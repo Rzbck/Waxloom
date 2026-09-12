@@ -103,6 +103,15 @@ export type DiscoverySeed = {
   recording_mbid: string;
 };
 
+export type DiscoveryDiagnostics = {
+  requested_seeds: number;
+  resolved_seeds: number;
+  expanded_seeds: number;
+  similar_rows: number;
+  unique_external_candidates: number;
+  local_duplicates_removed: number;
+};
+
 export type DiscoveryCandidate = {
   recording_mbid: string;
   artist: string;
@@ -121,7 +130,8 @@ export type DiscoveryResponse = {
   items: DiscoveryCandidate[];
   count: number;
   underground_weight: number;
-  warning?: string;
+  warning?: string | null;
+  diagnostics?: DiscoveryDiagnostics;
 };
 
 export type AudioMuseSimilarTrack = {
