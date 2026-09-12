@@ -1,11 +1,15 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 
 import { api } from "./api";
+import { DiscoveryView } from "./DiscoveryView";
+import { ImportsView } from "./ImportsView";
 import { usePlayer } from "./Player";
 import type {
   Album,
   Artist,
+  DiscoveryCandidate,
   Health,
+  ImportResult,
   IntegrationHealth,
   PlaylistDetail,
   PlaylistSummary,
@@ -32,6 +36,7 @@ function itemName(album: Album): string {
 
 function statusLabel(status?: string): string {
   if (status === "ok") return "Connected";
+  if (status === "configured") return "Configured";
   if (status === "not_configured") return "Not configured";
   if (status === "unavailable") return "Unavailable";
   return "Checking…";
@@ -160,6 +165,7 @@ export default function App() {
   const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistDetail | null>(null);
   const [playlistSongTarget, setPlaylistSongTarget] = useState<Song | null>(null);
   const [starOverrides, setStarOverrides] = useState<Record<string, boolean>>({});
+  const [importTarget, setImportTarget] = useState<DiscoveryCandidate | null>(null);
 
   useEffect(() => {
     void api.health().then(setHealth).catch(() => setHealth(null));
@@ -191,6 +197,29 @@ export default function App() {
       setHomeSongs(songPayload.items);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not load Navidrome library.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function shuffleSomething() {
+    setLoading(true);
+    setError(null);
+    try {
+      const payload = await api.randomSongs(40);
+      const songs = payload.items;
+      if (songs.length === 0) {
+        setError("Navidrome returned no random tracks.");
+        return;
+      }
+      let index = Math.floor(Math.random() * songs.length);
+      if (songs.length > 1 && songs[index]?.id === player.currentSong?.id) {
+        index = (index + 1) % songs.length;
+      }
+      setHomeSongs(songs.slice(0, 16));
+      player.playSongs(songs, index);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not shuffle the library.");
     } finally {
       setLoading(false);
     }
@@ -341,14 +370,14 @@ export default function App() {
     if (next === "favorites") void loadFavorites();
   }
 
-  const navItems: Array<{ id: View; label: string; live: boolean }> = [
-    { id: "home", label: "Home", live: true },
-    { id: "albums", label: "Albums", live: true },
-    { id: "artists", label: "Artists", live: true },
-    { id: "playlists", label: "Playlists", live: true },
-    { id: "favorites", label: "Favorites", live: true },
-    { id: "discovery", label: "Discovery", live: false },
-    { id: "imports", label: "Imports", live: false },
+  const navItems: Array<{ id: View; label: string }> = [
+    { id: "home", label: "Home" },
+    { id: "albums", label: "Albums" },
+    { id: "artists", label: "Artists" },
+    { id: "playlists", label: "Playlists" },
+    { id: "favorites", label: "Favorites" },
+    { id: "discovery", label: "Discovery" },
+    { id: "imports", label: "Imports" },
   ];
 
   const title = useMemo(() => {
@@ -367,6 +396,25 @@ export default function App() {
     );
   }
 
+  function handleDiscoveryImport(candidate: DiscoveryCandidate) {
+    setImportTarget(candidate);
+    setView("imports");
+    setError(null);
+    setNotice(null);
+  }
+
+  function handleImported(result: ImportResult) {
+    void loadPlaylists(false);
+    void loadHome();
+    if (result.status === "imported") {
+      setNotice("Track imported, indexed by Navidrome and ready in Waxloom.");
+    } else if (result.status === "already_local") {
+      setNotice("That track was already in your library; the existing copy was reused.");
+    } else {
+      setNotice("Track downloaded. Navidrome is still indexing it; refresh the library shortly.");
+    }
+  }
+
   return (
     <main className={player.currentSong ? "app-shell app-shell-with-player" : "app-shell"}>
       <aside className="sidebar">
@@ -380,7 +428,6 @@ export default function App() {
               onClick={() => navigate(item.id)}
             >
               <span>{item.label}</span>
-              {!item.live && <span className="nav-badge">Next</span>}
             </button>
           ))}
         </nav>
@@ -432,14 +479,14 @@ export default function App() {
           <div className="workspace-stack">
             <section className="hero-grid">
               <article className="panel panel-primary">
-                <p className="eyebrow">Navidrome core</p>
-                <h2>Browse. Search. Play. Queue. Favorite.</h2>
+                <p className="eyebrow">Navidrome + Waxloom</p>
+                <h2>Browse. Play. Discover. Import.</h2>
                 <p>
-                  Waxloom is now the player surface: your Navidrome library stays behind it while Discovery, AudioMuse and imports become extra layers instead of separate apps.
+                  Your Navidrome library is the player core. Discovery, AudioMuse and imports now live in the same interface instead of separate local dashboards.
                 </p>
                 <div className="button-row">
-                  <button className="primary-action" type="button" onClick={() => navigate("albums")}>Browse albums</button>
-                  <button className="secondary-action" type="button" onClick={() => player.playSongs(homeSongs, 0)} disabled={homeSongs.length === 0}>Shuffle something</button>
+                  <button className="primary-action" type="button" onClick={() => navigate("discovery")}>Discover music</button>
+                  <button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>Shuffle something</button>
                 </div>
               </article>
               <article className="panel integration-panel">
@@ -459,7 +506,7 @@ export default function App() {
             </section>
 
             <section>
-              <div className="section-toolbar"><div><p className="eyebrow">Random</p><h2>Play something</h2></div><button className="secondary-action" type="button" onClick={() => player.playSongs(homeSongs, 0)} disabled={homeSongs.length === 0}>Play all</button></div>
+              <div className="section-toolbar"><div><p className="eyebrow">Random</p><h2>Play something</h2></div><button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>Fresh shuffle</button></div>
               <SongTable songs={homeSongs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
             </section>
           </div>
@@ -540,12 +587,10 @@ export default function App() {
           </div>
         )}
 
-        {view === "discovery" && (
-          <section className="panel feature-placeholder"><p className="eyebrow">Waxloom layer</p><h2>Discovery comes after the Navidrome player core.</h2><p>ListenBrainz + MusicBrainz + underground ranking + AudioMuse seeds will live here without replacing the player you now use for the local library.</p><button className="primary-action" type="button" onClick={() => navigate("playlists")}>Choose seed playlists</button></section>
-        )}
+        {view === "discovery" && <DiscoveryView onImportCandidate={handleDiscoveryImport} />}
 
         {view === "imports" && (
-          <section className="panel feature-placeholder"><p className="eyebrow">Waxloom layer</p><h2>Imports will feed this same library and player.</h2><p>YouTube candidate selection, authorized download, Navidrome scan, playlist insertion and AudioMuse analysis will be orchestrated here.</p></section>
+          <ImportsView target={importTarget} playlists={playlists} onImported={handleImported} />
         )}
       </section>
 
