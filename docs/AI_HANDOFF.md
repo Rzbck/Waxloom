@@ -18,75 +18,69 @@ Date: 2026-09-12
 - Bootstrap/runtime: Windows API + Vite + browser + clean Ctrl+C shutdown PASS.
 - Real Navidrome playlists render in Waxloom.
 - Expanded Navidrome player/library is the accepted base.
-- `Shuffle something` fix on PR #4 is USER VALIDATED: repeated clicks now vary tracks.
-- AudioMuse local sonic-neighbour cards on PR #4 are USER VALIDATED and populated.
+- `Shuffle something` fix is USER VALIDATED: repeated clicks now vary tracks.
+- AudioMuse integration is reachable and produces local sonic neighbours.
+- Automatic Discovery produced real external candidates in runtime, but UX/ranking needed correction.
 
-## Discovery runtime finding
+## Discovery runtime evidence / owner feedback
 
-The manual-seed Discovery UI produced `0 candidates` even though:
+The automatic page successfully produced external recommendations, but the captured result exposed three product problems:
 
-- `POST /api/discovery/external` returned HTTP 200;
-- the seed resolved to MusicBrainz;
-- AudioMuse returned local neighbours;
-- diagnostics showed ListenBrainz `similar-recordings` coverage at zero.
+1. `Sonic matches inside your library` is not useful inside a Discovery page whose purpose is finding new music.
+2. One catalogue can flood the page: the runtime result contained many separate Justice and Gorillaz cards.
+3. Cards were too large/vertical; the owner wants compact horizontal browsing with direct preview and one-step add-to-playlist/import.
 
-This is a sparse external-similarity coverage case, not a Waxloom transport failure.
+The owner also clarified that Discovery must profile the **whole Navidrome library**, not primarily playlists.
 
-## Owner UX correction — Discovery must be automatic
+## Current Discovery product rule
 
-The owner rejected the manual Discovery workflow. New permanent product requirement:
+Opening Discovery should show **outside-library recommendations only**, automatically, without seed selection or Generate.
 
-**Opening Discovery must already produce recommendations automatically. The user must not have to choose seeds, choose a playlist, tune a slider, or click Generate.**
+The current branch now implements:
 
-Discovery should read the existing music context itself and present organized recommendation shelves. Advanced diagnostics/controls may exist only as optional secondary UI.
+- a backend library snapshot that enumerates all Navidrome albums and their songs, cached for 10 minutes;
+- full-library representative seed selection with artist/genre diversity caps;
+- favorites/queue are only small preference signals, not the discovery corpus;
+- AudioMuse remains an internal expansion/sonic-anchor engine but local songs are no longer rendered in Discovery;
+- ListenBrainz similar-recordings remains the primary collaborative source when coverage exists;
+- sparse ListenBrainz coverage falls back to MusicBrainz catalogues reached through AudioMuse-neighbour artists;
+- exact artist/title matches already in Navidrome are removed;
+- external candidates are grouped by artist so repeated Justice/Gorillaz-style results become one compact artist card with several tracks;
+- cards are presented in horizontally scrollable rails with left/right controls;
+- each track row has direct `Preview` and `Add` actions;
+- preview lazily searches YouTube and embeds the selected source in the card;
+- `Add to playlist` asks only for destination playlist, then automatically uses the best YouTube source when confidence >= 80;
+- if source confidence is low, Waxloom falls back to the manual Imports source picker instead of downloading blindly;
+- authorization for automatic media import is explicitly confirmed once and stored locally in the browser; backend authorization enforcement remains in place.
 
-Current branch implementation now:
+## Discovery shelves
 
-- automatically reads every Navidrome playlist available to Waxloom;
-- also weighs starred tracks, play queue, random-library diversity and the currently playing track;
-- creates a weighted local profile and selects up to 24 representative seeds with artist diversity caps;
-- queries AudioMuse across several representative seeds and aggregates sonic neighbours;
-- automatically calls external Discovery with the resulting profile;
-- caches the generated page in the browser for 10 minutes so returning to Discovery is immediate;
-- offers Refresh only as an optional action, never as a prerequisite;
-- renders separate shelves for local sonic matches, closest outside-library candidates, underground candidates and deeper catalogue cuts;
-- hides raw provider diagnostics behind a collapsed details section.
+Current automatic outside-library shelves:
 
-## Sparse ListenBrainz fallback
+- `Closest to your collection`
+- `More underground`
+- `Deep cuts from neighbouring artists`
 
-ListenBrainz Labs `similar-recordings` remains useful when it has coverage, but it is no longer allowed to make Discovery empty by itself.
-
-Current fallback path:
-
-1. resolve representative seeds to MusicBrainz;
-2. query ListenBrainz similar-recordings;
-3. expand sparse seeds through AudioMuse neighbours;
-4. if ListenBrainz still has too few candidates, use the artists reached through AudioMuse as anchors;
-5. query MusicBrainz recording catalogues for those artists;
-6. remove tracks already present in Navidrome;
-7. merge/rank ListenBrainz + MusicBrainz fallback candidates.
-
-MusicBrainz requests are serialized around one request/second and use a descriptive Waxloom User-Agent.
+Artists are grouped within shelves; repeated tracks from one artist collapse inside the same card.
 
 ## Artist/card rendering performance
 
-Owner observed cover requests when entering Artists and flagged possible navigation blocking.
-
-Already implemented on the current branch:
+Already implemented:
 
 - browser image lazy loading;
 - `content-visibility: auto`;
 - layout/paint/style containment;
 - intrinsic sizing for artist/media/track cards.
 
-The observed log showed only visible/near-visible cover requests rather than the whole library at once. Still test Artists -> another view -> Artists while images are loading; if the UI is not responsive enough, next step is real list virtualization/pagination, not more CSS-only tuning.
+If runtime navigation through Artists still blocks while covers load, next step is true virtualization/pagination rather than more CSS-only tuning.
 
 ## Imports
 
-PR #4 still includes:
+PR #4 includes:
 
-- ShazamDownloader-derived yt-dlp/RapidFuzz source search;
-- explicit YouTube source selection, never automatic download selection;
+- yt-dlp/RapidFuzz source search derived from ShazamDownloader;
+- explicit manual source-selection screen remains available;
+- new high-confidence quick-import path from Discovery cards;
 - backend-enforced authorization confirmation;
 - YouTube host allowlist;
 - FFmpeg discovery;
@@ -102,21 +96,23 @@ PR #4 still includes:
 - browser talks only to Waxloom `/api/*` for private integrations;
 - `scripts/security-gate.ps1` remains mandatory;
 - 1 active chantier = 1 branch = 1 dedicated worktree;
-- historical `E:\_Project\Waxloom` remains `HOLD_DIRTY` because of the old untracked `apps/api/uv.lock`; do not clean/reset it merely to continue;
+- historical `E:\_Project\Waxloom` remains `HOLD_DIRTY` because of old untracked `apps/api/uv.lock`; do not clean/reset merely to continue;
 - no force-push/destructive reset/blind clean.
 
 ## Exact next runtime gate — PR #4
 
-1. require security + Windows build PASS on the fresh branch HEAD;
-2. fast-forward the existing Discovery/Imports worktree to that exact SHA and require CLEAN;
+1. require security + Windows build PASS on fresh branch HEAD;
+2. fast-forward existing `discovery-imports-20260912` worktree to that exact SHA and require CLEAN;
 3. run security + dev launcher;
-4. open Discovery and verify it starts building recommendations immediately with no seed/generate workflow;
-5. verify profile stats reflect playlists/library context;
-6. verify AudioMuse local shelf populates;
-7. verify at least one outside-library shelf populates through ListenBrainz or MusicBrainz fallback;
-8. if external candidates appear, use `Find source` and continue to YouTube candidate selection + one authorized import test;
-9. check Artists navigation responsiveness while covers are loading;
-10. record exact tested SHA/results before promotion.
+4. open Discovery: no local-library recommendation shelf should appear;
+5. profile counts should represent the full library (tracks/albums/artists), not playlist-only counts;
+6. confirm repeated artists are grouped into compact horizontal cards;
+7. test left/right rail scrolling;
+8. test `▶` preview on an external track;
+9. test `+` -> playlist -> one authorized high-confidence automatic import and confirm Navidrome playlist insertion;
+10. if automatic source confidence is low, confirm Waxloom routes to manual Imports instead of auto-downloading;
+11. optionally recheck Artists navigation responsiveness while covers load;
+12. record exact tested SHA/results before promotion.
 
 ## Rollback
 
