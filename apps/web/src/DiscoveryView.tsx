@@ -19,7 +19,7 @@ type ArtistGroup = {
 
 type PreviewState = {
   recordingMbid: string;
-  embedUrl: string;
+  audioUrl: string;
   sourceTitle: string;
 };
 
@@ -56,23 +56,6 @@ function groupCandidates(items: DiscoveryCandidate[]): ArtistGroup[] {
     group.items.sort((a, b) => b.rank - a.rank);
   }
   return [...groups.values()].sort((a, b) => b.bestRank - a.bestRank);
-}
-
-function youtubeVideoId(value: string): string | null {
-  try {
-    const url = new URL(value);
-    const host = url.hostname.toLocaleLowerCase();
-    if (host === "youtu.be") return url.pathname.split("/").filter(Boolean)[0] ?? null;
-    if (host.endsWith("youtube.com")) {
-      const direct = url.searchParams.get("v");
-      if (direct) return direct;
-      const parts = url.pathname.split("/").filter(Boolean);
-      if (["shorts", "embed", "live"].includes(parts[0] ?? "")) return parts[1] ?? null;
-    }
-  } catch {
-    return null;
-  }
-  return null;
 }
 
 function readBrowserFeed(): DiscoveryFeedResponse | null {
@@ -130,39 +113,29 @@ function ArtistGroupCard({
       </header>
 
       <div className="artist-track-stack">
-        {visible.map((candidate) => (
-          <div className="artist-track-row" key={candidate.recording_mbid}>
-            <div className="artist-track-copy">
-              <strong>{candidate.title}</strong>
-              <span>{candidate.release || candidate.reason || "Outside your library"}</span>
-            </div>
-            <button
-              className="compact-action"
-              type="button"
-              onClick={() => onPreview(candidate)}
-              disabled={previewLoading === candidate.recording_mbid}
-              title="Preview"
-            >
-              {previewLoading === candidate.recording_mbid ? "…" : "▶"}
-            </button>
-            <button className="compact-action compact-action-add" type="button" onClick={() => onQuickAdd(candidate)} title="Add to playlist">
-              +
-            </button>
-
-            {preview?.recordingMbid === candidate.recording_mbid && (
-              <div className="inline-preview">
-                <iframe
-                  src={preview.embedUrl}
-                  title={`Preview ${candidate.artist} - ${candidate.title}`}
-                  allow="autoplay; encrypted-media; picture-in-picture"
-                  referrerPolicy="strict-origin-when-cross-origin"
-                  allowFullScreen
-                />
-                <small>{preview.sourceTitle}</small>
+        {visible.map((candidate) => {
+          const isPreviewing = preview?.recordingMbid === candidate.recording_mbid;
+          return (
+            <div className="artist-track-row" key={candidate.recording_mbid}>
+              <div className="artist-track-copy">
+                <strong>{candidate.title}</strong>
+                <span>{candidate.release || candidate.reason || "Outside your library"}</span>
               </div>
-            )}
-          </div>
-        ))}
+              <button
+                className={isPreviewing ? "compact-action compact-action-playing" : "compact-action"}
+                type="button"
+                onClick={() => onPreview(candidate)}
+                disabled={previewLoading === candidate.recording_mbid}
+                title={isPreviewing ? "Stop preview" : "Play audio preview"}
+              >
+                {previewLoading === candidate.recording_mbid ? "…" : isPreviewing ? "■" : "▶"}
+              </button>
+              <button className="compact-action compact-action-add" type="button" onClick={() => onQuickAdd(candidate)} title="Add to playlist">
+                +
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       <footer className="artist-discovery-foot">
@@ -319,17 +292,15 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     setError(null);
     try {
       const payload = await api.youtubeSearch(candidate.artist, candidate.title);
-      const best = payload.items[0];
-      if (!best) throw new Error("No preview source found.");
-      const id = youtubeVideoId(best.url);
-      if (!id) throw new Error("The best source could not be embedded.");
+      const best = payload.items.find((item) => Boolean(item.preview_url));
+      if (!best?.preview_url) throw new Error("No browser-playable audio preview source was found.");
       setPreview({
         recordingMbid: candidate.recording_mbid,
-        embedUrl: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0`,
+        audioUrl: best.preview_url,
         sourceTitle: best.title,
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Preview search failed.");
+      setError(caught instanceof Error ? caught.message : "Audio preview search failed.");
     } finally {
       setPreviewLoading(null);
     }
@@ -378,6 +349,19 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
   return (
     <div className="discovery-layout discovery-auto-layout">
+      {preview && (
+        <audio
+          className="discovery-audio-preview"
+          src={preview.audioUrl}
+          autoPlay
+          onEnded={() => setPreview(null)}
+          onError={() => {
+            setPreview(null);
+            setError("The temporary audio preview stream could not be played.");
+          }}
+        />
+      )}
+
       <section className="panel discovery-profile-panel discovery-profile-compact">
         <div className="section-toolbar">
           <div>
