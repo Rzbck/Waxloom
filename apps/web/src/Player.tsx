@@ -336,7 +336,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       <audio
         ref={audioRef}
         src={activeSrc}
-        preload="metadata"
+        preload="none"
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
@@ -344,15 +344,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }}
         onTimeUpdate={onTimeUpdate}
         onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
         onEnded={() => {
           submitScrobble();
           next();
         }}
         onError={() => {
+          setPlaying(false);
           if (mode === "preview") {
             setPreviewError("The preview stream expired or could not be played. Press next or try again.");
-            setPlaying(false);
           }
         }}
       />
