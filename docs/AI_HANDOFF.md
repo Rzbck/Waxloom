@@ -6,12 +6,14 @@ Date: 2026-09-12
 
 - Repository: `Rzbck/Waxloom` (public)
 - Published baseline: `main@8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`
-- Current recovery branch: `fix/bootstrap-workflow-security-20260912`
-- Runtime candidate user-validated on Windows: `1d774b5a87d8646d1dd30baea2745d8e4ac88dc9`
-- Subsequent policy/handoff commits are documentation-only unless code/CI changes are explicitly noted.
-- Promotion to `main`: requires explicit repository-owner instruction; GitHub branch protection/rulesets are recommended but not required.
+- Bootstrap/recovery branch: `fix/bootstrap-workflow-security-20260912`
+- Bootstrap runtime candidate user-validated on Windows: `1d774b5a87d8646d1dd30baea2745d8e4ac88dc9`
+- Current product branch: `feat/navidrome-playlists-ui-20260912`
+- Current product PR: `#2`, stacked onto the bootstrap/recovery branch.
+- Product candidate SHA: always resolve the fresh remote HEAD immediately before testing.
+- Promotion to `main`: requires explicit repository-owner instruction; GitHub branch protection/rulesets are optional defense-in-depth, not required.
 
-## USER VALIDATED / exact Windows evidence
+## USER VALIDATED — bootstrap/runtime tranche
 
 `configure.ps1` was validated on Windows:
 
@@ -35,38 +37,40 @@ Exact runtime candidate `1d774b5a87d8646d1dd30baea2745d8e4ac88dc9` was validated
 - Ctrl+C shutdown: PASS;
 - Uvicorn application shutdown completed and `Waxloom stopped.` printed: PASS.
 
-This qualifies the bootstrap/runtime tranche as `USER VALIDATED` for that exact runtime candidate.
+The bootstrap/runtime tranche is therefore `USER VALIDATED` on that exact runtime candidate.
+
+## Current product tranche — functional playlists
+
+The first UI shell was intentionally minimal but was effectively non-functional: sidebar buttons and the hero action had no navigation/action wiring. The repository owner explicitly called this out and asked to move on to real functionality.
+
+Branch `feat/navidrome-playlists-ui-20260912` implements:
+
+- working sidebar view navigation;
+- working `Browse playlists` action from Library;
+- real `/api/playlists` fetch through the Waxloom backend;
+- real Navidrome playlist cards with song count and duration;
+- playlist selection through `/api/playlists/{playlist_id}`;
+- track list rendering with title / artist / album / duration;
+- loading, retry, refresh and visible error states;
+- Navidrome health isolated from Waxloom API health;
+- Discovery and Imports remain navigable but explicitly marked unfinished, with no fake silent buttons.
+
+Security invariant: browser code only calls Waxloom `/api/*`; provider credentials remain backend-only.
+
+Validation state: `IMPLEMENTED / NOT USER VALIDATED` until the exact product-branch HEAD is run against the user's real Navidrome data.
 
 ## Historical local state
 
 The old `main` launcher generated an untracked `apps/api/uv.lock` in `E:\_Project\Waxloom`. That historical checkout remains `HOLD_DIRTY`; do not delete/reset/clean it merely to continue work.
 
-## Recovery implementation
+## Public repository security
 
-The recovery branch includes:
-
-- canonical repo/API/web paths;
-- verification of `apps/web/package.json` before npm;
-- ignored `apps/api/.venv` via `uv venv`;
-- API dependency install via `uv pip install` instead of `uv sync`, avoiding bootstrap-generated `uv.lock`;
-- `npm install --package-lock=false` from `apps/web`, avoiding bootstrap-generated `package-lock.json`;
-- API launched from venv Python with repository root as working directory so root `.env` is loaded;
-- Vite launched directly with `node.exe` + `node_modules/vite/bin/vite.js`, removing `cmd.exe`/`npm.cmd` runtime quoting;
-- candidate worktree cleanliness checks;
-- single-terminal service logs and process-tree cleanup;
-- Vite CSS/client type declarations for the pinned TypeScript toolchain;
-- Windows CI security, PowerShell parse, API import/build, web production build, and direct Node/Vite smoke gates;
-- SIGNAL-style branch/worktree/handoff discipline;
-- fail-closed public-repository security gate.
-
-## Security state
-
-Waxloom is public. Blocking rules live in `/HANDOFF.md` and `SECURITY.md`.
+Blocking rules live in `/HANDOFF.md` and `SECURITY.md`.
 
 - `.env`, provider credentials, cookies, private keys, private DBs, media, and private library exports must never be committed;
 - browser-facing code must not receive backend provider credentials;
 - security gate failure blocks publication;
-- GitHub branch protection/rulesets are optional defense-in-depth, not a promotion blocker when unavailable on the account.
+- explicit owner authorization to push/merge `main` does not bypass security/build/test gates.
 
 ## Main-promotion authority
 
@@ -80,23 +84,26 @@ If the repository owner explicitly instructs **push/merge to `main`**, that is s
 4. final diff inspection;
 5. no secret exposure or destructive Git action.
 
-Do not infer main-promotion permission from a successful test alone.
+## Exact next test — product branch
 
-## Next product tranche
-
-After owner-authorized promotion of the bootstrap recovery, create a new dedicated branch/worktree for product work.
-
-The immediate product target is:
-
-1. real sidebar navigation;
-2. no fake clickable buttons;
-3. connect the existing backend `/api/playlists` route to the UI;
-4. show real Navidrome playlists;
-5. select/open a playlist and show its tracks;
-6. keep Discovery/Imports visibly disabled until those routes are implemented rather than presenting dead controls.
+1. wait for security + Windows build CI PASS on the fresh `feat/navidrome-playlists-ui-20260912` HEAD;
+2. inventory local worktrees;
+3. create/reuse a dedicated worktree for the product branch, separate from the bootstrap worktree;
+4. require local HEAD == remote feature HEAD and CLEAN;
+5. copy the ignored local `.env` without displaying it;
+6. run `scripts/security-gate.ps1`;
+7. run `scripts/dev.ps1`;
+8. in the browser verify Library -> Playlists navigation;
+9. require the real Navidrome playlist list to render;
+10. open at least one real playlist and require its track list to render;
+11. verify Discovery and Imports clearly report that they are not implemented rather than silently doing nothing;
+12. Ctrl+C and verify clean process shutdown;
+13. record the exact tested SHA and result before promotion.
 
 ## Rollback / base
 
-Recovery base: `8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`.
+Product branch base: `fix/bootstrap-workflow-security-20260912` at the branch point used to create the feature branch.
+
+Bootstrap recovery base: `8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`.
 
 No destructive rollback. Revert/new commit only after publication.
