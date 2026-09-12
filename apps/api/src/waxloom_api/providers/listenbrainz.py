@@ -32,7 +32,6 @@ def _recording_rows(payload: Any) -> list[dict[str, Any]]:
     seen: set[tuple[str, str]] = set()
     for item in _iter_dicts(payload):
         mbid = str(item.get("recording_mbid") or "").strip()
-        title = str(item.get("recording_name") or item.get("track_name") or "").strip()
         if not mbid:
             continue
         key = (mbid, str(item.get("reference_mbid") or ""))
@@ -94,10 +93,31 @@ class ListenBrainzLabsClient:
             return response.json()
 
     async def resolve_recording(self, artist: str, title: str) -> dict[str, Any] | None:
-        query = " ".join(part.strip() for part in (artist, title) if part.strip())
-        if not query:
+        artist = artist.strip()
+        title = title.strip()
+        if not artist or not title:
             return None
-        payload = await self._json("GET", "/recording-search/json", params={"query": query})
+
+        # Prefer the canonical semi-exact Artist Credit + Recording lookup. It is
+        # much less likely than fuzzy recording-search to resolve a seed to the
+        # wrong MusicBrainz recording, especially for underground material.
+        try:
+            payload = await self._json(
+                "GET",
+                "/acr-lookup/json",
+                params={"artist_credit_name": artist, "recording_name": title},
+            )
+            rows = _recording_rows(payload)
+            if rows:
+                return rows[0]
+        except (httpx.HTTPError, ValueError):
+            pass
+
+        query = f"{artist} {title}".strip()
+        try:
+            payload = await self._json("GET", "/recording-search/json", params={"query": query})
+        except (httpx.HTTPError, ValueError):
+            return None
         rows = _recording_rows(payload)
         return rows[0] if rows else None
 
@@ -110,12 +130,40 @@ class ListenBrainzLabsClient:
         unique = list(dict.fromkeys(mbid for mbid in recording_mbids if mbid))
         if not unique:
             return []
+
+        # The Labs query supports multiple references in one request. Use that
+        # first, then fall back to individual references if the grouped request
+        # has no coverage. The fallback matters for niche seeds where only some
+        # recordings are present in the similarity index.
         payload = await self._json(
             "POST",
             "/similar-recordings/json",
             json=[{"recording_mbids": unique, "algorithm": algorithm}],
         )
-        return _recording_rows(payload)
+        rows = _recording_rows(payload)
+        if rows or len(unique) == 1:
+            return rows
+
+        combined: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for mbid in unique[:12]:
+            try:
+                payload = await self._json(
+                    "POST",
+                    "/similar-recordings/json",
+                    json=[{"recording_mbids": [mbid], "algorithm": algorithm}],
+                )
+            except (httpx.HTTPError, ValueError):
+                continue
+            for row in _recording_rows(payload):
+                key = (str(row.get("recording_mbid") or ""), str(row.get("reference_mbid") or mbid))
+                if not key[0] or key in seen:
+                    continue
+                seen.add(key)
+                if not row.get("reference_mbid"):
+                    row = {**row, "reference_mbid": mbid}
+                combined.append(row)
+        return combined
 
     async def tag_popularity(self, recording_mbid: str) -> dict[str, Any]:
         """Best-effort Labs enrichment; discovery still works when this dataset changes."""
