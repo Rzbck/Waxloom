@@ -18,6 +18,21 @@ function Require-Command([string]$Name) {
     return $cmd
 }
 
+function Resolve-NpmCommand {
+    # On Windows, prefer npm.cmd explicitly. PowerShell may otherwise resolve
+    # `npm` to npm.ps1; that wrapper can mangle arguments on some setups.
+    $npmCmd = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
+    if ($npmCmd) {
+        return $npmCmd
+    }
+
+    $npm = Get-Command "npm" -ErrorAction SilentlyContinue
+    if (-not $npm) {
+        throw "npm is required but was not found in PATH."
+    }
+    return $npm
+}
+
 function Wait-Http([string]$Url, [System.Diagnostics.Process]$Process, [int]$TimeoutSeconds = 30) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
@@ -54,7 +69,7 @@ function Stop-ProcessTree([System.Diagnostics.Process]$Process) {
 }
 
 $uv = Require-Command "uv"
-$null = Require-Command "npm"
+$npm = Resolve-NpmCommand
 
 if (-not (Test-Path ".env")) {
     throw ".env is missing. Run .\scripts\configure.ps1 first."
@@ -62,18 +77,18 @@ if (-not (Test-Path ".env")) {
 
 Write-Section "Waxloom dependency check"
 Write-Host "uv  : $($uv.Source)" -ForegroundColor DarkGray
-Write-Host "npm : $((Get-Command npm).Source)" -ForegroundColor DarkGray
+Write-Host "npm : $($npm.Source)" -ForegroundColor DarkGray
 
 Write-Host ""
 Write-Host "Syncing Python dependencies..." -ForegroundColor Yellow
-& uv sync --project apps/api
+& $uv.Source sync --project apps/api
 if ($LASTEXITCODE -ne 0) {
     throw "uv sync failed with exit code $LASTEXITCODE"
 }
 
 Write-Host ""
 Write-Host "Installing web dependencies..." -ForegroundColor Yellow
-& npm --prefix apps/web install
+& $npm.Source --prefix apps/web install
 if ($LASTEXITCODE -ne 0) {
     throw "npm install failed with exit code $LASTEXITCODE"
 }
@@ -103,12 +118,10 @@ try {
     Wait-Http "http://127.0.0.1:8787/api/health" $apiProcess 30
     Write-Host "[Waxloom] API ready: http://127.0.0.1:8787" -ForegroundColor Green
 
+    $npmCommandLine = '"' + $npm.Source + '" --prefix apps/web run dev -- --host 127.0.0.1 --port 5173'
     $webProcess = Start-Process `
         -FilePath "cmd.exe" `
-        -ArgumentList @(
-            "/d", "/c",
-            "npm --prefix apps/web run dev -- --host 127.0.0.1 --port 5173"
-        ) `
+        -ArgumentList @("/d", "/s", "/c", $npmCommandLine) `
         -WorkingDirectory $root `
         -NoNewWindow `
         -PassThru
