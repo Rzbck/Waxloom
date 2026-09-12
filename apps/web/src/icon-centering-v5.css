@@ -14,7 +14,6 @@
 .discovery-song-card > .compact-action,
 .discovery-song-card > .taste-chip,
 .track-play,
-.cover-play,
 .play-button {
   position: relative !important;
   box-sizing: border-box !important;
@@ -22,6 +21,28 @@
   margin: 0 !important;
   line-height: 0 !important;
   text-align: center !important;
+}
+
+/* Album-card play is a true centered overlay, never part of document flow. */
+.cover-play {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 42px !important;
+  height: 42px !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 0 !important;
+  text-align: center !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 3 !important;
+}
+
+.media-card:hover .cover-play {
+  transform: translate(-50%, -50%) !important;
 }
 
 .discovery-song-card > .compact-action > *,
@@ -155,5 +176,11 @@
   .play-button::before {
     width: 21px !important;
     height: 21px !important;
+  }
+
+  .cover-play {
+    width: 38px !important;
+    height: 38px !important;
+    opacity: .96 !important;
   }
 }
