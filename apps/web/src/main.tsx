@@ -4,7 +4,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { PlayerProvider } from "./Player";
 import "./styles.css";
-import "./discovery-playlist.css";
+import "./performance.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
