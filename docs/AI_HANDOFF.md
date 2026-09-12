@@ -7,8 +7,9 @@ Date: 2026-09-12
 - Repository: `Rzbck/Waxloom` (public)
 - Published baseline: `main@8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`
 - Current recovery branch: `fix/bootstrap-workflow-security-20260912`
-- Candidate SHA for validation: **resolve the fresh remote HEAD of the recovery branch immediately before testing; never hardcode a self-referential handoff SHA.**
-- Promotion to `main`: `BLOCKED` pending complete exact-head Windows runtime validation and server-side main protection.
+- Runtime candidate user-validated on Windows: `1d774b5a87d8646d1dd30baea2745d8e4ac88dc9`
+- Subsequent policy/handoff commits are documentation-only unless code/CI changes are explicitly noted.
+- Promotion to `main`: requires explicit repository-owner instruction; GitHub branch protection/rulesets are recommended but not required.
 
 ## USER VALIDATED / exact Windows evidence
 
@@ -20,42 +21,43 @@ Date: 2026-09-12
 - AudioMuse token detected without display;
 - local ignored `.env` written.
 
-Exact candidate `918a7fa08e30e0cb9f7cacd69339f2d677daa11f` was then tested from the dedicated worktree `E:\_Project\_WAXLOOM_WORKTREES\bootstrap-workflow-security-20260912`:
+Exact runtime candidate `1d774b5a87d8646d1dd30baea2745d8e4ac88dc9` was validated from the dedicated worktree `E:\_Project\_WAXLOOM_WORKTREES\bootstrap-workflow-security-20260912`:
 
 - exact branch/SHA/CLEAN gate: PASS;
-- ignored `.env` copied without display: PASS;
+- ignored `.env` present without disclosure: PASS;
 - public-repository security gate: PASS;
 - isolated Python venv/bootstrap: PASS;
-- npm dependency install: PASS, 0 vulnerabilities reported by npm for that install;
+- npm dependency install: PASS;
 - FastAPI/Uvicorn startup: PASS;
 - `GET /api/health`: HTTP 200 PASS;
-- UI/Vite readiness: FAIL before Vite start because `cmd.exe` stripped quoting around `C:\Program Files\nodejs\npm.cmd`, producing `'C:\Program' is not recognized`;
-- failure cleanup stopped Waxloom processes.
+- direct Node/Vite UI startup: PASS;
+- browser page rendered: PASS;
+- Ctrl+C shutdown: PASS;
+- Uvicorn application shutdown completed and `Waxloom stopped.` printed: PASS.
 
-Therefore `918a7fa...` validates the backend/bootstrap path only. It does **not** validate the UI startup or complete Waxloom runtime.
+This qualifies the bootstrap/runtime tranche as `USER VALIDATED` for that exact runtime candidate.
 
 ## Historical local state
 
-The old `main` launcher generated an untracked `apps/api/uv.lock` in `E:\_Project\Waxloom`. That historical checkout remains `HOLD_DIRTY`; do not delete/reset/clean it merely to continue testing.
+The old `main` launcher generated an untracked `apps/api/uv.lock` in `E:\_Project\Waxloom`. That historical checkout remains `HOLD_DIRTY`; do not delete/reset/clean it merely to continue work.
 
 ## Recovery implementation
 
-The recovery branch now:
+The recovery branch includes:
 
-- canonicalizes repo/API/web paths;
-- verifies `apps/web/package.json` before npm;
-- creates ignored `apps/api/.venv` with `uv venv`;
-- installs API dependencies with `uv pip install` instead of `uv sync`, avoiding bootstrap-generated `uv.lock`;
-- runs `npm install --package-lock=false` from `apps/web`, avoiding bootstrap-generated `package-lock.json`;
-- starts the API from the venv Python while keeping the Waxloom repository root as working directory so root `.env` is loaded;
-- launches Vite **directly with `node.exe` and `node_modules/vite/bin/vite.js`**, removing `cmd.exe`/`npm.cmd` runtime quoting from the path entirely;
-- checks that dependency bootstrap does not dirty the candidate worktree;
-- keeps service logs in the current terminal and performs process-tree cleanup;
-- runs the fail-closed public-repository security gate before startup.
-
-The Windows CI additionally parses PowerShell, installs/imports the API, installs/builds the web app, and smokes the same direct Node/Vite launch path.
-
-Dependency lockfile policy remains a separate reproducibility tranche after bootstrap qualification.
+- canonical repo/API/web paths;
+- verification of `apps/web/package.json` before npm;
+- ignored `apps/api/.venv` via `uv venv`;
+- API dependency install via `uv pip install` instead of `uv sync`, avoiding bootstrap-generated `uv.lock`;
+- `npm install --package-lock=false` from `apps/web`, avoiding bootstrap-generated `package-lock.json`;
+- API launched from venv Python with repository root as working directory so root `.env` is loaded;
+- Vite launched directly with `node.exe` + `node_modules/vite/bin/vite.js`, removing `cmd.exe`/`npm.cmd` runtime quoting;
+- candidate worktree cleanliness checks;
+- single-terminal service logs and process-tree cleanup;
+- Vite CSS/client type declarations for the pinned TypeScript toolchain;
+- Windows CI security, PowerShell parse, API import/build, web production build, and direct Node/Vite smoke gates;
+- SIGNAL-style branch/worktree/handoff discipline;
+- fail-closed public-repository security gate.
 
 ## Security state
 
@@ -64,23 +66,34 @@ Waxloom is public. Blocking rules live in `/HANDOFF.md` and `SECURITY.md`.
 - `.env`, provider credentials, cookies, private keys, private DBs, media, and private library exports must never be committed;
 - browser-facing code must not receive backend provider credentials;
 - security gate failure blocks publication;
-- GitHub `main` was observed unprotected; project policy blocks promotion until branch protection/ruleset is enabled and confirmed.
+- GitHub branch protection/rulesets are optional defense-in-depth, not a promotion blocker when unavailable on the account.
 
-## Exact next step
+## Main-promotion authority
 
-Do not modify or clean the historical `HOLD_DIRTY` checkout.
+Default: do not push/merge to `main` automatically.
 
-1. wait for security + Windows build/direct-Vite-smoke CI PASS on the fresh branch HEAD;
-2. fetch `origin/fix/bootstrap-workflow-security-20260912`;
-3. resolve that fresh remote HEAD as the exact candidate SHA;
-4. fast-forward only the dedicated candidate worktree; no reset/rebase/force;
-5. require local HEAD == remote candidate SHA and CLEAN;
-6. keep/copy ignored `.env` without printing it;
-7. run `scripts/security-gate.ps1`;
-8. run `scripts/dev.ps1`;
-9. require API ready + UI ready + browser rendering;
-10. press Ctrl+C and confirm API/Vite child processes terminate cleanly;
-11. record the exact tested SHA and result before any promotion decision.
+If the repository owner explicitly instructs **push/merge to `main`**, that is sufficient authorization to promote after:
+
+1. fetch/reconcile `main` and candidate;
+2. security gate PASS;
+3. required build/test gates PASS;
+4. final diff inspection;
+5. no secret exposure or destructive Git action.
+
+Do not infer main-promotion permission from a successful test alone.
+
+## Next product tranche
+
+After owner-authorized promotion of the bootstrap recovery, create a new dedicated branch/worktree for product work.
+
+The immediate product target is:
+
+1. real sidebar navigation;
+2. no fake clickable buttons;
+3. connect the existing backend `/api/playlists` route to the UI;
+4. show real Navidrome playlists;
+5. select/open a playlist and show its tracks;
+6. keep Discovery/Imports visibly disabled until those routes are implemented rather than presenting dead controls.
 
 ## Rollback / base
 
