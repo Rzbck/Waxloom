@@ -20,10 +20,10 @@ type TasteEntry = {
 type TasteState = Record<string, TasteEntry>;
 type ShelfKey = "closest" | "underground" | "deep";
 
-const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v2";
+const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v3";
 const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SHELF_PAGE_SIZE = 12;
-const SHELF_TARGET_SIZE = 28;
+const SHELF_TARGET_SIZE = 20;
 
 function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
@@ -100,7 +100,6 @@ function fillShelf(
   fallback: DiscoveryCandidate[],
   used: Set<string>,
   target = SHELF_TARGET_SIZE,
-  maxPerArtist = 2,
 ): DiscoveryCandidate[] {
   const output: DiscoveryCandidate[] = [];
   const append = (candidate: DiscoveryCandidate) => {
@@ -108,12 +107,12 @@ function fillShelf(
     output.push(candidate);
   };
 
-  for (const candidate of diversify(primary, maxPerArtist)) {
+  for (const candidate of diversify(primary, 2)) {
     append(candidate);
     if (output.length >= target) break;
   }
   if (output.length < target) {
-    for (const candidate of diversify(fallback, Math.max(2, maxPerArtist))) {
+    for (const candidate of diversify(fallback, 2)) {
       append(candidate);
       if (output.length >= target) break;
     }
@@ -340,27 +339,25 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
   const rails = useMemo(() => {
     const ranked = activeCandidates(bundle?.external.items ?? [], taste);
+    const used = new Set<string>();
 
-    const closestUsed = new Set<string>();
-    const closest = fillShelf(ranked, ranked, closestUsed, SHELF_TARGET_SIZE, 2);
+    // Closest remains similarity-first and intentionally excludes YouTube-dig
+    // material so rare gems are preserved for the dedicated digging shelf.
+    const closestPool = ranked.filter((candidate) => candidate.source !== "youtube_dig");
+    const closest = fillShelf(closestPool, closestPool, used);
 
-    // Underground is intentionally built as its own track shelf. It does not
-    // consume the same artist-limited fallback as Closest, otherwise a rotation
-    // dominated by a handful of artists can collapse this shelf to 2–3 tracks.
-    const undergroundPrimary = [...ranked].sort((a, b) => {
-      const aScore = (a.underground ?? 0.5) * 0.78 + (a.rank + tasteAdjustment(a, taste)) * 0.22;
-      const bScore = (b.underground ?? 0.5) * 0.78 + (b.rank + tasteAdjustment(b, taste)) * 0.22;
-      return bScore - aScore;
-    });
-    const undergroundUsed = new Set(closest.slice(0, 4).map((item) => item.recording_mbid));
-    const underground = fillShelf(undergroundPrimary, ranked, undergroundUsed, SHELF_TARGET_SIZE, 2);
+    // Real digging: direct YouTube discoveries with low exposure come first.
+    // Only very-high-rarity ListenBrainz material may fill remaining slots.
+    const youtubeDigPrimary = [...ranked]
+      .filter((candidate) => candidate.source === "youtube_dig")
+      .sort((a, b) => (b.underground + b.rank * 0.25) - (a.underground + a.rank * 0.25));
+    const rareMetadataFallback = [...ranked]
+      .filter((candidate) => candidate.source === "listenbrainz" && candidate.underground >= 0.82)
+      .sort((a, b) => (b.underground + b.rank * 0.15) - (a.underground + a.rank * 0.15));
+    const underground = fillShelf(youtubeDigPrimary, rareMetadataFallback, used, 28);
 
     const deepPrimary = ranked.filter((candidate) => candidate.source === "musicbrainz_catalog");
-    const deepUsed = new Set([
-      ...closest.slice(0, 4).map((item) => item.recording_mbid),
-      ...underground.slice(0, 4).map((item) => item.recording_mbid),
-    ]);
-    const deep = fillShelf(deepPrimary, ranked, deepUsed, 24, 2);
+    const deep = fillShelf(deepPrimary, closestPool, used);
 
     return { closest, underground, deep, totalTracks: ranked.length };
   }, [bundle, taste]);
@@ -534,7 +531,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onFeedback={updateFeedback}
           />
           <DiscoveryShelf
-            eyebrow="Dig deeper · obscurity weighted"
+            eyebrow="YouTube dig · low-exposure tracks"
             title="More underground"
             items={rails.underground}
             page={shelfPages.underground}
