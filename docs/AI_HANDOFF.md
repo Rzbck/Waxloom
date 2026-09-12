@@ -6,100 +6,106 @@ Date: 2026-09-12
 
 - Repository: `Rzbck/Waxloom` (public)
 - Published baseline: `main@8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`
-- Bootstrap branch: `fix/bootstrap-workflow-security-20260912`
+- Bootstrap branch: `fix/bootstrap-workflow-security-20260912` / PR #1
 - Playlist UI branch: `feat/navidrome-playlists-ui-20260912` / PR #2
-- Current product branch: `feat/navidrome-core-player-20260912` / PR #3
-- Core-player implementation commit before handoff-only updates: `2393ef8f808c7f84f66b2ccce12c938b376cf6f3`
-- Exact candidate SHA for local validation: always resolve fresh remote HEAD immediately before testing.
+- Navidrome core player: `feat/navidrome-core-player-20260912` / PR #3
+- Current chantier: `feat/discovery-imports-20260912` / PR #4, stacked on the core player.
+- Exact candidate SHA: resolve fresh remote HEAD immediately before testing; do not hardcode a self-referential handoff SHA.
 - Promotion to `main`: only on explicit repository-owner instruction. Branch protection/rulesets are optional defense-in-depth.
 
 ## USER VALIDATED
 
 ### Bootstrap/runtime
 
-Exact runtime candidate `1d774b5a87d8646d1dd30baea2745d8e4ac88dc9` was validated on Windows from its dedicated worktree:
+Exact runtime candidate `1d774b5a87d8646d1dd30baea2745d8e4ac88dc9` was validated on Windows: security, Python/npm bootstrap, API, Vite/browser render and clean Ctrl+C shutdown all PASS.
 
-- security gate PASS;
-- isolated Python/npm bootstrap PASS;
-- FastAPI/Uvicorn startup PASS;
-- Vite/browser render PASS;
-- clean Ctrl+C shutdown PASS.
+### Navidrome UI/player
 
-`configure.ps1` also successfully detected Navidrome, the music library and AudioMuse, and wrote ignored local `.env` without displaying secrets.
+The owner validated real playlists and then the expanded Navidrome player on the core-player tranche and explicitly said to keep it as the base. Working daily surfaces include Home, Albums, Artists, Search, Favorites, playlists and real audio playback/player controls.
 
-### Playlist UI
+Known owner-reported defect on the validated core: Home `Shuffle something` always started the same first random item. Root cause was deterministic `player.playSongs(homeSongs, 0)` against one startup batch. The current Discovery/Imports branch fixes this by requesting a fresh `getRandomSongs` batch per click, choosing a random start index and avoiding the current song when possible. This shuffle fix is `IMPLEMENTED / NOT USER VALIDATED` until the current branch is tested.
 
-The owner subsequently confirmed that the real Navidrome playlists render in Waxloom. Do not regress this while expanding the player.
+## Current tranche — Discovery + AudioMuse + Imports
 
-## Current tranche — Navidrome core player
+PR #4 turns both former placeholders into functional Waxloom workflows.
 
-Owner requirement: Waxloom is not a playlist viewer. It must become the primary music client for Navidrome, with Waxloom-only features layered on top.
+### Discovery
 
-PR #3 implements the daily music-player surface:
+- local seed selection by search;
+- add currently playing track as a seed;
+- use up to 30 tracks from a Navidrome playlist as seeds;
+- AudioMuse `/api/similar_tracks` local sonic neighbours;
+- seed recording-MBID resolution through ListenBrainz Labs recording search when local metadata lacks an MBID;
+- ListenBrainz Labs similar-recordings external candidates;
+- local Navidrome duplicate filtering;
+- similarity + underground weighting + multi-seed confidence ranking;
+- best-effort Labs tag/popularity enrichment;
+- MusicBrainz recording links;
+- Underground slider in UI.
 
-- Home with newest albums and random tracks;
-- Albums browsing (`newest`, `recent`, `frequent`, A–Z, random, starred);
-- album detail + track list + play album;
-- Artists browsing + artist detail + albums;
-- global `search3` search across artists/albums/songs;
-- starred/favorites view;
-- playlist create/rename/delete/add-song/remove-song;
-- server-side cover-art proxy;
-- server-side audio `stream` proxy with HTTP Range forwarding for seeking;
-- persistent global player with play/pause, previous/next, seek, volume, shuffle and repeat;
-- queue drawer backed by Navidrome `getPlayQueue` / `savePlayQueue`;
-- `scrobble` now-playing + submission so Navidrome play counts/history remain coherent;
-- all provider credentials remain backend-only.
+### Imports
 
-Automated gates on implementation commit `2393ef8...`: security PASS, PowerShell parse PASS, API install/compile/import PASS, npm PASS, React/TypeScript/Vite production build PASS, direct Node/Vite HTTP smoke PASS.
+- YouTube search engine derived from the existing `Rzbck/ShazamDownloader` scoring logic;
+- RapidFuzz matching and penalties for cover/karaoke/sped-up/slowed/nightcore/lyrics/live/etc.;
+- explicit candidate list and explicit user source selection — never auto-pick candidate #1;
+- only `youtube.com` / `youtu.be` source URLs accepted server-side;
+- UI authorization checkbox and backend `authorized=true` enforcement;
+- FFmpeg resolution through `FFMPEG_PATH`, PATH, or common installation locations;
+- download only under configured `MUSIC_LIBRARY_PATH/_Waxloom Imports`;
+- path containment validation;
+- MP3 192 kbps extraction + deterministic Artist/Title/Album ID3 tags;
+- Navidrome `startScan` after download;
+- poll Navidrome for the indexed artist/title;
+- optional automatic insertion into the chosen Navidrome playlist;
+- response exposes only the path relative to the music library, never the absolute local path.
 
-Runtime state: `IMPLEMENTED / NOT USER VALIDATED` until the fresh PR #3 HEAD is tested against the owner's real Navidrome media stream.
+### Public-repo security
 
-## Navidrome parity boundary
+- Navidrome password, AudioMuse token and provider credentials remain backend-only;
+- browser only calls Waxloom `/api/*` for private integrations;
+- no cookies, secrets, local DBs, media or private library exports belong in Git;
+- actual YouTube import is for media the owner is authorized to save;
+- fail-closed `scripts/security-gate.ps1` remains mandatory.
 
-`docs/NAVIDROME_CORE_SCOPE.md` defines this tranche. It intentionally covers the complete everyday music-player experience first.
+## Automated state
 
-Separate later parity tranches remain for server/admin surfaces such as users, public shares, internet-radio management, podcasts, bookmarks/audiobooks, jukebox-server hardware control and smart-playlist authoring. Do not mislabel those as already implemented.
+The initial PR #4 code passed security, backend dependency install/import, TypeScript/Vite build and direct Vite smoke before the final FFmpeg/ID3/playlist-seed hardening commits. Re-run both CI gates on the fresh final branch HEAD before local testing and only attribute PASS to that exact SHA.
 
-After the core player is qualified, continue with Waxloom differentiators rather than stopping at Navidrome parity:
+Official ListenBrainz Labs contract used by the current implementation was re-checked on 2026-09-12: recording-search is available for fuzzy artist+track resolution and similar-recordings exposes the selected session-based algorithm and JSON POST shape used by Waxloom.
 
-1. ListenBrainz/MusicBrainz external discovery with underground weighting;
-2. AudioMuse-local similarity surfaced in the same UI;
-3. explicit YouTube candidate search/selection for authorized imports;
-4. download -> Navidrome scan -> playlist insertion -> AudioMuse analysis orchestration.
+## Historical local state
 
-## Security / Git invariants
+`E:\_Project\Waxloom` still contains an old untracked `apps/api/uv.lock` generated by the historical launcher and remains `HOLD_DIRTY`. Do not reset/clean/delete it merely to continue work.
 
-- repo is public: no `.env`, provider credentials, cookies, private keys, private DBs, media or private library exports in Git;
-- browser only calls Waxloom `/api/*`; backend owns provider credentials;
-- fail-closed `scripts/security-gate.ps1` remains mandatory;
+## Exact next runtime gate — PR #4
+
+1. require security + Windows build CI PASS on the fresh `feat/discovery-imports-20260912` HEAD;
+2. inventory worktrees and create/reuse one dedicated Discovery/Imports worktree;
+3. require local HEAD == remote branch HEAD and CLEAN;
+4. copy ignored `.env` without printing it;
+5. run `scripts/security-gate.ps1`, then `scripts/dev.ps1`;
+6. verify `Shuffle something` changes track across repeated clicks;
+7. Discovery: add current/search seed and playlist seeds;
+8. generate external recommendations and verify local duplicates are not obvious results;
+9. verify AudioMuse local similar cards and playback;
+10. use `Find source` on one external candidate;
+11. verify Imports runtime reports yt-dlp + FFmpeg + library ready;
+12. search YouTube and verify multiple scored candidates are selectable;
+13. for an authorized test track only, select a source + optional disposable playlist, confirm authorization, import;
+14. verify file lands under `_Waxloom Imports`, Navidrome indexes it, Waxloom can find/play it and selected playlist receives it when requested;
+15. Ctrl+C and verify clean shutdown;
+16. record exact tested SHA and any provider-contract/runtime failures before promotion.
+
+## Git/worktree invariants
+
 - 1 active chantier = 1 branch = 1 dedicated worktree;
-- historical `E:\_Project\Waxloom` still contains an old untracked `apps/api/uv.lock` and remains `HOLD_DIRTY`; do not clean/reset it merely to continue;
-- no force-push/destructive reset/blind clean;
-- explicit owner instruction `push/merge to main` authorizes promotion only after security/build/diff gates.
-
-## Exact next runtime gate
-
-1. wait for both CI gates PASS on the fresh `feat/navidrome-core-player-20260912` HEAD;
-2. inventory worktrees;
-3. create/reuse dedicated `navidrome-core-player-20260912` worktree;
-4. require local HEAD == remote branch HEAD and CLEAN;
-5. copy ignored `.env` without printing it;
-6. run `scripts/security-gate.ps1`;
-7. run `scripts/dev.ps1`;
-8. verify Home/new albums/random tracks;
-9. verify Albums + one album detail + play album;
-10. verify Artists + one artist detail;
-11. verify global search;
-12. verify Favorites toggle/view;
-13. play a real track and verify audio, seek, volume, previous/next, shuffle/repeat;
-14. verify queue drawer and queue persistence after reload;
-15. verify playlist create/add/remove/rename/delete on a disposable test playlist;
-16. Ctrl+C and verify clean shutdown;
-17. record exact tested SHA and failures before promotion or next stacked tranche.
+- no force-push, destructive reset or blind clean;
+- security/build gates apply even when owner explicitly authorizes promotion to `main`;
+- do not claim provider/runtime success from compile/CI alone.
 
 ## Rollback
 
+Discovery/Imports base: the user-validated Navidrome core-player branch at its branch point.
 Bootstrap recovery base: `8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`.
 
 No destructive rollback. Revert/new commit only after publication.
