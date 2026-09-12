@@ -1,0 +1,64 @@
+.discovery-audio-preview {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.compact-action-playing {
+  color: #f0e8f7;
+  border-color: #72568e;
+  background: #241a2d;
+}
+
+/* Use geometry instead of a font glyph so the play triangle is optically
+   centered and cannot overflow differently from one system font to another. */
+.cover-play,
+.track-play {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 0;
+  line-height: 0;
+}
+
+.cover-play::before,
+.track-play::before {
+  content: "";
+  display: block;
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid currentColor;
+  transform: translateX(1.5px);
+}
+
+.cover-play {
+  color: #17131b;
+}
+
+.cover-play::before {
+  border-top-width: 6px;
+  border-bottom-width: 6px;
+  border-left-width: 10px;
+}
+
+.track-play {
+  color: #8c8792;
+  border: 1px solid transparent;
+  transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease;
+}
+
+.track-play:hover {
+  color: #111015;
+  border-color: #eeeaf2;
+  background: #eeeaf2;
+  transform: scale(1.04);
+}
+
+.track-play:active,
+.cover-play:active {
+  transform: scale(.95);
+}
