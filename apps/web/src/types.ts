@@ -197,6 +197,8 @@ export type YouTubeCandidate = {
   duration?: number;
   thumbnail?: string;
   score: number;
+  preview_url?: string | null;
+  preview_ext?: string | null;
 };
 
 export type YouTubeRuntime = {
