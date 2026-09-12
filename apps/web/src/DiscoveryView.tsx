@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 import { api } from "./api";
 import { usePlayer } from "./Player";
@@ -17,23 +17,22 @@ function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
 }
 
-export function DiscoveryView({
-  playlists,
-  onImportCandidate,
-}: {
-  playlists: PlaylistSummary[];
-  onImportCandidate: (candidate: DiscoveryCandidate) => void;
-}) {
+export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candidate: DiscoveryCandidate) => void }) {
   const player = usePlayer();
   const [seedQuery, setSeedQuery] = useState("");
   const [seedResults, setSeedResults] = useState<SearchResults | null>(null);
   const [seeds, setSeeds] = useState<Song[]>([]);
+  const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [seedPlaylistId, setSeedPlaylistId] = useState("");
   const [underground, setUnderground] = useState(75);
   const [result, setResult] = useState<DiscoveryResponse | null>(null);
   const [localSimilar, setLocalSimilar] = useState<AudioMuseSimilarTrack[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api.playlists().then((payload) => setPlaylists(payload.items)).catch(() => undefined);
+  }, []);
 
   async function searchSeeds(event: FormEvent) {
     event.preventDefault();
