@@ -7,6 +7,7 @@ import "./styles.css";
 import "./performance.css";
 import "./discovery-auto.css";
 import "./discovery-v2.css";
+import "./discovery-v3.css";
 import "./polish.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
