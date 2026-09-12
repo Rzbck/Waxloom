@@ -2,6 +2,7 @@ import type {
   Album,
   Artist,
   AudioMuseSimilarTrack,
+  AutomaticDiscoveryResponse,
   DiscoveryResponse,
   Health,
   ImportResult,
@@ -113,6 +114,10 @@ export const api = {
         result_count: resultCount,
       }),
     }),
+  automaticDiscovery: (refresh = false, count = 80) =>
+    request<AutomaticDiscoveryResponse>(
+      `/api/discovery/automatic?refresh=${refresh ? "true" : "false"}&count=${count}`,
+    ),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
   youtubeSearch: (artist: string, title: string, isrc?: string) =>
