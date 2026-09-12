@@ -4,7 +4,9 @@ import asyncio
 import copy
 import hashlib
 import json
+import re
 import time
+import unicodedata
 from collections import defaultdict
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -52,6 +54,21 @@ class DiscoveryFeedEngine:
         if epoch is None:
             return None
         return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+
+    @staticmethod
+    def _artist_key(value: str) -> str:
+        """Collapse cosmetic/collaboration variants under a stable lead artist.
+
+        Discovery cards are intentionally grouped tightly. Provider data can
+        contain variants such as accents, punctuation or ``Artist feat. Guest``;
+        without canonicalization those variants can occupy several cards in the
+        same shelf and make the UI look repetitive.
+        """
+        normalized = unicodedata.normalize("NFKD", value).casefold()
+        normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+        normalized = re.sub(r"\b(?:feat(?:uring)?|ft|with|vs)\.?\b.*$", "", normalized)
+        normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
+        return " ".join(normalized.split()) or "unknown artist"
 
     def _load_persisted(self) -> None:
         try:
@@ -177,7 +194,7 @@ class DiscoveryFeedEngine:
         for item in items:
             if self._feedback.exact(str(item.get("recording_mbid") or "")) < 0:
                 continue
-            artist = str(item.get("artist") or "unknown artist").strip().casefold()
+            artist = self._artist_key(str(item.get("artist") or "unknown artist"))
             grouped[artist].append(item)
 
         def artist_score(entry: tuple[str, list[dict[str, Any]]]) -> tuple[float, str]:
