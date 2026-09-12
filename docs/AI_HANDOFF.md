@@ -20,7 +20,9 @@ Date: 2026-09-12
 - Expanded Navidrome player/library is the accepted base.
 - `Shuffle something` fix is USER VALIDATED: repeated clicks now vary tracks.
 - AudioMuse integration is reachable and produces local sonic neighbours.
-- Automatic Discovery produced real external candidates in runtime, but UX/ranking needed correction.
+- Automatic Discovery produced real external candidates in runtime.
+- Persistent/background Discovery feed architecture is USER VALIDATED as working.
+- Owner reports the overall current UI/functionality as working well apart from preview and first-navigation polish tracked below.
 
 ## Runtime diagnosis — synchronous Discovery was wrong architecture
 
@@ -38,7 +40,7 @@ Permanent product requirement: **opening Discovery must never trigger or wait fo
 
 ## Persistent / background Discovery feed
 
-The current branch now implements `DiscoveryFeedEngine`:
+The current branch implements `DiscoveryFeedEngine`:
 
 - starts independently when the Waxloom API starts;
 - loads the last persisted feed immediately from `%LOCALAPPDATA%\Waxloom\discovery-feed.json` when available;
@@ -61,7 +63,7 @@ Frontend behavior:
 
 - reads the persistent feed only; page opening does not start the heavy build;
 - keeps a non-secret browser cache of the last usable feed as an extra instant fallback;
-- polls the cheap feed every ~30 s and on window focus, so a first background build appears automatically when it completes;
+- polls the cheap feed every ~30 s and on window focus;
 - if first-ever feed is not ready, clearly says it is being prepared in the background and the user may leave the page;
 - a manual `Refresh in background` control is optional and non-blocking;
 - page reports feed state, last update, pool size and rotation cadence.
@@ -75,7 +77,7 @@ The branch also implements:
 - backend full-library snapshot by enumerating Navidrome albums/songs;
 - representative seed selection with artist/genre diversity caps;
 - favorites/queue as small preference signals, not the discovery corpus;
-- AudioMuse used internally for sonic expansion, not rendered as “discover your own music” cards;
+- AudioMuse used internally for sonic expansion, not rendered as local discovery cards;
 - ListenBrainz similar-recordings when coverage exists;
 - MusicBrainz catalogue fallback reached through AudioMuse-neighbour artists when ListenBrainz is sparse;
 - local exact artist/title duplicates removed;
@@ -89,6 +91,23 @@ Discovery shelves:
 - `Closest to your collection`
 - `More underground`
 - `Deep cuts from neighbouring artists`
+
+## Preview / first-navigation UX rule
+
+Owner feedback after the background feed became usable:
+
+1. Discovery preview must **not open or embed a YouTube page**. The interface must stay visually unchanged and play audio only.
+2. First navigation into Albums / Artists should not feel like a cold request; Waxloom should warm these views before the user clicks them.
+3. Small play controls must not use a font-glyph triangle that overflows or looks optically off-center.
+
+Current implementation:
+
+- yt-dlp search resolves a temporary browser-playable `bestaudio` URL for preview while retaining the canonical YouTube page URL for imports;
+- Discovery uses one hidden `<audio>` element; no iframe, no page expansion, no YouTube UI;
+- clicking the active preview again stops it; only one Discovery preview exists at a time;
+- Albums `newest/120` and the full Artists list are preloaded into a short-lived browser cache immediately after API health succeeds;
+- first visible album/artist covers are also prewarmed in the browser background;
+- album-cover and track-row play controls use CSS geometry instead of the Unicode `▶` glyph for stable optical centering.
 
 ## Imports
 
@@ -117,19 +136,17 @@ PR #4 includes:
 - historical `E:\_Project\Waxloom` remains `HOLD_DIRTY` because of old untracked `apps/api/uv.lock`; do not clean/reset merely to continue;
 - no force-push/destructive reset/blind clean.
 
-## Exact next runtime gate — background feed
+## Exact next runtime gate — UX polish
 
 1. require security + Windows build PASS on fresh branch HEAD;
 2. fast-forward existing `discovery-imports-20260912` worktree to exact SHA and require CLEAN;
 3. restart Waxloom;
-4. verify `/api/discovery/feed/status` answers immediately and reports `warming` or `ready`;
-5. verify no browser visit is required for feed generation to start;
-6. while first generation is running, navigate Home/Artists/Albums normally and confirm UI remains usable;
-7. verify status eventually becomes `ready`, `candidate_pool > 0`, and a local `%LOCALAPPDATA%\Waxloom\discovery-feed.json` exists;
-8. enter Discovery after ready: recommendations must display immediately without a heavy request;
-9. restart Waxloom and confirm the persisted feed is available immediately while a future refresh remains background work;
-10. verify hourly rotation metadata changes the visible subset without rebuilding the whole feed;
-11. then test preview and one authorized add-to-playlist/import path.
+4. on Home, wait only a few seconds while background warmup runs, then open Albums and Artists and verify first navigation is materially faster;
+5. confirm album/track play triangles are centered and contained;
+6. open Discovery and click preview: audio should play with **no iframe, no new page and no layout change**;
+7. click the same preview again and confirm it stops;
+8. click a second candidate and confirm the first preview is replaced/stopped;
+9. then test one authorized add-to-playlist/import path.
 
 ## Rollback
 
