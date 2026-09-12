@@ -13,7 +13,7 @@ from yt_dlp.utils import DownloadError
 from waxloom_api.providers.navidrome import NavidromeClient
 
 _DIG_CACHE_SECONDS = 2 * 60 * 60
-_MAX_VIEWS = 350_000
+_MAX_VIEWS = 150_000
 _MIN_VIEWS = 40
 _cache: tuple[float, str, list[dict[str, Any]]] | None = None
 _cache_lock = asyncio.Lock()
