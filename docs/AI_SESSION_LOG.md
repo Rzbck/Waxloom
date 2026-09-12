@@ -3,12 +3,11 @@
 ### 2026-09-12 — bootstrap / Windows launcher / public-repo workflow
 HEAD before: `main@8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`
 USER VALIDATED: `configure.ps1` detected Navidrome/library/AudioMuse and wrote ignored local `.env` without displaying the AudioMuse token.
-USER VALIDATED on `918a7fa08e30e0cb9f7cacd69339f2d677daa11f`: exact-SHA/CLEAN gate PASS, security PASS, Python bootstrap PASS, npm install PASS, API startup PASS, `/api/health` HTTP 200 PASS.
-BUG / BLOCKER on `918a7fa`: Vite did not start because `cmd.exe` stripped quoting around `C:\Program Files\nodejs\npm.cmd`; UI readiness FAIL, cleanup executed.
-FIX CANDIDATE: Vite now launches directly through `node.exe` + `node_modules/vite/bin/vite.js`; Windows CI smokes this exact launch path.
-LOCAL STATE: historical `E:\_Project\Waxloom` remains `HOLD_DIRTY` because old launcher generated untracked `apps/api/uv.lock`; no reset/clean/delete.
-DECISION: SIGNAL-style branch/worktree/handoff discipline; no development writes directly to main.
-SECURITY: repo public; fail-closed security gate + CI; main observed unprotected, so promotion remains blocked by policy.
+USER VALIDATED: runtime candidate `1d774b5a87d8646d1dd30baea2745d8e4ac88dc9` reached API ready, UI ready/browser rendering, and clean Ctrl+C shutdown from the dedicated worktree.
+AUTOMATED GATE PASS: public-repository security gate, PowerShell parser, API install/import, web build, direct Node/Vite smoke.
+DECISION: adopt SIGNAL-style branch/worktree/handoff discipline; normal development remains off `main`.
+OWNER POLICY: GitHub branch protection/rulesets are optional, not a promotion blocker. Do not push/merge to `main` by default; when the repository owner explicitly instructs `push/merge to main`, perform the promotion after security/build/diff gates. Owner authorization does not permit secrets, force-push, destructive history rewrite, or failed-gate bypass.
+SECURITY: repository is public; fail-closed tracked-secret gate and CI gate remain mandatory.
 RECOVERY BRANCH: `fix/bootstrap-workflow-security-20260912`.
-NEXT TEST: fresh remote HEAD, dedicated CLEAN worktree, security PASS, full `dev.ps1`, API+UI readiness, browser render, Ctrl+C cleanup.
+NEXT PRODUCT TRANCHE AFTER OWNER-AUTHORIZED PROMOTION: real navigation + real Navidrome playlists in UI; dead/unimplemented controls must be disabled rather than fake-clickable.
 ROLLBACK / BASE: `8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`.
