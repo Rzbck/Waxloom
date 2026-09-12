@@ -252,7 +252,39 @@ class DiscoveryFeedEngine:
             if not added:
                 break
             depth += 1
-        return output, slot
+
+        # Reserve a meaningful slice of every visible rotation for direct
+        # YouTube digs. Without a quota, a successful background dig could still
+        # be hidden behind sixty metadata candidates with slightly higher scores.
+        dig_items = [
+            item
+            for item in items
+            if item.get("source") == "youtube_dig"
+            and self._feedback.exact(str(item.get("recording_mbid") or "")) >= 0
+        ]
+        if dig_items:
+            def dig_score(item: dict[str, Any]) -> float:
+                mbid = str(item.get("recording_mbid") or "")
+                digest = hashlib.sha1(f"{slot}:dig:{mbid}".encode("utf-8", errors="ignore")).hexdigest()
+                jitter = int(digest[:8], 16) / 0xFFFFFFFF
+                return self._candidate_score(item) * 0.9 + jitter * 0.1
+
+            dig_items.sort(key=dig_score, reverse=True)
+            desired = min(len(dig_items), max(12, self._visible_size // 3))
+            visible_dig = sum(1 for item in output if item.get("source") == "youtube_dig")
+            needed = max(0, desired - visible_dig)
+            if needed:
+                present = {str(item.get("recording_mbid") or "") for item in output}
+                additions = [
+                    self._feedback.annotate(item)
+                    for item in dig_items
+                    if str(item.get("recording_mbid") or "") not in present
+                ][:needed]
+                if additions:
+                    keep = max(0, self._visible_size - len(additions))
+                    output = output[:keep] + additions
+
+        return output[: self._visible_size], slot
 
     def feed(self) -> dict[str, Any]:
         if self._snapshot is None:
