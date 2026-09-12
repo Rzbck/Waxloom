@@ -72,57 +72,52 @@
 
 .discovery-rail-section {
   min-width: 0;
+  overflow: hidden;
 }
 
 .discovery-rail-toolbar {
   align-items: end;
-}
-
-.rail-arrows {
-  display: flex;
-  gap: 7px;
-}
-
-.rail-arrows button {
-  width: 38px;
-  height: 34px;
-  border: 1px solid #302d36;
-  border-radius: 9px;
-  color: #d7cfdf;
-  background: #151419;
-  cursor: pointer;
-}
-
-.rail-arrows button:hover {
-  border-color: #655676;
-  background: #1b1820;
+  padding-right: clamp(24px, 6vw, 72px);
 }
 
 .artist-discovery-rail {
   display: flex;
-  gap: 12px;
-  padding: 3px 2px 12px;
+  gap: 14px;
+  padding: 4px clamp(24px, 6vw, 72px) 14px 2px;
   overflow-x: auto;
   overflow-y: hidden;
-  scroll-snap-type: x proximity;
-  scrollbar-width: thin;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 2px;
+  scrollbar-width: none;
   overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  cursor: grab;
+}
+
+.artist-discovery-rail:active {
+  cursor: grabbing;
+}
+
+.artist-discovery-rail::-webkit-scrollbar,
+.artist-track-stack::-webkit-scrollbar {
+  display: none;
 }
 
 .artist-discovery-card {
-  flex: 0 0 min(360px, 82vw);
+  flex: 0 0 clamp(300px, 38vw, 420px);
   display: grid;
-  align-content: start;
-  gap: 10px;
-  min-height: 210px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 11px;
+  height: 250px;
   padding: 14px;
   border: 1px solid #28262e;
-  border-radius: 14px;
-  background: #131217;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #15141a, #111015);
   scroll-snap-align: start;
   content-visibility: auto;
   contain: layout paint style;
-  contain-intrinsic-size: 360px 230px;
+  contain-intrinsic-size: 380px 250px;
 }
 
 .artist-discovery-head {
@@ -143,39 +138,52 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.96rem;
+  font-size: 0.98rem;
   font-weight: 780;
 }
 
 .artist-discovery-head span {
   color: #77717f;
-  font-size: 0.69rem;
+  font-size: 0.68rem;
 }
 
 .artist-discovery-head b {
+  flex: none;
   color: #bda8d5;
   font-size: 0.76rem;
 }
 
 .artist-track-stack {
-  display: grid;
-  gap: 5px;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
-.artist-track-row {
+.discovery-track-tile {
+  flex: 0 0 calc(100% - 24px);
+  min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 31px 31px;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 7px 7px 9px;
-  border-radius: 9px;
-  background: #18171d;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto 1fr;
+  gap: 8px 10px;
+  padding: 12px;
+  border: 1px solid #292730;
+  border-radius: 12px;
+  background: #19181e;
+  scroll-snap-align: start;
 }
 
 .artist-track-copy {
   display: grid;
   min-width: 0;
-  gap: 2px;
+  gap: 3px;
 }
 
 .artist-track-copy strong,
@@ -186,12 +194,19 @@
 }
 
 .artist-track-copy strong {
-  font-size: 0.79rem;
+  color: #ece8ef;
+  font-size: 0.84rem;
 }
 
 .artist-track-copy span {
   color: #77717f;
-  font-size: 0.65rem;
+  font-size: 0.66rem;
+}
+
+.discovery-track-primary-actions {
+  display: flex;
+  align-items: start;
+  gap: 6px;
 }
 
 .compact-action {
@@ -201,7 +216,7 @@
   height: 31px;
   padding: 0;
   border: 1px solid #34303b;
-  border-radius: 8px;
+  border-radius: 9px;
   color: #c8b7dc;
   background: #111015;
   cursor: pointer;
@@ -212,31 +227,86 @@
   background: #1d1824;
 }
 
+.compact-action-playing {
+  border-color: #765990;
+  color: #f2e9fa;
+  background: #271c31;
+}
+
 .compact-action-add {
-  font-size: 1.05rem;
+  font-size: 1.04rem;
 }
 
-.inline-preview {
+.css-play-mark {
+  width: 0;
+  height: 0;
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-left: 8px solid currentColor;
+  transform: translateX(1px);
+}
+
+.css-pause-mark {
+  position: relative;
+  width: 8px;
+  height: 10px;
+}
+
+.css-pause-mark::before,
+.css-pause-mark::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 10px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.css-pause-mark::before { left: 1px; }
+.css-pause-mark::after { right: 1px; }
+
+.taste-actions {
   grid-column: 1 / -1;
-  display: grid;
-  gap: 5px;
-  margin-top: 3px;
+  display: flex;
+  gap: 6px;
 }
 
-.inline-preview iframe {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  border: 0;
-  border-radius: 8px;
-  background: #08080a;
+.taste-chip {
+  padding: 5px 9px;
+  border: 1px solid #302d36;
+  border-radius: 999px;
+  color: #8c8693;
+  background: #141318;
+  font-size: 0.66rem;
+  cursor: pointer;
 }
 
-.inline-preview small {
+.taste-chip:hover {
+  color: #d8d0df;
+  border-color: #4e4658;
+}
+
+.taste-chip-active {
+  color: #c8f1d4;
+  border-color: rgba(118, 219, 165, .36);
+  background: rgba(118, 219, 165, .09);
+}
+
+.taste-chip-less-active {
+  color: #f0b0b6;
+  border-color: rgba(235, 115, 122, .34);
+  background: rgba(235, 115, 122, .08);
+}
+
+.track-tile-tags {
+  grid-column: 1 / -1;
+  align-self: end;
   overflow: hidden;
-  color: #77717f;
+  color: #696370;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.62rem;
+  font-size: 0.61rem;
 }
 
 .artist-discovery-foot {
@@ -244,7 +314,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-top: auto;
   min-width: 0;
 }
 
@@ -253,17 +322,7 @@
   color: #6e6875;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.62rem;
-}
-
-.text-action {
-  flex: none;
-  padding: 0;
-  border: 0;
-  color: #a893be;
-  font-size: 0.68rem;
-  background: transparent;
-  cursor: pointer;
+  font-size: 0.61rem;
 }
 
 .discovery-playlist-modal {
@@ -302,22 +361,45 @@
   cursor: pointer;
 }
 
+.player-dock-preview {
+  border-top-color: rgba(143, 103, 190, .38);
+  background: linear-gradient(90deg, rgba(31, 22, 39, .98), rgba(15, 15, 19, .98));
+}
+
+.player-track-copy small {
+  color: #8c739f;
+  font-size: .62rem;
+}
+
+.player-preview-error {
+  display: block;
+  margin-top: 4px;
+  color: #e4949b;
+  font-size: .64rem;
+  text-align: center;
+}
+
 @media (max-width: 900px) {
   .profile-stat-grid-library {
     grid-template-columns: repeat(2, minmax(110px, 1fr));
   }
 
-  .rail-arrows {
-    display: none;
+  .artist-discovery-card {
+    flex-basis: min(78vw, 390px);
   }
 }
 
 @media (max-width: 560px) {
   .artist-discovery-card {
-    flex-basis: 88vw;
+    flex-basis: 86vw;
+    height: 244px;
   }
 
   .profile-stat-grid-library {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .artist-discovery-rail {
+    padding-right: 14vw;
   }
 }
