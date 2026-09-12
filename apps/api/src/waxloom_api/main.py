@@ -76,6 +76,7 @@ class YouTubeSearchRequest(BaseModel):
     artist: str = Field(min_length=1, max_length=300)
     title: str = Field(min_length=1, max_length=300)
     isrc: str | None = Field(default=None, max_length=32)
+    limit: int = Field(default=8, ge=1, le=8)
 
 
 class YouTubeImportRequest(BaseModel):
@@ -88,6 +89,9 @@ class YouTubeImportRequest(BaseModel):
 
 def waxloom_state_dir() -> Path:
     return Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()) / "Waxloom"
+
+
+_youtube_provider = YouTubeProvider(cache_dir=waxloom_state_dir() / "yt-dlp-cache")
 
 
 def navidrome_client() -> NavidromeClient:
@@ -107,7 +111,7 @@ def listenbrainz_client() -> ListenBrainzLabsClient:
 
 
 def youtube_provider() -> YouTubeProvider:
-    return YouTubeProvider(cache_dir=waxloom_state_dir() / "yt-dlp-cache")
+    return _youtube_provider
 
 
 def discovery_service() -> DiscoveryService:
@@ -401,6 +405,7 @@ async def youtube_search(payload: YouTubeSearchRequest) -> dict[str, object]:
             payload.artist,
             payload.title,
             isrc=payload.isrc,
+            search_results=payload.limit,
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"YouTube search failed: {exc}") from exc

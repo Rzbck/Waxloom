@@ -1,13 +1,12 @@
-/* Discovery v3: dense desktop shelves that stay inside the Waxloom viewport.
-   Artist groups use one responsive row; tracks are compact vertical rows inside
-   each card. No nested horizontal deck, no visible scrollbar instructions and
-   no expanding layout. */
+/* Discovery track-first shelves.
+   Artists are ranking/diversity signals; the visible unit is the track. */
 
 .discovery-auto-layout {
   gap: 18px;
 }
 
 .discovery-profile-compact {
+  min-width: 0;
   padding: 14px 16px;
 }
 
@@ -18,7 +17,10 @@
 }
 
 .discovery-profile-compact .section-toolbar .muted {
-  display: none;
+  max-width: 760px;
+  margin: 5px 0 0;
+  font-size: .72rem;
+  line-height: 1.35;
 }
 
 .discovery-profile-compact h2 {
@@ -56,7 +58,8 @@
 
 .discovery-rail-section {
   min-width: 0;
-  overflow: visible;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .discovery-rail-toolbar {
@@ -70,144 +73,100 @@
   font-size: clamp(1.22rem, 2vw, 1.65rem);
 }
 
-.discovery-rail-toolbar .muted {
-  display: none;
+.discovery-track-toolbar {
+  flex-direction: row;
+  align-items: end;
 }
 
-/* Keep the complete visible shelf inside the content width. The feed already
-   rotates in the background, so showing the four strongest artist groups per
-   shelf is preferable to an off-screen horizontal strip on desktop. */
-.artist-discovery-rail {
+.discovery-more-tracks {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 7px 10px;
+  font-size: .72rem;
+}
+
+.discovery-more-tracks span {
+  margin-left: 5px;
+  color: #736d7c;
+  font-size: .62rem;
+}
+
+.discovery-track-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  width: 100%;
-  min-width: 0;
-  padding: 0;
-  overflow: visible;
-  scroll-snap-type: none;
-  cursor: default;
-}
-
-.artist-discovery-rail > .artist-discovery-card:nth-child(n + 5) {
-  display: none;
-}
-
-.artist-discovery-card {
-  min-width: 0;
-  width: 100%;
-  height: 188px;
-  padding: 9px;
   gap: 7px;
-  grid-template-rows: auto minmax(0, 1fr);
-  border-radius: 13px;
-  scroll-snap-align: none;
-  contain-intrinsic-size: 290px 188px;
-}
-
-.artist-discovery-head {
-  min-width: 0;
-  gap: 8px;
-  padding-bottom: 6px;
-}
-
-.artist-discovery-head p {
-  font-size: .84rem;
-}
-
-/* Count/instruction copy is redundant in a fixed compact card. */
-.artist-discovery-head span,
-.artist-discovery-foot {
-  display: none;
-}
-
-.artist-discovery-head b {
-  font-size: .66rem;
-}
-
-/* Mouse wheel / touch scroll stays inside the card only when the artist has
-   more rows than can fit. The page itself never expands for extra tracks. */
-.artist-track-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  min-height: 0;
-  padding: 0 2px 2px 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  scroll-snap-type: none;
-  scrollbar-width: none;
-  overscroll-behavior: contain;
-  touch-action: pan-y;
-  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 12px), transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 12px), transparent 100%);
-}
-
-.artist-track-stack::-webkit-scrollbar {
-  display: none;
-}
-
-.discovery-track-tile {
-  flex: 0 0 38px;
   width: 100%;
   min-width: 0;
-  min-height: 38px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  grid-template-rows: 1fr;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 5px 4px 8px;
-  border-radius: 9px;
-  scroll-snap-align: none;
 }
 
-.artist-track-copy {
-  display: block;
+.discovery-song-card {
   min-width: 0;
+  height: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px repeat(4, 26px);
+  align-items: center;
+  gap: 4px;
+  padding: 5px 6px 5px 9px;
+  border: 1px solid #28252e;
+  border-radius: 10px;
+  background: rgba(22, 20, 26, .82);
+  transition: border-color .15s ease, background .15s ease, transform .15s ease;
 }
 
-.artist-track-copy strong {
-  display: block;
+.discovery-song-card:hover {
+  border-color: #3a3442;
+  background: #19171e;
+  transform: translateY(-1px);
+}
+
+.discovery-song-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.discovery-song-copy strong,
+.discovery-song-copy span {
+  min-width: 0;
   overflow: hidden;
-  color: #ece8ef;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.discovery-song-copy strong {
+  color: #eee9f1;
   font-size: .72rem;
-  line-height: 1.1;
+  line-height: 1.05;
 }
 
-.artist-track-copy span,
-.track-tile-tags {
-  display: none;
+.discovery-song-copy span {
+  color: #746e7a;
+  font-size: .6rem;
+  line-height: 1;
 }
 
-.discovery-track-primary-actions,
-.taste-actions {
-  display: flex;
-  align-items: center;
-  gap: 3px;
-}
-
-.taste-actions {
-  grid-column: auto;
+.discovery-song-score {
+  width: 34px;
+  color: #b79bd3;
+  font-size: .61rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .compact-action,
 .taste-chip {
   display: grid;
   place-items: center;
-  width: 25px;
-  height: 25px;
-  min-width: 25px;
+  width: 26px;
+  height: 26px;
+  min-width: 26px;
   padding: 0;
   border-radius: 7px;
 }
 
 .compact-action {
   color: #c6afe0;
-  border-color: rgba(162, 124, 205, .24);
+  border: 1px solid rgba(162, 124, 205, .24);
   background: rgba(112, 76, 150, .06);
 }
 
@@ -223,6 +182,7 @@
   border-color: rgba(90, 182, 205, .25);
   background: rgba(58, 142, 162, .06);
   font-size: .9rem;
+  line-height: 1;
 }
 
 .compact-action-add:hover {
@@ -231,8 +191,6 @@
   background: rgba(69, 161, 184, .15);
 }
 
-/* Supericons/Lucide masks in icons.css inherit currentColor. Keep the buttons
-   icon-only and tint them as semantic feedback without introducing emoji. */
 .taste-chip {
   color: #7da98b;
   border: 1px solid rgba(104, 171, 128, .2);
@@ -260,42 +218,23 @@
   background: rgba(235, 115, 122, .12);
 }
 
-/* Product feedback: technical feed internals should not occupy the discovery
-   page. They remain available through /api/discovery/feed/status for debug. */
-.discovery-details {
+.discovery-details,
+.artist-discovery-rail,
+.artist-discovery-card,
+.artist-track-stack,
+.discovery-track-tile,
+.artist-discovery-foot {
   display: none;
 }
 
-@media (max-width: 1280px) {
-  .artist-discovery-rail {
+@media (max-width: 1320px) {
+  .discovery-track-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-
-  .artist-discovery-rail > .artist-discovery-card:nth-child(4) {
-    display: none;
-  }
 }
 
-@media (max-width: 920px) {
-  .artist-discovery-rail {
+@media (max-width: 980px) {
+  .discovery-track-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .artist-discovery-rail > .artist-discovery-card:nth-child(3) {
-    display: none;
-  }
-}
-
-@media (max-width: 620px) {
-  .artist-discovery-rail {
-    grid-template-columns: 1fr;
-  }
-
-  .artist-discovery-rail > .artist-discovery-card:nth-child(2) {
-    display: none;
-  }
-
-  .artist-discovery-card {
-    height: 184px;
   }
 }
