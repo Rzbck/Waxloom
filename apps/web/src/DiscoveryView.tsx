@@ -11,14 +11,6 @@ import type {
 
 import "./discovery.css";
 
-type ArtistGroup = {
-  key: string;
-  artist: string;
-  items: DiscoveryCandidate[];
-  bestRank: number;
-  bestUnderground: number;
-};
-
 type TasteEntry = {
   value: -1 | 1;
   artist: string;
@@ -26,9 +18,12 @@ type TasteEntry = {
 };
 
 type TasteState = Record<string, TasteEntry>;
+type ShelfKey = "closest" | "underground" | "deep";
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v2";
 const TASTE_KEY = "waxloom.discovery.taste.v1";
+const SHELF_PAGE_SIZE = 12;
+const SHELF_TARGET_SIZE = 20;
 
 function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
@@ -81,35 +76,50 @@ function tasteAdjustment(candidate: DiscoveryCandidate, taste: TasteState): numb
   return adjustment;
 }
 
-function groupCandidates(items: DiscoveryCandidate[], taste: TasteState): ArtistGroup[] {
-  const groups = new Map<string, ArtistGroup>();
-  const sorted = [...items]
+function activeCandidates(items: DiscoveryCandidate[], taste: TasteState): DiscoveryCandidate[] {
+  return [...items]
     .filter((candidate) => (taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0) >= 0)
     .sort((a, b) => (b.rank + tasteAdjustment(b, taste)) - (a.rank + tasteAdjustment(a, taste)));
+}
 
-  for (const candidate of sorted) {
-    const key = folded(candidate.artist) || candidate.recording_mbid;
-    const adjustedRank = candidate.rank + tasteAdjustment(candidate, taste);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.items.push(candidate);
-      existing.bestRank = Math.max(existing.bestRank, adjustedRank);
-      existing.bestUnderground = Math.max(existing.bestUnderground, candidate.underground);
-    } else {
-      groups.set(key, {
-        key,
-        artist: candidate.artist,
-        items: [candidate],
-        bestRank: adjustedRank,
-        bestUnderground: candidate.underground,
-      });
+function diversify(items: DiscoveryCandidate[], maxPerArtist = 2): DiscoveryCandidate[] {
+  const counts = new Map<string, number>();
+  const output: DiscoveryCandidate[] = [];
+  for (const candidate of items) {
+    const artist = folded(candidate.artist) || candidate.recording_mbid;
+    const current = counts.get(artist) ?? 0;
+    if (current >= maxPerArtist) continue;
+    counts.set(artist, current + 1);
+    output.push(candidate);
+  }
+  return output;
+}
+
+function fillShelf(
+  primary: DiscoveryCandidate[],
+  fallback: DiscoveryCandidate[],
+  used: Set<string>,
+  target = SHELF_TARGET_SIZE,
+): DiscoveryCandidate[] {
+  const output: DiscoveryCandidate[] = [];
+  const append = (candidate: DiscoveryCandidate) => {
+    if (used.has(candidate.recording_mbid) || output.some((item) => item.recording_mbid === candidate.recording_mbid)) return;
+    output.push(candidate);
+  };
+
+  for (const candidate of diversify(primary, 2)) {
+    append(candidate);
+    if (output.length >= target) break;
+  }
+  if (output.length < target) {
+    for (const candidate of diversify(fallback, 2)) {
+      append(candidate);
+      if (output.length >= target) break;
     }
   }
 
-  for (const group of groups.values()) {
-    group.items.sort((a, b) => (b.rank + tasteAdjustment(b, taste)) - (a.rank + tasteAdjustment(a, taste)));
-  }
-  return [...groups.values()].sort((a, b) => b.bestRank - a.bestRank);
+  output.forEach((candidate) => used.add(candidate.recording_mbid));
+  return output;
 }
 
 function readBrowserFeed(): DiscoveryFeedResponse | null {
@@ -150,8 +160,8 @@ function asPreviewTrack(candidate: DiscoveryCandidate): PreviewTrack {
   };
 }
 
-function ArtistGroupCard({
-  group,
+function DiscoveryTrackCard({
+  candidate,
   currentPreviewMbid,
   playing,
   taste,
@@ -159,7 +169,7 @@ function ArtistGroupCard({
   onQuickAdd,
   onFeedback,
 }: {
-  group: ArtistGroup;
+  candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
   playing: boolean;
   taste: TasteState;
@@ -167,79 +177,58 @@ function ArtistGroupCard({
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
 }) {
+  const currentFeedback = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
+  const isPlaying = currentPreviewMbid === candidate.recording_mbid && playing;
+
   return (
-    <article className="artist-discovery-card">
-      <header className="artist-discovery-head">
-        <div>
-          <p>{group.artist}</p>
-          <span>{group.items.length} track{group.items.length > 1 ? "s" : ""} · swipe inside</span>
-        </div>
-        <b>{scorePercent(group.bestRank)}</b>
-      </header>
-
-      <div className="artist-track-stack" aria-label={`${group.artist} suggestions`}>
-        {group.items.map((candidate) => {
-          const currentFeedback = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
-          const isPlaying = currentPreviewMbid === candidate.recording_mbid && playing;
-          return (
-            <article className="discovery-track-tile" key={candidate.recording_mbid}>
-              <div className="artist-track-copy">
-                <strong>{candidate.title}</strong>
-                <span>{candidate.release || candidate.reason || "Outside your library"}</span>
-              </div>
-
-              <div className="discovery-track-primary-actions">
-                <button
-                  className={isPlaying ? "compact-action compact-action-playing" : "compact-action"}
-                  type="button"
-                  onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
-                  onPointerDown={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
-                  onClick={() => onPlay(candidate)}
-                  title={isPlaying ? "Playing in Waxloom" : "Play in Waxloom"}
-                >
-                  <span className={isPlaying ? "css-pause-mark" : "css-play-mark"} aria-hidden="true" />
-                </button>
-                <button className="compact-action compact-action-add" type="button" onClick={() => onQuickAdd(candidate)} title="Download + add to playlist">+</button>
-              </div>
-
-              <div className="taste-actions" aria-label="Tune recommendations">
-                <button
-                  className={currentFeedback === 1 ? "taste-chip taste-chip-active" : "taste-chip"}
-                  type="button"
-                  onClick={() => onFeedback(candidate, currentFeedback === 1 ? 0 : 1)}
-                  title="More like this"
-                >
-                  Like
-                </button>
-                <button
-                  className={currentFeedback === -1 ? "taste-chip taste-chip-less-active" : "taste-chip"}
-                  type="button"
-                  onClick={() => onFeedback(candidate, currentFeedback === -1 ? 0 : -1)}
-                  title="Show less like this"
-                >
-                  Less
-                </button>
-              </div>
-
-              <small className="track-tile-tags">{candidate.tags?.slice(0, 3).join(" · ") || candidate.source || "recommendation"}</small>
-            </article>
-          );
-        })}
+    <article className="discovery-song-card">
+      <div className="discovery-song-copy">
+        <strong title={candidate.title}>{candidate.title}</strong>
+        <span title={candidate.artist}>{candidate.artist}</span>
       </div>
-
-      <footer className="artist-discovery-foot">
-        <span>Swipe tracks ← →</span>
-        <span>{group.items.length} in this artist tile</span>
-      </footer>
+      <b className="discovery-song-score">{scorePercent(candidate.rank)}</b>
+      <button
+        className={isPlaying ? "compact-action compact-action-playing" : "compact-action"}
+        type="button"
+        onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
+        onPointerDown={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
+        onClick={() => onPlay(candidate)}
+        title={isPlaying ? "Playing in Waxloom" : "Play in Waxloom"}
+        aria-label={isPlaying ? `Playing ${candidate.title}` : `Play ${candidate.title}`}
+      >
+        <span className={isPlaying ? "css-pause-mark" : "css-play-mark"} aria-hidden="true" />
+      </button>
+      <button
+        className="compact-action compact-action-add"
+        type="button"
+        onClick={() => onQuickAdd(candidate)}
+        title="Download + add to playlist"
+        aria-label={`Add ${candidate.title} to playlist`}
+      >+</button>
+      <button
+        className={currentFeedback === 1 ? "taste-chip taste-chip-active" : "taste-chip"}
+        type="button"
+        onClick={() => onFeedback(candidate, currentFeedback === 1 ? 0 : 1)}
+        title="More like this"
+        aria-label={`More like ${candidate.title}`}
+      >Like</button>
+      <button
+        className={currentFeedback === -1 ? "taste-chip taste-chip-less-active" : "taste-chip"}
+        type="button"
+        onClick={() => onFeedback(candidate, currentFeedback === -1 ? 0 : -1)}
+        title="Show less like this"
+        aria-label={`Less like ${candidate.title}`}
+      >Less</button>
     </article>
   );
 }
 
-function DiscoveryRail({
+function DiscoveryShelf({
   eyebrow,
   title,
-  subtitle,
-  groups,
+  items,
+  page,
+  onNextPage,
   currentPreviewMbid,
   playing,
   taste,
@@ -249,8 +238,9 @@ function DiscoveryRail({
 }: {
   eyebrow: string;
   title: string;
-  subtitle: string;
-  groups: ArtistGroup[];
+  items: DiscoveryCandidate[];
+  page: number;
+  onNextPage: () => void;
   currentPreviewMbid: string | null;
   playing: boolean;
   taste: TasteState;
@@ -258,27 +248,34 @@ function DiscoveryRail({
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
 }) {
-  if (groups.length === 0) return null;
-  const railItems = groups.flatMap((group) => group.items);
+  if (items.length === 0) return null;
+  const pageCount = Math.max(1, Math.ceil(items.length / SHELF_PAGE_SIZE));
+  const normalizedPage = page % pageCount;
+  const start = normalizedPage * SHELF_PAGE_SIZE;
+  const visible = items.slice(start, start + SHELF_PAGE_SIZE);
 
   return (
-    <section className="discovery-rail-section">
-      <div className="section-toolbar discovery-rail-toolbar">
+    <section className="discovery-rail-section discovery-track-shelf">
+      <div className="section-toolbar discovery-rail-toolbar discovery-track-toolbar">
         <div>
-          <p className="eyebrow">{eyebrow}</p>
+          <p className="eyebrow">{eyebrow} · {items.length} tracks</p>
           <h2>{title}</h2>
-          <p className="muted">{subtitle}</p>
         </div>
+        {pageCount > 1 && (
+          <button className="secondary-action discovery-more-tracks" type="button" onClick={onNextPage}>
+            More tracks <span>{normalizedPage + 1}/{pageCount}</span>
+          </button>
+        )}
       </div>
-      <div className="artist-discovery-rail" aria-label={`${title} carousel`}>
-        {groups.map((group) => (
-          <ArtistGroupCard
-            key={group.key}
-            group={group}
+      <div className="discovery-track-grid" aria-label={`${title} tracks`}>
+        {visible.map((candidate) => (
+          <DiscoveryTrackCard
+            key={candidate.recording_mbid}
+            candidate={candidate}
             currentPreviewMbid={currentPreviewMbid}
             playing={playing}
             taste={taste}
-            onPlay={(candidate) => onPlayQueue(railItems, candidate)}
+            onPlay={(track) => onPlayQueue(items, track)}
             onQuickAdd={onQuickAdd}
             onFeedback={onFeedback}
           />
@@ -298,6 +295,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const [quickTarget, setQuickTarget] = useState<DiscoveryCandidate | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
+  const [shelfPages, setShelfPages] = useState<Record<ShelfKey, number>>({ closest: 0, underground: 0, deep: 0 });
 
   async function readFeed() {
     try {
@@ -340,27 +338,41 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   }, []);
 
   const rails = useMemo(() => {
-    const groups = groupCandidates(bundle?.external.items ?? [], taste);
-    const closest = groups.slice(0, 10);
-    const used = new Set(closest.map((group) => group.key));
-    const underground = [...groups]
-      .filter((group) => !used.has(group.key) && group.items.some((item) => item.source === "listenbrainz"))
-      .sort((a, b) => b.bestUnderground - a.bestUnderground || b.bestRank - a.bestRank)
-      .slice(0, 10);
-    underground.forEach((group) => used.add(group.key));
-    const deep = groups
-      .filter((group) => !used.has(group.key) && group.items.some((item) => item.source === "musicbrainz_catalog"))
-      .slice(0, 10);
-    return { closest, underground, deep, totalArtists: groups.length };
+    const ranked = activeCandidates(bundle?.external.items ?? [], taste);
+    const used = new Set<string>();
+
+    const closest = fillShelf(ranked, ranked, used);
+    const undergroundPrimary = [...ranked]
+      .filter((candidate) => candidate.source === "listenbrainz")
+      .sort((a, b) => (b.underground + (b.rank + tasteAdjustment(b, taste)) * 0.35) - (a.underground + (a.rank + tasteAdjustment(a, taste)) * 0.35));
+    const underground = fillShelf(undergroundPrimary, ranked, used);
+    const deepPrimary = ranked.filter((candidate) => candidate.source === "musicbrainz_catalog");
+    const deep = fillShelf(deepPrimary, ranked, used);
+
+    return { closest, underground, deep, totalTracks: ranked.length };
   }, [bundle, taste]);
 
   useEffect(() => {
-    const warm = rails.closest.flatMap((group) => group.items.slice(0, 1)).slice(0, 4);
-    const timers = warm.map((candidate, index) => window.setTimeout(() => {
-      api.prefetchYoutubePreview(candidate.artist, candidate.title);
-    }, 300 + index * 650));
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
-  }, [bundle?.rotation_id]);
+    setShelfPages({ closest: 0, underground: 0, deep: 0 });
+  }, [bundle?.rotation_id, bundle?.generated_at]);
+
+  useEffect(() => {
+    const source = bundle?.external.items ?? [];
+    if (source.length === 0) return;
+
+    const seen = new Set<string>();
+    const ordered: DiscoveryCandidate[] = [];
+    for (const candidate of [...rails.closest, ...rails.underground, ...rails.deep, ...source]) {
+      if (seen.has(candidate.recording_mbid)) continue;
+      seen.add(candidate.recording_mbid);
+      ordered.push(candidate);
+    }
+
+    const timer = window.setTimeout(() => {
+      void api.prewarmYoutubePreviews(ordered.slice(0, 60), 2);
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [bundle?.rotation_id, bundle?.generated_at]);
 
   async function requestBackgroundRefresh() {
     setNotice(null);
@@ -425,7 +437,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     setError(null);
     setNotice(null);
     try {
-      const search = await api.youtubeSearch(candidate.artist, candidate.title);
+      const search = await api.youtubeSearch(candidate.artist, candidate.title, undefined, 1);
       const best = search.items[0];
       if (!best || best.score < 80) {
         setQuickTarget(null);
@@ -453,14 +465,18 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const tasteLess = Object.values(taste).filter((entry) => entry.value < 0).length;
   const currentPreviewMbid = player.currentPreview?.recording_mbid ?? null;
 
+  function nextShelfPage(key: ShelfKey) {
+    setShelfPages((current) => ({ ...current, [key]: current[key] + 1 }));
+  }
+
   return (
     <div className="discovery-layout discovery-auto-layout">
       <section className="panel discovery-profile-panel discovery-profile-compact">
         <div className="section-toolbar">
           <div>
             <p className="eyebrow">Always-on Discovery · outside your library</p>
-            <h2>Your feed is prepared before you get here.</h2>
-            <p className="muted">Swipe the shelves like a phone. Tracks stay inside fixed-size artist tiles, previews use the global Waxloom player, and Like/Less tunes future rotations.</p>
+            <h2>Your feed is ready before you arrive.</h2>
+            <p className="muted">Track-first recommendations, diversified across artists. Preview sources warm quietly in the background.</p>
           </div>
           <button className="secondary-action" type="button" onClick={() => void requestBackgroundRefresh()}>Refresh in background</button>
         </div>
@@ -491,11 +507,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
       {bundle && (
         <>
-          <DiscoveryRail
-            eyebrow={`Best matches · ${rails.totalArtists} artists in this rotation`}
+          <DiscoveryShelf
+            eyebrow={`Best matches · ${rails.totalTracks} tracks in this rotation`}
             title="Closest to your collection"
-            subtitle="Swipe artist tiles horizontally. Each tile has its own swipeable track deck."
-            groups={rails.closest}
+            items={rails.closest}
+            page={shelfPages.closest}
+            onNextPage={() => nextShelfPage("closest")}
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
             taste={taste}
@@ -503,11 +520,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onQuickAdd={setQuickTarget}
             onFeedback={updateFeedback}
           />
-          <DiscoveryRail
+          <DiscoveryShelf
             eyebrow="Dig deeper"
             title="More underground"
-            subtitle="Less obvious ListenBrainz matches from the persistent pool."
-            groups={rails.underground}
+            items={rails.underground}
+            page={shelfPages.underground}
+            onNextPage={() => nextShelfPage("underground")}
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
             taste={taste}
@@ -515,11 +533,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onQuickAdd={setQuickTarget}
             onFeedback={updateFeedback}
           />
-          <DiscoveryRail
+          <DiscoveryShelf
             eyebrow="Catalogue exploration"
-            title="Deep cuts from neighbouring artists"
-            subtitle="MusicBrainz catalogue paths reached through AudioMuse neighbours."
-            groups={rails.deep}
+            title="Deep cuts"
+            items={rails.deep}
+            page={shelfPages.deep}
+            onNextPage={() => nextShelfPage("deep")}
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
             taste={taste}
@@ -527,12 +546,6 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onQuickAdd={setQuickTarget}
             onFeedback={updateFeedback}
           />
-
-          <details className="discovery-details">
-            <summary>Feed details</summary>
-            <p>{bundle.profile?.library_tracks ?? 0} tracks · {bundle.profile?.library_albums ?? 0} albums · {bundle.profile?.library_artists ?? 0} artists · {bundle.profile?.representative_seeds ?? 0} diversified anchors.</p>
-            <p>Generated {bundle.generated_at ?? "not yet"} · next background rebuild {bundle.next_refresh_at ?? "pending"} · rotation #{bundle.rotation_id ?? "-"}.</p>
-          </details>
         </>
       )}
 
