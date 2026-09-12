@@ -2,7 +2,6 @@ import type {
   Album,
   Artist,
   AudioMuseSimilarTrack,
-  AutomaticDiscoveryResponse,
   DiscoveryFeedResponse,
   DiscoveryFeedStatus,
   DiscoveryResponse,
@@ -44,16 +43,64 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+const LIBRARY_CACHE_MS = 2 * 60 * 1000;
+
+type CachedPromise<T> = {
+  at: number;
+  promise: Promise<T>;
+};
+
+const albumCache = new Map<string, CachedPromise<ListResponse<Album>>>();
+let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
+
+function albumCacheKey(type: string, size: number, offset: number): string {
+  return `${type}:${size}:${offset}`;
+}
+
+function loadAlbumsCached(type = "newest", size = 80, offset = 0): Promise<ListResponse<Album>> {
+  const key = albumCacheKey(type, size, offset);
+  const existing = albumCache.get(key);
+  if (existing && Date.now() - existing.at < LIBRARY_CACHE_MS) return existing.promise;
+
+  const promise = request<ListResponse<Album>>(
+    `/api/library/albums?type=${encodeURIComponent(type)}&size=${size}&offset=${offset}`,
+  ).catch((error) => {
+    albumCache.delete(key);
+    throw error;
+  });
+  albumCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
+function loadArtistsCached(): Promise<ListResponse<Artist>> {
+  if (artistsCache && Date.now() - artistsCache.at < LIBRARY_CACHE_MS) return artistsCache.promise;
+
+  const promise = request<ListResponse<Artist>>("/api/library/artists").catch((error) => {
+    artistsCache = null;
+    throw error;
+  });
+  artistsCache = { at: Date.now(), promise };
+  return promise;
+}
+
+function warmLibraryNavigation(): void {
+  // Do this after API startup/health, without blocking Home. It makes the first
+  // Albums / Artists navigation hit browser memory instead of waiting on Navidrome.
+  void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
+  void loadArtistsCached().catch(() => undefined);
+}
+
 export const api = {
-  health: () => request<Health>("/api/health"),
+  health: async () => {
+    const value = await request<Health>("/api/health");
+    warmLibraryNavigation();
+    return value;
+  },
   navidromeHealth: () => request<IntegrationHealth>("/api/integrations/navidrome/health"),
   audiomuseHealth: () => request<IntegrationHealth>("/api/integrations/audiomuse/health"),
 
-  albums: (type = "newest", size = 80, offset = 0) =>
-    request<ListResponse<Album>>(
-      `/api/library/albums?type=${encodeURIComponent(type)}&size=${size}&offset=${offset}`,
-    ),
-  artists: () => request<ListResponse<Artist>>("/api/library/artists"),
+  albums: (type = "newest", size = 80, offset = 0) => loadAlbumsCached(type, size, offset),
+  artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
   album: (id: string) => request<Album>(`/api/albums/${encodeURIComponent(id)}`),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
@@ -116,16 +163,10 @@ export const api = {
         result_count: resultCount,
       }),
     }),
-  automaticDiscovery: (refresh = false, count = 80) =>
-    request<AutomaticDiscoveryResponse>(
-      `/api/discovery/automatic?refresh=${refresh ? "true" : "false"}&count=${count}`,
-    ),
   discoveryFeed: () => request<DiscoveryFeedResponse>("/api/discovery/feed"),
   discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
   refreshDiscoveryFeed: () =>
-    request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", {
-      method: "POST",
-    }),
+    request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
   youtubeSearch: (artist: string, title: string, isrc?: string) =>
