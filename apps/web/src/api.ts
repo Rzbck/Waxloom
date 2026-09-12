@@ -45,11 +45,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const LIBRARY_CACHE_MS = 2 * 60 * 1000;
-const PREVIEW_CACHE_MS = 20 * 60 * 1000;
+const PREVIEW_CACHE_MS = 15 * 60 * 1000;
 
-// During Vite development all normal API/audio requests go through :5173.
-// Put cover art on the API origin directly so a fast scroll cannot consume the
-// browser's per-origin HTTP/1 connection pool and delay play/search/import.
 const COVER_MEDIA_ORIGIN =
   typeof window !== "undefined" && window.location.port === "5173"
     ? `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8787`
@@ -100,18 +97,24 @@ function loadArtistsCached(): Promise<ListResponse<Artist>> {
   return promise;
 }
 
-function youtubeKey(artist: string, title: string, isrc?: string): string {
-  return `${artist.trim().toLocaleLowerCase()}\n${title.trim().toLocaleLowerCase()}\n${isrc ?? ""}`;
+function youtubeKey(artist: string, title: string, isrc: string | undefined, limit: number): string {
+  return `${artist.trim().toLocaleLowerCase()}\n${title.trim().toLocaleLowerCase()}\n${isrc ?? ""}\n${limit}`;
 }
 
-function youtubeSearchCached(artist: string, title: string, isrc?: string): Promise<ListResponse<YouTubeCandidate>> {
-  const key = youtubeKey(artist, title, isrc);
+function youtubeSearchCached(
+  artist: string,
+  title: string,
+  isrc?: string,
+  limit = 8,
+): Promise<ListResponse<YouTubeCandidate>> {
+  const safeLimit = Math.max(1, Math.min(8, limit));
+  const key = youtubeKey(artist, title, isrc, safeLimit);
   const existing = youtubeSearchCache.get(key);
   if (existing && Date.now() - existing.at < PREVIEW_CACHE_MS) return existing.promise;
 
   const promise = request<ListResponse<YouTubeCandidate>>("/api/imports/youtube/search", {
     method: "POST",
-    body: JSON.stringify({ artist, title, isrc }),
+    body: JSON.stringify({ artist, title, isrc, limit: safeLimit }),
   }).catch((error) => {
     youtubeSearchCache.delete(key);
     throw error;
@@ -120,10 +123,35 @@ function youtubeSearchCached(artist: string, title: string, isrc?: string): Prom
   return promise;
 }
 
+async function prewarmYoutubePreviews(
+  candidates: Array<Pick<DiscoveryCandidate, "artist" | "title">>,
+  concurrency = 2,
+): Promise<void> {
+  const unique = new Map<string, Pick<DiscoveryCandidate, "artist" | "title">>();
+  for (const candidate of candidates) {
+    const key = `${candidate.artist.trim().toLocaleLowerCase()}\n${candidate.title.trim().toLocaleLowerCase()}`;
+    if (!unique.has(key)) unique.set(key, candidate);
+  }
+
+  const queue = [...unique.values()];
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(3, concurrency, queue.length || 1));
+
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (cursor < queue.length) {
+      const index = cursor;
+      cursor += 1;
+      const candidate = queue[index];
+      if (!candidate) return;
+      await youtubeSearchCached(candidate.artist, candidate.title, undefined, 1).catch(() => undefined);
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+  });
+
+  await Promise.all(workers);
+}
+
 function warmLibraryNavigation(): void {
-  // Warm data only. Cover preloading used to compete with interactive media/API
-  // traffic on first navigation; the browser's native lazy images can fill in
-  // covers independently through COVER_MEDIA_ORIGIN.
   void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
   void loadArtistsCached().catch(() => undefined);
 }
@@ -207,10 +235,11 @@ export const api = {
   }),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
-  youtubeSearch: (artist: string, title: string, isrc?: string) => youtubeSearchCached(artist, title, isrc),
+  youtubeSearch: (artist: string, title: string, isrc?: string, limit = 8) => youtubeSearchCached(artist, title, isrc, limit),
   prefetchYoutubePreview: (artist: string, title: string) => {
-    void youtubeSearchCached(artist, title).catch(() => undefined);
+    void youtubeSearchCached(artist, title, undefined, 1).catch(() => undefined);
   },
+  prewarmYoutubePreviews,
   youtubeImport: (
     artist: string,
     title: string,
@@ -229,8 +258,6 @@ export const api = {
   }),
   scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
 
-  // Keep interactive audio on the normal application origin. In development
-  // this remains on :5173 while covers use the independent :8787 lane.
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
   coverUrl: (coverId?: string, size = 300) => mediaCoverUrl(coverId, size),
 };
