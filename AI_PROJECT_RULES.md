@@ -22,7 +22,10 @@ Waxloom orchestrates multiple services and credentials. A local convenience chan
 **1 active chantier = 1 branch = 1 dedicated worktree.**
 
 - `main` is not a development scratchpad.
-- Never write a new development change directly to `main`.
+- Normal development happens on a dedicated branch/worktree.
+- Do not push/merge to `main` unless the repository owner explicitly instructs it.
+- If the owner explicitly instructs `push/merge to main`, that instruction authorizes promotion even if GitHub branch protection/rulesets are unavailable on the account.
+- Owner authorization never bypasses security gates, required build/test checks, final diff inspection, or non-destructive Git rules.
 - Never let two agents/chantiers write into the same worktree.
 - Never destroy a DIRTY worktree to “clean things up”.
 - No force-push, destructive reset, blind `git clean`, or shared-history rewrite.
@@ -65,9 +68,9 @@ For non-trivial changes:
 4. add a regression check when practical;
 5. run security + syntax/build/tests appropriate to scope;
 6. inspect final diff and tracked files;
-7. publish only the work branch;
-8. user validation happens on the exact candidate SHA;
-9. promotion to `main` is separate and explicit.
+7. publish only the work branch by default;
+8. user validation happens on the exact candidate SHA when runtime/UX behavior is involved;
+9. promotion to `main` is separate and requires explicit owner instruction.
 
 ## End of session
 
