@@ -82,6 +82,7 @@ function Stop-ProcessTree([System.Diagnostics.Process]$Process) {
 
 $uv = Require-Command "uv"
 $npm = Resolve-NpmCommand
+$cmd = Require-Command "cmd.exe"
 
 if (-not (Test-Path (Join-Path $root ".env"))) {
     throw ".env is missing. Run .\scripts\configure.ps1 first."
@@ -148,9 +149,10 @@ try {
     Wait-Http "http://127.0.0.1:8787/api/health" $apiProcess 30
     Write-Host "[Waxloom] API ready: http://127.0.0.1:8787" -ForegroundColor Green
 
+    $npmCommandLine = '"' + $npm.Source + '" run dev -- --host 127.0.0.1 --port 5173'
     $webProcess = Start-Process `
-        -FilePath $npm.Source `
-        -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "5173") `
+        -FilePath $cmd.Source `
+        -ArgumentList @("/d", "/s", "/c", $npmCommandLine) `
         -WorkingDirectory $webRoot `
         -NoNewWindow `
         -PassThru
