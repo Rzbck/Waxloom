@@ -51,13 +51,13 @@ The user interacts with **Waxloom only**. Integrations are plumbing.
 apps/
   api/        Waxloom backend and provider adapters
   web/        Waxloom user interface
-docs/         Architecture and design notes
-scripts/      Development helpers
+docs/         Architecture, handoff, and workflow notes
+scripts/      Development and security helpers
 ```
 
 ## Development status
 
-The initial scaffold is live:
+The initial scaffold includes:
 
 - FastAPI backend;
 - React + TypeScript + Vite frontend;
@@ -65,6 +65,8 @@ The initial scaffold is live:
 - Navidrome/OpenSubsonic client;
 - Navidrome health, playlist listing, and playlist-detail API endpoints;
 - first Waxloom application shell.
+
+Runtime behavior remains candidate-specific until it has been validated on the exact tested SHA.
 
 ## Windows quick start
 
@@ -85,7 +87,7 @@ The Windows configuration helper:
 - detects the local Navidrome installation and `MusicFolder`;
 - reads the AudioMuse plugin URL and API token without printing the token;
 - asks only for the Navidrome account credentials;
-- writes the local `.env` file;
+- writes the local ignored `.env` file;
 - backs up an existing `.env` before replacing it.
 
 Then launch:
@@ -95,6 +97,22 @@ Then launch:
 ```
 
 The development launcher starts the backend and frontend, but **the Waxloom UI is the only user-facing page**.
+
+## Development workflow
+
+Waxloom uses an isolated branch/worktree workflow:
+
+**1 active chantier = 1 branch = 1 dedicated worktree.**
+
+Before modifying the repository, start with [`HANDOFF.md`](HANDOFF.md). Public-repository security rules are blocking and `scripts/security-gate.ps1` must pass before publication.
+
+Relevant documents:
+
+- [`AI_PROJECT_RULES.md`](AI_PROJECT_RULES.md)
+- [`docs/AI_HANDOFF.md`](docs/AI_HANDOFF.md)
+- [`docs/GITHUB_WORKFLOW.md`](docs/GITHUB_WORKFLOW.md)
+- [`docs/LOCAL_MULTI_WORKTREE_POLICY.md`](docs/LOCAL_MULTI_WORKTREE_POLICY.md)
+- [`SECURITY.md`](SECURITY.md)
 
 ## Architecture
 

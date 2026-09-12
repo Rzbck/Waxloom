@@ -1,13 +1,16 @@
 $ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
 
-$root = Split-Path $PSScriptRoot -Parent
-Set-Location $root
+$root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$apiRoot = (Resolve-Path (Join-Path $root "apps\api")).Path
+$webRoot = (Resolve-Path (Join-Path $root "apps\web")).Path
+$webPackage = Join-Path $webRoot "package.json"
 
 function Write-Section([string]$Title) {
     Write-Host ""
-    Write-Host ("=" * 70) -ForegroundColor DarkGray
+    Write-Host ("=" * 72) -ForegroundColor DarkGray
     Write-Host " $Title" -ForegroundColor Cyan
-    Write-Host ("=" * 70) -ForegroundColor DarkGray
+    Write-Host ("=" * 72) -ForegroundColor DarkGray
 }
 
 function Require-Command([string]$Name) {
@@ -19,18 +22,29 @@ function Require-Command([string]$Name) {
 }
 
 function Resolve-NpmCommand {
-    # On Windows, prefer npm.cmd explicitly. PowerShell may otherwise resolve
-    # `npm` to npm.ps1; that wrapper can mangle arguments on some setups.
     $npmCmd = Get-Command "npm.cmd" -ErrorAction SilentlyContinue
-    if ($npmCmd) {
-        return $npmCmd
-    }
+    if ($npmCmd) { return $npmCmd }
 
     $npm = Get-Command "npm" -ErrorAction SilentlyContinue
     if (-not $npm) {
         throw "npm is required but was not found in PATH."
     }
     return $npm
+}
+
+function Invoke-InDirectory {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][scriptblock]$Script
+    )
+
+    Push-Location $Path
+    try {
+        & $Script
+    }
+    finally {
+        Pop-Location
+    }
 }
 
 function Wait-Http([string]$Url, [System.Diagnostics.Process]$Process, [int]$TimeoutSeconds = 30) {
@@ -43,9 +57,7 @@ function Wait-Http([string]$Url, [System.Diagnostics.Process]$Process, [int]$Tim
 
         try {
             $response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 2 -ErrorAction Stop
-            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) {
-                return
-            }
+            if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500) { return }
         }
         catch {
             Start-Sleep -Milliseconds 500
@@ -71,26 +83,44 @@ function Stop-ProcessTree([System.Diagnostics.Process]$Process) {
 $uv = Require-Command "uv"
 $npm = Resolve-NpmCommand
 
-if (-not (Test-Path ".env")) {
+if (-not (Test-Path (Join-Path $root ".env"))) {
     throw ".env is missing. Run .\scripts\configure.ps1 first."
 }
+if (-not (Test-Path $webPackage -PathType Leaf)) {
+    throw "Frontend package.json not found at: $webPackage"
+}
 
-Write-Section "Waxloom dependency check"
-Write-Host "uv  : $($uv.Source)" -ForegroundColor DarkGray
-Write-Host "npm : $($npm.Source)" -ForegroundColor DarkGray
+Write-Section "Waxloom preflight"
+Write-Host "repo : $root" -ForegroundColor DarkGray
+Write-Host "api  : $apiRoot" -ForegroundColor DarkGray
+Write-Host "web  : $webRoot" -ForegroundColor DarkGray
+Write-Host "uv   : $($uv.Source)" -ForegroundColor DarkGray
+Write-Host "npm  : $($npm.Source)" -ForegroundColor DarkGray
+
+$securityGate = Join-Path $root "scripts\security-gate.ps1"
+if (Test-Path $securityGate -PathType Leaf) {
+    Write-Host ""
+    Write-Host "Running public-repository security gate..." -ForegroundColor Yellow
+    & $securityGate
+    if ($LASTEXITCODE -ne 0) {
+        throw "Security gate failed with exit code $LASTEXITCODE"
+    }
+}
 
 Write-Host ""
 Write-Host "Syncing Python dependencies..." -ForegroundColor Yellow
-& $uv.Source sync --project apps/api
+& $uv.Source sync --project $apiRoot
 if ($LASTEXITCODE -ne 0) {
     throw "uv sync failed with exit code $LASTEXITCODE"
 }
 
 Write-Host ""
-Write-Host "Installing web dependencies..." -ForegroundColor Yellow
-& $npm.Source --prefix apps/web install
-if ($LASTEXITCODE -ne 0) {
-    throw "npm install failed with exit code $LASTEXITCODE"
+Write-Host "Installing web dependencies from apps/web..." -ForegroundColor Yellow
+Invoke-InDirectory -Path $webRoot -Script {
+    & $npm.Source install
+    if ($LASTEXITCODE -ne 0) {
+        throw "npm install failed with exit code $LASTEXITCODE"
+    }
 }
 
 $apiProcess = $null
@@ -98,14 +128,14 @@ $webProcess = $null
 
 try {
     Write-Section "Starting Waxloom"
-    Write-Host "All logs stay in THIS terminal." -ForegroundColor Green
+    Write-Host "All service logs stay in THIS terminal." -ForegroundColor Green
     Write-Host "Press Ctrl+C to stop Waxloom cleanly." -ForegroundColor Green
     Write-Host ""
 
     $apiProcess = Start-Process `
         -FilePath $uv.Source `
         -ArgumentList @(
-            "run", "--project", "apps/api",
+            "run", "--project", $apiRoot,
             "uvicorn", "waxloom_api.main:app",
             "--host", "127.0.0.1",
             "--port", "8787"
@@ -118,11 +148,10 @@ try {
     Wait-Http "http://127.0.0.1:8787/api/health" $apiProcess 30
     Write-Host "[Waxloom] API ready: http://127.0.0.1:8787" -ForegroundColor Green
 
-    $npmCommandLine = '"' + $npm.Source + '" --prefix apps/web run dev -- --host 127.0.0.1 --port 5173'
     $webProcess = Start-Process `
-        -FilePath "cmd.exe" `
-        -ArgumentList @("/d", "/s", "/c", $npmCommandLine) `
-        -WorkingDirectory $root `
+        -FilePath $npm.Source `
+        -ArgumentList @("run", "dev", "--", "--host", "127.0.0.1", "--port", "5173") `
+        -WorkingDirectory $webRoot `
         -NoNewWindow `
         -PassThru
 
@@ -134,13 +163,11 @@ try {
         Start-Process "http://127.0.0.1:5173"
     }
     catch {
-        Write-Host "[Waxloom] Could not open the browser automatically." -ForegroundColor Yellow
-        Write-Host "Open http://127.0.0.1:5173 manually." -ForegroundColor Yellow
+        Write-Host "[Waxloom] Browser auto-open failed. Open http://127.0.0.1:5173 manually." -ForegroundColor Yellow
     }
 
     Write-Host ""
     Write-Host "Waxloom is running. Keep this terminal open." -ForegroundColor Green
-    Write-Host ""
 
     while ($true) {
         Start-Sleep -Seconds 1
