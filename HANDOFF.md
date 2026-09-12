@@ -12,7 +12,7 @@ If a new session starts with `HANDOFF`, rebuild the current state from GitHub fi
 4. Read this file, then `AI_PROJECT_RULES.md`, `docs/AI_HANDOFF.md`, `docs/GITHUB_WORKFLOW.md`, and `docs/LOCAL_MULTI_WORKTREE_POLICY.md`.
 5. Inspect the relevant code and tests before editing.
 6. For any candidate-specific test, require `local HEAD == remote branch HEAD == expected candidate SHA` and a CLEAN worktree.
-7. Do not write directly to `main` for development work.
+7. Do not write directly to `main` for normal development work unless the repository owner explicitly instructs a push/merge to `main`.
 
 Permanent rule: **1 active chantier = 1 branch = 1 dedicated worktree**.
 
@@ -33,9 +33,16 @@ Before every commit, push, pull request, release, or promotion:
 9. Provider integrations must keep credentials server-side. The browser must never receive Navidrome passwords, AudioMuse tokens, downloader cookies, or equivalent secrets.
 10. Security gates are fail-closed: unknown provenance, unknown secret status, or an unexpected generated file means **do not push / do not promote**.
 
-### Server-side main protection
+### Main protection / owner authority
 
-Project policy requires `main` to be protected by GitHub branch protection or a repository ruleset before normal promotion begins. Until this is confirmed active, **promotion to `main` is blocked by policy** even if a candidate passes local tests.
+GitHub branch protection or repository rulesets are recommended when the account/plan supports them, but they are **not a promotion blocker** for Waxloom.
+
+The repository owner is the authority for promotion to `main`:
+
+- default behavior: develop on dedicated branches/worktrees and do not push to `main`;
+- if the owner explicitly says to **push/merge to `main`**, that is authorization to perform the promotion even when `main` is unprotected;
+- explicit owner authorization does **not** bypass public-repository security checks, required build/test gates, diff inspection, or non-destructive Git rules;
+- never infer promotion permission from silence, a successful test, or an earlier unrelated instruction.
 
 ## 3. Source of truth / status categories
 
@@ -53,12 +60,13 @@ Code presence, parse success, CI success, or an assistant-authored commit never 
 ## 4. Git / worktree discipline
 
 - `main` is the published/testable line, not a shared development checkout.
-- Development happens on dedicated branches/worktrees.
+- Development normally happens on dedicated branches/worktrees.
 - Two agents/chantiers never write in the same worktree.
 - Never assume the historical repo folder is the active worktree.
 - No destructive reset, force-push, blind clean, or shared-branch rewrite to recover from mistakes.
 - Use revert/new commits for published rollback.
-- Before promotion, re-fetch `main`, verify the candidate is not behind, inspect the final diff, run relevant gates, and require explicit human promotion approval.
+- Before promotion, re-fetch `main`, verify the candidate is not behind, inspect the final diff, run relevant gates, and require explicit owner promotion approval.
+- When the owner explicitly instructs `push/merge to main`, execute that promotion after the required gates rather than blocking on missing GitHub branch protection.
 
 ## 5. Current bootstrap incident / recovery point
 
@@ -71,34 +79,25 @@ Windows configuration already succeeded locally:
 - AudioMuse endpoint and token detected without displaying the token;
 - `.env` generated locally and ignored.
 
-`main@8aab207` is **NOT USER VALIDATED** as a working Waxloom launch. The last observed blocker is frontend dependency installation resolving `package.json` from the repository root instead of `apps/web`.
-
 Recovery branch:
 
 `fix/bootstrap-workflow-security-20260912`
 
-This branch must:
+Bootstrap/runtime qualification has reached USER VALIDATED PASS on Windows for the exact runtime candidate recorded in the PR evidence, including API readiness, UI readiness, browser rendering, and clean Ctrl+C shutdown.
 
-- resolve repository/application paths canonically;
-- run npm from `apps/web` itself, not depend on `--prefix` parsing;
-- keep API/UI logs in the current console;
-- add the blocking public-repository security gate;
-- add durable workflow/worktree/handoff rules;
-- remain unpromoted until exact-head Windows validation passes.
+## 6. Promotion / next chantier
 
-## 6. Exact next validation
+The bootstrap recovery may be promoted when:
 
-Use a dedicated local worktree for `fix/bootstrap-workflow-security-20260912` after inventorying existing worktrees. Require branch/HEAD/CLEAN confirmation, then run:
+1. security gate passes;
+2. required CI/build gates pass;
+3. final diff is inspected;
+4. runtime behavior has the required user validation;
+5. the repository owner explicitly instructs promotion to `main`.
 
-1. `./scripts/security-gate.ps1`
-2. `./scripts/dev.ps1`
-3. confirm API readiness;
-4. confirm Vite UI readiness;
-5. confirm the browser opens Waxloom;
-6. confirm `/api/health` reports without exposing secrets;
-7. stop with `Ctrl+C` and confirm both child processes terminate.
+Missing GitHub branch protection is not a blocker.
 
-A PASS must be attributed to the exact tested SHA. Do not promote based on a PASS from another SHA.
+After promotion, start product work in a new dedicated branch/worktree. The next product tranche is expected to make navigation real and expose the existing Navidrome playlist API in the Waxloom UI.
 
 ## 7. End-of-session handoff rule
 
@@ -106,4 +105,4 @@ When the real next step, blocker, architecture, validation state, or security ru
 
 ## Mental shortcut
 
-`HANDOFF -> fetch -> repo/worktree/branch/HEAD/CLEAN -> security gate -> minimal change -> exact-head test -> evidence -> human validation -> explicit promotion`
+`HANDOFF -> fetch -> repo/worktree/branch/HEAD/CLEAN -> security gate -> minimal change -> exact-head test -> evidence -> explicit owner promotion instruction -> main`
