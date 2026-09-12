@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from waxloom_api import __version__
 from waxloom_api.discovery import DiscoveryService
+from waxloom_api.discovery_feed import DiscoveryFeedEngine
 from waxloom_api.imports import ImportService
 from waxloom_api.providers.audiomuse import AudioMuseClient
 from waxloom_api.providers.listenbrainz import ListenBrainzLabsClient
@@ -77,6 +78,10 @@ class YouTubeImportRequest(BaseModel):
     authorized: bool = False
 
 
+def waxloom_state_dir() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()) / "Waxloom"
+
+
 def navidrome_client() -> NavidromeClient:
     return NavidromeClient(
         settings.navidrome_url,
@@ -94,8 +99,7 @@ def listenbrainz_client() -> ListenBrainzLabsClient:
 
 
 def youtube_provider() -> YouTubeProvider:
-    local_state = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()) / "Waxloom" / "yt-dlp-cache"
-    return YouTubeProvider(cache_dir=local_state)
+    return YouTubeProvider(cache_dir=waxloom_state_dir() / "yt-dlp-cache")
 
 
 def discovery_service() -> DiscoveryService:
@@ -114,6 +118,12 @@ def import_service() -> ImportService:
     )
 
 
+discovery_feed_engine = DiscoveryFeedEngine(
+    service_factory=discovery_service,
+    state_dir=waxloom_state_dir(),
+)
+
+
 def require_navidrome() -> None:
     if not settings.navidrome_username or not settings.navidrome_password:
         raise HTTPException(status_code=503, detail="Navidrome credentials are not configured.")
@@ -126,6 +136,16 @@ async def call_navidrome(coro: Any) -> Any:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Navidrome is unavailable.") from exc
+
+
+@app.on_event("startup")
+async def start_discovery_feed() -> None:
+    await discovery_feed_engine.start()
+
+
+@app.on_event("shutdown")
+async def stop_discovery_feed() -> None:
+    await discovery_feed_engine.stop()
 
 
 @app.get("/api/health")
@@ -213,7 +233,11 @@ async def genres() -> dict[str, object]:
 
 
 @app.get("/api/library/genres/{genre}/songs")
-async def genre_songs(genre: str, count: int = Query(default=100, ge=1, le=500), offset: int = Query(default=0, ge=0)) -> dict[str, object]:
+async def genre_songs(
+    genre: str,
+    count: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
     require_navidrome()
     items = await call_navidrome(navidrome_client().get_songs_by_genre(genre, count=count, offset=offset))
     return {"items": items, "count": len(items)}
@@ -325,6 +349,25 @@ async def automatic_discovery(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+@app.get("/api/discovery/feed")
+async def discovery_feed() -> dict[str, object]:
+    require_navidrome()
+    return discovery_feed_engine.feed()
+
+
+@app.get("/api/discovery/feed/status")
+async def discovery_feed_status() -> dict[str, object]:
+    require_navidrome()
+    return discovery_feed_engine.status()
+
+
+@app.post("/api/discovery/feed/refresh")
+async def refresh_discovery_feed() -> dict[str, object]:
+    require_navidrome()
+    discovery_feed_engine.request_refresh()
+    return {"accepted": True, **discovery_feed_engine.status()}
+
+
 @app.get("/api/imports/youtube/runtime")
 async def youtube_runtime() -> dict[str, object]:
     status = await asyncio.to_thread(youtube_provider().runtime_status)
@@ -354,12 +397,14 @@ async def youtube_import(payload: YouTubeImportRequest) -> dict[str, object]:
             detail="Confirm that you are authorized to save this media before importing it.",
         )
     try:
-        return await import_service().import_youtube(
+        result = await import_service().import_youtube(
             artist=payload.artist,
             title=payload.title,
             source_url=payload.source_url,
             playlist_id=payload.playlist_id,
         )
+        discovery_feed_engine.request_refresh()
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
