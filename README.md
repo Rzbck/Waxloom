@@ -52,11 +52,57 @@ apps/
   api/        Waxloom backend and provider adapters
   web/        Waxloom user interface
 docs/         Architecture and design notes
+scripts/      Development helpers
 ```
 
 ## Development status
 
-Bootstrap in progress.
+The initial scaffold is live:
+
+- FastAPI backend;
+- React + TypeScript + Vite frontend;
+- server-side environment configuration;
+- Navidrome/OpenSubsonic client;
+- Navidrome health, playlist listing, and playlist-detail API endpoints;
+- first Waxloom application shell.
+
+## Windows quick start
+
+Requirements:
+
+- Python 3.12+
+- `uv`
+- Node.js / npm
+
+Clone the repository, then from its root:
+
+```powershell
+Copy-Item .env.example .env
+notepad .env
+```
+
+Set at least:
+
+```text
+NAVIDROME_URL=http://127.0.0.1:4533
+NAVIDROME_USERNAME=your-user
+NAVIDROME_PASSWORD=your-password
+AUDIOMUSE_URL=http://127.0.0.1:8042
+AUDIOMUSE_API_TOKEN=your-token
+MUSIC_LIBRARY_PATH=E:\Music
+```
+
+Then launch:
+
+```powershell
+.\scripts\dev.ps1
+```
+
+The development launcher starts the backend and frontend, but **the Waxloom UI is the only user-facing page**.
+
+## Architecture
+
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Legal note
 
