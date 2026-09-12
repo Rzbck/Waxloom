@@ -11,6 +11,7 @@ import yt_dlp
 from mutagen.easyid3 import EasyID3
 from mutagen.id3 import ID3NoHeaderError
 from rapidfuzz import fuzz
+from yt_dlp.utils import DownloadError
 
 LOW_SIGNAL_KEYWORDS = (
     "cover",
@@ -105,6 +106,12 @@ class YouTubeProvider:
             "ignoreerrors": False,
             "cachedir": str(self.cache_dir),
             "noprogress": True,
+            # Interactive preview/search must fail fast enough that the player can
+            # skip a bad source instead of looking frozen behind YouTube retries.
+            "socket_timeout": 12,
+            "retries": 1,
+            "extractor_retries": 1,
+            "fragment_retries": 1,
         }
         if ffmpeg := _resolve_ffmpeg():
             options["ffmpeg_location"] = str(ffmpeg.parent)
@@ -156,6 +163,16 @@ class YouTubeProvider:
                 score -= 12
         return max(0.0, round(score, 2))
 
+    @staticmethod
+    def _canonical_url(entry: dict[str, Any]) -> str:
+        value = str(entry.get("webpage_url") or entry.get("original_url") or "")
+        if _is_youtube_url(value):
+            return value
+        video_id = str(entry.get("id") or entry.get("url") or "").strip()
+        if re.fullmatch(r"[A-Za-z0-9_-]{6,20}", video_id):
+            return f"https://www.youtube.com/watch?v={video_id}"
+        return ""
+
     def search_candidates(
         self,
         artist: str,
@@ -169,33 +186,37 @@ class YouTubeProvider:
             queries.insert(0, f"{isrc} {artist} {title}")
         queries = list(dict.fromkeys(query.strip() for query in queries if query.strip()))
 
-        options = self._base_options()
-        options.update(
+        # Stage 1 is flat/cheap. Do not ask YouTube to resolve every search hit to
+        # a playback URL because a single sign-in-gated video used to abort the
+        # whole Waxloom request with 502.
+        search_options = self._base_options()
+        search_options.update(
             {
-                "extract_flat": False,
+                "extract_flat": "in_playlist",
                 "skip_download": True,
                 "noplaylist": True,
-                # Prefer a browser-friendly audio-only stream for in-app preview.
-                "format": "bestaudio[ext=m4a]/bestaudio/best",
+                "ignoreerrors": True,
             }
         )
-        candidates: dict[str, dict[str, Any]] = {}
-        with yt_dlp.YoutubeDL(options) as downloader:
+
+        flat: dict[str, dict[str, Any]] = {}
+        with yt_dlp.YoutubeDL(search_options) as downloader:
             for query in queries:
-                payload = downloader.extract_info(
-                    f"ytsearch{max(1, min(search_results, 20))}:{query}",
-                    download=False,
-                )
+                try:
+                    payload = downloader.extract_info(
+                        f"ytsearch{max(1, min(search_results * 2, 20))}:{query}",
+                        download=False,
+                    )
+                except DownloadError:
+                    continue
                 entries = payload.get("entries", []) if isinstance(payload, dict) else []
                 for entry in entries:
                     if not isinstance(entry, dict):
                         continue
-                    url = str(entry.get("webpage_url") or entry.get("original_url") or "")
+                    url = self._canonical_url(entry)
                     candidate_title = str(entry.get("title") or "")
-                    if not url or not candidate_title or not _is_youtube_url(url):
+                    if not url or not candidate_title:
                         continue
-
-                    preview_url = str(entry.get("url") or "")
                     candidate = {
                         "title": candidate_title,
                         "url": url,
@@ -203,16 +224,59 @@ class YouTubeProvider:
                         "channel": entry.get("channel"),
                         "duration": entry.get("duration"),
                         "thumbnail": entry.get("thumbnail"),
-                        "preview_url": preview_url if _is_direct_https_url(preview_url) else None,
-                        "preview_ext": entry.get("ext"),
+                        "preview_url": None,
+                        "preview_ext": None,
                     }
                     candidate["score"] = self._score(artist, title, candidate)
-                    previous = candidates.get(url)
+                    previous = flat.get(url)
                     if previous is None or float(candidate["score"]) > float(previous["score"]):
-                        candidates[url] = candidate
-                if candidates:
+                        flat[url] = candidate
+
+        ranked = sorted(flat.values(), key=lambda item: float(item["score"]), reverse=True)
+        if not ranked:
+            return []
+
+        # Stage 2 resolves only the best candidates. Sign-in/private/age-gated
+        # sources are skipped individually and the search continues to the next
+        # hit rather than failing the whole API call.
+        resolve_options = self._base_options()
+        resolve_options.update(
+            {
+                "extract_flat": False,
+                "skip_download": True,
+                "noplaylist": True,
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
+            }
+        )
+
+        resolved: list[dict[str, Any]] = []
+        with yt_dlp.YoutubeDL(resolve_options) as downloader:
+            for candidate in ranked[: max(search_results * 2, 10)]:
+                try:
+                    entry = downloader.extract_info(str(candidate["url"]), download=False)
+                except (DownloadError, OSError, ValueError):
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                preview_url = str(entry.get("url") or "")
+                if not _is_direct_https_url(preview_url):
+                    continue
+                enriched = {
+                    **candidate,
+                    "title": str(entry.get("title") or candidate["title"]),
+                    "uploader": entry.get("uploader") or candidate.get("uploader"),
+                    "channel": entry.get("channel") or candidate.get("channel"),
+                    "duration": entry.get("duration") or candidate.get("duration"),
+                    "thumbnail": entry.get("thumbnail") or candidate.get("thumbnail"),
+                    "preview_url": preview_url,
+                    "preview_ext": entry.get("ext"),
+                }
+                enriched["score"] = self._score(artist, title, enriched)
+                resolved.append(enriched)
+                if len(resolved) >= search_results:
                     break
-        return sorted(candidates.values(), key=lambda item: float(item["score"]), reverse=True)
+
+        return sorted(resolved, key=lambda item: float(item["score"]), reverse=True)
 
     def download_selected(
         self,
