@@ -198,6 +198,13 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
               <p className="eyebrow">ListenBrainz + MusicBrainz</p>
               <h2>Outside your library</h2>
               <p className="muted">{result.count} candidates · local duplicates removed · underground weight {Math.round(result.underground_weight * 100)}%</p>
+              {result.diagnostics && (
+                <p className="muted discovery-diagnostics">
+                  Seeds {result.diagnostics.resolved_seeds}/{result.diagnostics.requested_seeds} resolved
+                  {result.diagnostics.expanded_seeds > 0 ? ` · +${result.diagnostics.expanded_seeds} AudioMuse anchors` : ""}
+                  {` · ${result.diagnostics.similar_rows} ListenBrainz rows · ${result.diagnostics.unique_external_candidates} unique · ${result.diagnostics.local_duplicates_removed} local removed`}
+                </p>
+              )}
             </div>
           </div>
           {result.warning && <div className="state-card state-card-error">{result.warning}</div>}
@@ -221,7 +228,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
                 </div>
               </article>
             ))}
-            {result.items.length === 0 && <div className="empty-state">No external candidates survived duplicate filtering.</div>}
+            {result.items.length === 0 && <div className="empty-state">No external candidates available for this seed set.</div>}
           </div>
         </section>
       )}
