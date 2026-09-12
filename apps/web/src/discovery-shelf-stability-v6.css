@@ -1,0 +1,29 @@
+/* Keep Discovery shelves spatially stable when More tracks lands on a short final page.
+   The content changes; the sections below do not jump. */
+
+@media (min-width: 1321px) {
+  .discovery-track-shelf .discovery-track-grid {
+    min-height: 170px;
+    align-content: start;
+  }
+}
+
+@media (min-width: 981px) and (max-width: 1320px) {
+  .discovery-track-shelf .discovery-track-grid {
+    min-height: 229px;
+    align-content: start;
+  }
+}
+
+@media (min-width: 821px) and (max-width: 980px) {
+  .discovery-track-shelf .discovery-track-grid {
+    min-height: 347px;
+    align-content: start;
+  }
+}
+
+@media (max-width: 820px) {
+  .discovery-track-shelf .discovery-track-grid {
+    min-height: 0;
+  }
+}
