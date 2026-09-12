@@ -7,6 +7,7 @@ $webRoot = (Resolve-Path (Join-Path $root "apps\web")).Path
 $webPackage = Join-Path $webRoot "package.json"
 $apiVenv = Join-Path $apiRoot ".venv"
 $apiPython = Join-Path $apiVenv "Scripts\python.exe"
+$viteEntry = Join-Path $webRoot "node_modules\vite\bin\vite.js"
 
 function Write-Section([string]$Title) {
     Write-Host ""
@@ -97,7 +98,7 @@ function Stop-ProcessTree([System.Diagnostics.Process]$Process) {
 
 $uv = Require-Command "uv"
 $npm = Resolve-NpmCommand
-$cmd = Require-Command "cmd.exe"
+$node = Require-Command "node.exe"
 $null = Require-Command "git"
 
 if (-not (Test-Path (Join-Path $root ".env"))) {
@@ -113,6 +114,7 @@ Write-Host "api  : $apiRoot" -ForegroundColor DarkGray
 Write-Host "web  : $webRoot" -ForegroundColor DarkGray
 Write-Host "uv   : $($uv.Source)" -ForegroundColor DarkGray
 Write-Host "npm  : $($npm.Source)" -ForegroundColor DarkGray
+Write-Host "node : $($node.Source)" -ForegroundColor DarkGray
 
 Assert-RepositoryClean "initial preflight"
 
@@ -149,6 +151,10 @@ Invoke-InDirectory -Path $webRoot -Script {
     }
 }
 
+if (-not (Test-Path $viteEntry -PathType Leaf)) {
+    throw "Vite entry point not found after npm install: $viteEntry"
+}
+
 Assert-RepositoryClean "dependency bootstrap"
 
 $apiProcess = $null
@@ -175,10 +181,11 @@ try {
     Wait-Http "http://127.0.0.1:8787/api/health" $apiProcess 30
     Write-Host "[Waxloom] API ready: http://127.0.0.1:8787" -ForegroundColor Green
 
-    $npmCommandLine = '"' + $npm.Source + '" run dev -- --host 127.0.0.1 --port 5173'
+    # Run Vite with node.exe directly instead of routing through cmd.exe/npm.cmd.
+    # This avoids cmd.exe quote stripping when npm lives under "Program Files".
     $webProcess = Start-Process `
-        -FilePath $cmd.Source `
-        -ArgumentList @("/d", "/s", "/c", $npmCommandLine) `
+        -FilePath $node.Source `
+        -ArgumentList @(".\node_modules\vite\bin\vite.js", "--host", "127.0.0.1", "--port", "5173") `
         -WorkingDirectory $webRoot `
         -NoNewWindow `
         -PassThru
