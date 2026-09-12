@@ -27,6 +27,25 @@ LOW_SIGNAL_KEYWORDS = (
 )
 
 
+class _QuietInteractiveLogger:
+    """Suppress expected per-candidate yt-dlp noise during interactive search.
+
+    Waxloom deliberately tries several public candidates because some YouTube
+    videos can be private, age-gated or sign-in-gated. Those failures are normal
+    candidate misses, not whole-request errors, so they should not flood the
+    Waxloom terminal while the provider continues to the next source.
+    """
+
+    def debug(self, message: str) -> None:
+        return None
+
+    def warning(self, message: str) -> None:
+        return None
+
+    def error(self, message: str) -> None:
+        return None
+
+
 def _normalize(value: str) -> str:
     value = value.casefold()
     value = re.sub(r"[^\w\s]", " ", value, flags=re.UNICODE)
@@ -196,6 +215,7 @@ class YouTubeProvider:
                 "skip_download": True,
                 "noplaylist": True,
                 "ignoreerrors": True,
+                "logger": _QuietInteractiveLogger(),
             }
         )
 
@@ -246,6 +266,8 @@ class YouTubeProvider:
                 "skip_download": True,
                 "noplaylist": True,
                 "format": "bestaudio[ext=m4a]/bestaudio/best",
+                "ignoreerrors": True,
+                "logger": _QuietInteractiveLogger(),
             }
         )
 
