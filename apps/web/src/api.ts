@@ -1,7 +1,10 @@
 import type {
   Album,
   Artist,
+  AudioMuseSimilarTrack,
+  DiscoveryResponse,
   Health,
+  ImportResult,
   IntegrationHealth,
   ListResponse,
   PlayQueueResponse,
@@ -10,6 +13,8 @@ import type {
   SearchResults,
   Song,
   StarredResults,
+  YouTubeCandidate,
+  YouTubeRuntime,
 } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -39,6 +44,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<Health>("/api/health"),
   navidromeHealth: () => request<IntegrationHealth>("/api/integrations/navidrome/health"),
+  audiomuseHealth: () => request<IntegrationHealth>("/api/integrations/audiomuse/health"),
 
   albums: (type = "newest", size = 80, offset = 0) =>
     request<ListResponse<Album>>(
@@ -93,6 +99,45 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ ids, current, position }),
     }),
+
+  localSimilar: (songId: string, count = 40) =>
+    request<ListResponse<AudioMuseSimilarTrack>>(
+      `/api/discovery/local-similar/${encodeURIComponent(songId)}?count=${count}`,
+    ),
+  discover: (seedSongIds: string[], undergroundWeight = 0.75, resultCount = 50) =>
+    request<DiscoveryResponse>("/api/discovery/external", {
+      method: "POST",
+      body: JSON.stringify({
+        seed_song_ids: seedSongIds,
+        underground_weight: undergroundWeight,
+        result_count: resultCount,
+      }),
+    }),
+
+  youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
+  youtubeSearch: (artist: string, title: string, isrc?: string) =>
+    request<ListResponse<YouTubeCandidate>>("/api/imports/youtube/search", {
+      method: "POST",
+      body: JSON.stringify({ artist, title, isrc }),
+    }),
+  youtubeImport: (
+    artist: string,
+    title: string,
+    sourceUrl: string,
+    playlistId: string | null,
+    authorized: boolean,
+  ) =>
+    request<ImportResult>("/api/imports/youtube", {
+      method: "POST",
+      body: JSON.stringify({
+        artist,
+        title,
+        source_url: sourceUrl,
+        playlist_id: playlistId,
+        authorized,
+      }),
+    }),
+  scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
 
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
   coverUrl: (coverId?: string, size = 300) =>
