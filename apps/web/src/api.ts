@@ -47,6 +47,14 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 const LIBRARY_CACHE_MS = 2 * 60 * 1000;
 const PREVIEW_CACHE_MS = 20 * 60 * 1000;
 
+// During Vite development all normal API/audio requests go through :5173.
+// Put cover art on the API origin directly so a fast scroll cannot consume the
+// browser's per-origin HTTP/1 connection pool and delay play/search/import.
+const COVER_MEDIA_ORIGIN =
+  typeof window !== "undefined" && window.location.port === "5173"
+    ? `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8787`
+    : "";
+
 type CachedPromise<T> = {
   at: number;
   promise: Promise<T>;
@@ -57,17 +65,9 @@ let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
 const youtubeSearchCache = new Map<string, CachedPromise<ListResponse<YouTubeCandidate>>>();
 
 function mediaCoverUrl(coverId?: string, size = 300): string {
-  return coverId ? `/api/media/cover/${encodeURIComponent(coverId)}?size=${size}` : "";
-}
-
-function warmCovers(items: Array<{ coverArt?: string }>, size: number, limit = 18): void {
-  if (typeof Image === "undefined") return;
-  for (const item of items.slice(0, limit)) {
-    if (!item.coverArt) continue;
-    const image = new Image();
-    image.decoding = "async";
-    image.src = mediaCoverUrl(item.coverArt, size);
-  }
+  return coverId
+    ? `${COVER_MEDIA_ORIGIN}/api/media/cover/${encodeURIComponent(coverId)}?size=${size}`
+    : "";
 }
 
 function albumCacheKey(type: string, size: number, offset: number): string {
@@ -121,12 +121,11 @@ function youtubeSearchCached(artist: string, title: string, isrc?: string): Prom
 }
 
 function warmLibraryNavigation(): void {
-  void loadAlbumsCached("newest", 120, 0)
-    .then((payload) => warmCovers(payload.items, 360, 18))
-    .catch(() => undefined);
-  void loadArtistsCached()
-    .then((payload) => warmCovers(payload.items, 260, 24))
-    .catch(() => undefined);
+  // Warm data only. Cover preloading used to compete with interactive media/API
+  // traffic on first navigation; the browser's native lazy images can fill in
+  // covers independently through COVER_MEDIA_ORIGIN.
+  void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
+  void loadArtistsCached().catch(() => undefined);
 }
 
 export const api = {
@@ -230,6 +229,8 @@ export const api = {
   }),
   scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
 
+  // Keep interactive audio on the normal application origin. In development
+  // this remains on :5173 while covers use the independent :8787 lane.
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
   coverUrl: (coverId?: string, size = 300) => mediaCoverUrl(coverId, size),
 };
