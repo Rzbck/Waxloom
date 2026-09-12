@@ -44,6 +44,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const LIBRARY_CACHE_MS = 2 * 60 * 1000;
+const PREVIEW_CACHE_MS = 20 * 60 * 1000;
 
 type CachedPromise<T> = {
   at: number;
@@ -52,6 +53,7 @@ type CachedPromise<T> = {
 
 const albumCache = new Map<string, CachedPromise<ListResponse<Album>>>();
 let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
+const youtubeSearchCache = new Map<string, CachedPromise<ListResponse<YouTubeCandidate>>>();
 
 function mediaCoverUrl(coverId?: string, size = 300): string {
   return coverId ? `/api/media/cover/${encodeURIComponent(coverId)}?size=${size}` : "";
@@ -97,9 +99,27 @@ function loadArtistsCached(): Promise<ListResponse<Artist>> {
   return promise;
 }
 
+function youtubeKey(artist: string, title: string, isrc?: string): string {
+  return `${artist.trim().toLocaleLowerCase()}\n${title.trim().toLocaleLowerCase()}\n${isrc ?? ""}`;
+}
+
+function youtubeSearchCached(artist: string, title: string, isrc?: string): Promise<ListResponse<YouTubeCandidate>> {
+  const key = youtubeKey(artist, title, isrc);
+  const existing = youtubeSearchCache.get(key);
+  if (existing && Date.now() - existing.at < PREVIEW_CACHE_MS) return existing.promise;
+
+  const promise = request<ListResponse<YouTubeCandidate>>("/api/imports/youtube/search", {
+    method: "POST",
+    body: JSON.stringify({ artist, title, isrc }),
+  }).catch((error) => {
+    youtubeSearchCache.delete(key);
+    throw error;
+  });
+  youtubeSearchCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
 function warmLibraryNavigation(): void {
-  // Warm the data and first visible covers without blocking Home. By the time
-  // the user opens Albums / Artists the first screen is usually already local.
   void loadAlbumsCached("newest", 120, 0)
     .then((payload) => warmCovers(payload.items, 360, 18))
     .catch(() => undefined);
@@ -123,27 +143,23 @@ export const api = {
   album: (id: string) => request<Album>(`/api/albums/${encodeURIComponent(id)}`),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
   song: (id: string) => request<Song>(`/api/songs/${encodeURIComponent(id)}`),
-  search: (query: string, count = 40) =>
-    request<SearchResults>(`/api/search?q=${encodeURIComponent(query)}&count=${count}`),
+  search: (query: string, count = 40) => request<SearchResults>(`/api/search?q=${encodeURIComponent(query)}&count=${count}`),
   starred: () => request<StarredResults>("/api/starred"),
-  setStarred: (id: string, starred: boolean) =>
-    request<{ ok: boolean }>("/api/starred", {
-      method: "PUT",
-      body: JSON.stringify({ id, starred }),
-    }),
-  scrobble: (id: string, submission: boolean) =>
-    request<{ ok: boolean }>("/api/scrobble", {
-      method: "POST",
-      body: JSON.stringify({ id, submission }),
-    }),
+  setStarred: (id: string, starred: boolean) => request<{ ok: boolean }>("/api/starred", {
+    method: "PUT",
+    body: JSON.stringify({ id, starred }),
+  }),
+  scrobble: (id: string, submission: boolean) => request<{ ok: boolean }>("/api/scrobble", {
+    method: "POST",
+    body: JSON.stringify({ id, submission }),
+  }),
 
   playlists: () => request<ListResponse<PlaylistSummary>>("/api/playlists"),
   playlist: (id: string) => request<PlaylistDetail>(`/api/playlists/${encodeURIComponent(id)}`),
-  createPlaylist: (name: string, songIds: string[] = []) =>
-    request<{ ok: boolean; playlist?: PlaylistSummary }>("/api/playlists", {
-      method: "POST",
-      body: JSON.stringify({ name, song_ids: songIds }),
-    }),
+  createPlaylist: (name: string, songIds: string[] = []) => request<{ ok: boolean; playlist?: PlaylistSummary }>("/api/playlists", {
+    method: "POST",
+    body: JSON.stringify({ name, song_ids: songIds }),
+  }),
   updatePlaylist: (
     id: string,
     payload: {
@@ -153,62 +169,54 @@ export const api = {
       song_ids_to_add?: string[];
       song_indexes_to_remove?: number[];
     },
-  ) =>
-    request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
-  deletePlaylist: (id: string) =>
-    request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  ) => request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  }),
+  deletePlaylist: (id: string) => request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   playQueue: () => request<PlayQueueResponse>("/api/player/queue"),
-  savePlayQueue: (ids: string[], current: string | null, position = 0) =>
-    request<{ ok: boolean }>("/api/player/queue", {
-      method: "PUT",
-      body: JSON.stringify({ ids, current, position }),
-    }),
+  savePlayQueue: (ids: string[], current: string | null, position = 0) => request<{ ok: boolean }>("/api/player/queue", {
+    method: "PUT",
+    body: JSON.stringify({ ids, current, position }),
+  }),
 
-  localSimilar: (songId: string, count = 40) =>
-    request<ListResponse<AudioMuseSimilarTrack>>(
-      `/api/discovery/local-similar/${encodeURIComponent(songId)}?count=${count}`,
-    ),
-  discover: (seedSongIds: string[], undergroundWeight = 0.75, resultCount = 50) =>
-    request<DiscoveryResponse>("/api/discovery/external", {
-      method: "POST",
-      body: JSON.stringify({
-        seed_song_ids: seedSongIds,
-        underground_weight: undergroundWeight,
-        result_count: resultCount,
-      }),
+  localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack>>(
+    `/api/discovery/local-similar/${encodeURIComponent(songId)}?count=${count}`,
+  ),
+  discover: (seedSongIds: string[], undergroundWeight = 0.75, resultCount = 50) => request<DiscoveryResponse>("/api/discovery/external", {
+    method: "POST",
+    body: JSON.stringify({
+      seed_song_ids: seedSongIds,
+      underground_weight: undergroundWeight,
+      result_count: resultCount,
     }),
+  }),
   discoveryFeed: () => request<DiscoveryFeedResponse>("/api/discovery/feed"),
   discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
-  refreshDiscoveryFeed: () =>
-    request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
+  refreshDiscoveryFeed: () => request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
-  youtubeSearch: (artist: string, title: string, isrc?: string) =>
-    request<ListResponse<YouTubeCandidate>>("/api/imports/youtube/search", {
-      method: "POST",
-      body: JSON.stringify({ artist, title, isrc }),
-    }),
+  youtubeSearch: (artist: string, title: string, isrc?: string) => youtubeSearchCached(artist, title, isrc),
+  prefetchYoutubePreview: (artist: string, title: string) => {
+    void youtubeSearchCached(artist, title).catch(() => undefined);
+  },
   youtubeImport: (
     artist: string,
     title: string,
     sourceUrl: string,
     playlistId: string | null,
     authorized: boolean,
-  ) =>
-    request<ImportResult>("/api/imports/youtube", {
-      method: "POST",
-      body: JSON.stringify({
-        artist,
-        title,
-        source_url: sourceUrl,
-        playlist_id: playlistId,
-        authorized,
-      }),
+  ) => request<ImportResult>("/api/imports/youtube", {
+    method: "POST",
+    body: JSON.stringify({
+      artist,
+      title,
+      source_url: sourceUrl,
+      playlist_id: playlistId,
+      authorized,
     }),
+  }),
   scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
 
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
