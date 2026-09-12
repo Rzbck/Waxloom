@@ -355,9 +355,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   }, [bundle, taste]);
 
   useEffect(() => {
-    const warm = rails.closest
-      .flatMap((group) => group.items.slice(0, 1))
-      .slice(0, 4);
+    const warm = rails.closest.flatMap((group) => group.items.slice(0, 1)).slice(0, 4);
     const timers = warm.map((candidate, index) => window.setTimeout(() => {
       api.prefetchYoutubePreview(candidate.artist, candidate.title);
     }, 300 + index * 650));
@@ -396,7 +394,18 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       writeTaste(next);
       return next;
     });
-    setNotice(value > 0 ? "Taste updated — Waxloom will favor nearby artists and tags." : value < 0 ? "Taste updated — Waxloom will show less from this musical neighbourhood." : "Taste feedback cleared.");
+
+    setNotice(value > 0
+      ? "Taste updated — Waxloom will favor nearby artists and tags."
+      : value < 0
+        ? "Taste updated — Waxloom will show less from this musical neighbourhood."
+        : "Taste feedback cleared.");
+
+    void api.discoveryFeedback(candidate, value)
+      .then(() => readFeed())
+      .catch((caught) => {
+        setError(caught instanceof Error ? caught.message : "Could not persist Discovery feedback.");
+      });
   }
 
   async function addToPlaylist(playlist: PlaylistSummary) {
