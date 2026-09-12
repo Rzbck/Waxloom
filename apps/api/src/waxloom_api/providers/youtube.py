@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 from pathlib import Path
@@ -49,6 +50,28 @@ def _is_youtube_url(value: str) -> bool:
     }
 
 
+def _resolve_ffmpeg() -> Path | None:
+    if explicit := os.environ.get("FFMPEG_PATH"):
+        path = Path(explicit).expanduser()
+        if path.is_file():
+            return path.resolve()
+        if path.is_dir():
+            candidate = path / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+            if candidate.is_file():
+                return candidate.resolve()
+
+    if found := shutil.which("ffmpeg"):
+        return Path(found).resolve()
+
+    candidates = (
+        Path("C:/ffmpeg/bin/ffmpeg.exe"),
+        Path("/usr/bin/ffmpeg"),
+        Path("/usr/local/bin/ffmpeg"),
+        Path("/opt/homebrew/bin/ffmpeg"),
+    )
+    return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+
+
 class YouTubeProvider:
     def __init__(self, *, cache_dir: Path) -> None:
         self.cache_dir = cache_dir
@@ -62,6 +85,8 @@ class YouTubeProvider:
             "cachedir": str(self.cache_dir),
             "noprogress": True,
         }
+        if ffmpeg := _resolve_ffmpeg():
+            options["ffmpeg_location"] = str(ffmpeg.parent)
         for runtime in ("node", "deno", "quickjs", "bun"):
             runtime_path = shutil.which(runtime)
             if runtime_path:
@@ -71,7 +96,7 @@ class YouTubeProvider:
 
     def runtime_status(self) -> dict[str, Any]:
         return {
-            "ffmpeg": bool(shutil.which("ffmpeg")),
+            "ffmpeg": _resolve_ffmpeg() is not None,
             "node": bool(shutil.which("node")),
             "yt_dlp": True,
         }
@@ -166,6 +191,10 @@ class YouTubeProvider:
     ) -> Path:
         if not _is_youtube_url(source_url):
             raise ValueError("Only youtube.com / youtu.be source URLs are accepted.")
+        ffmpeg = _resolve_ffmpeg()
+        if ffmpeg is None:
+            raise RuntimeError("FFmpeg was not found. Configure FFMPEG_PATH or install FFmpeg in PATH.")
+
         output_root = output_root.resolve()
         artist_dir = output_root / _safe_component(artist, "Unknown Artist")
         artist_dir.mkdir(parents=True, exist_ok=True)
