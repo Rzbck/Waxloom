@@ -226,7 +226,8 @@ class YouTubeProvider:
     ) -> list[dict[str, Any]]:
         search_results = max(1, min(search_results, 8))
         cache_key = self._search_key(artist, title, isrc)
-        if cached := self._cached_search(cache_key, search_results):
+        cached = self._cached_search(cache_key, search_results)
+        if cached is not None:
             return cached
 
         queries = [f"{artist} - {title}", f"{artist} {title} official audio"]
