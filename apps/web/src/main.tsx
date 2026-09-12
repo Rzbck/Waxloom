@@ -13,6 +13,7 @@ import "./icons.css";
 import "./mobile.css";
 import "./mobile-hotfix.css";
 import "./discovery-icons-hotfix.css";
+import "./layout-polish-v4.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
