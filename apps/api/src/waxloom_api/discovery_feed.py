@@ -214,7 +214,13 @@ class DiscoveryFeedEngine:
             added = False
             for _, tracks in ordered_groups:
                 if depth < len(tracks):
-                    output.append(self._feedback.annotate(tracks[depth]))
+                    annotated = self._feedback.annotate(tracks[depth])
+                    # Keep all cosmetic/collaboration variants under the same
+                    # visible artist label so the frontend cannot split them back
+                    # into multiple cards after the feed engine grouped them.
+                    lead_artist = str(tracks[0].get("artist") or annotated.get("artist") or "Unknown artist")
+                    annotated["artist"] = lead_artist
+                    output.append(annotated)
                     added = True
                     if len(output) >= self._visible_size:
                         break
