@@ -129,10 +129,11 @@ export type DiscoveryCandidate = {
 };
 
 export type DiscoveryResponse = {
-  seeds: DiscoverySeed[];
+  seeds?: DiscoverySeed[];
   items: DiscoveryCandidate[];
   count: number;
-  underground_weight: number;
+  pool_count?: number;
+  underground_weight?: number;
   warning?: string | null;
   diagnostics?: DiscoveryDiagnostics;
 };
@@ -152,6 +153,31 @@ export type AutomaticDiscoveryResponse = {
   profile: DiscoveryLibraryProfile;
   seeds: Song[];
   external: DiscoveryResponse;
+};
+
+export type DiscoveryFeedResponse = {
+  status: "starting" | "warming" | "refreshing" | "ready" | "error" | string;
+  generated_at: string | null;
+  next_refresh_at: string | null;
+  rotation_id: number | null;
+  rotation_seconds?: number;
+  profile: DiscoveryLibraryProfile | null;
+  seeds: Song[];
+  external: DiscoveryResponse;
+  error?: string | null;
+};
+
+export type DiscoveryFeedStatus = {
+  status: string;
+  has_snapshot: boolean;
+  candidate_pool: number;
+  generated_at: string | null;
+  last_started_at: string | null;
+  last_completed_at: string | null;
+  next_refresh_at: string | null;
+  refresh_hours: number;
+  rotation_minutes: number;
+  error?: string | null;
 };
 
 export type AudioMuseSimilarTrack = {
