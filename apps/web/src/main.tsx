@@ -6,6 +6,7 @@ import { PlayerProvider } from "./Player";
 import "./styles.css";
 import "./performance.css";
 import "./discovery-auto.css";
+import "./discovery-v2.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
