@@ -32,6 +32,7 @@ type WeightedSong = { song: Song; score: number };
 
 const CACHE_MS = 10 * 60 * 1000;
 let discoveryCache: { at: number; value: AutomaticDiscovery } | null = null;
+let discoveryInFlight: Promise<AutomaticDiscovery> | null = null;
 
 function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
@@ -141,6 +142,23 @@ async function buildAutomaticDiscovery(currentSong: Song | null): Promise<Automa
   };
 }
 
+async function getAutomaticDiscovery(currentSong: Song | null, force = false): Promise<AutomaticDiscovery> {
+  if (!force && discoveryCache && Date.now() - discoveryCache.at < CACHE_MS) {
+    return discoveryCache.value;
+  }
+  if (!force && discoveryInFlight) return discoveryInFlight;
+
+  const job = buildAutomaticDiscovery(currentSong);
+  discoveryInFlight = job;
+  try {
+    const value = await job;
+    discoveryCache = { at: Date.now(), value };
+    return value;
+  } finally {
+    if (discoveryInFlight === job) discoveryInFlight = null;
+  }
+}
+
 function RecommendationCard({
   candidate,
   onImportCandidate,
@@ -217,12 +235,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     setLoading(true);
     setError(null);
     try {
-      if (!force && discoveryCache && Date.now() - discoveryCache.at < CACHE_MS) {
-        setBundle(discoveryCache.value);
-        return;
-      }
-      const value = await buildAutomaticDiscovery(player.currentSong ?? null);
-      discoveryCache = { at: Date.now(), value };
+      const value = await getAutomaticDiscovery(player.currentSong ?? null, force);
       setBundle(value);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Automatic discovery failed.");
