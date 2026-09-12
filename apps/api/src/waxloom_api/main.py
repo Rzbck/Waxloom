@@ -64,6 +64,14 @@ class DiscoveryRequest(BaseModel):
     underground_weight: float = Field(default=0.75, ge=0.0, le=1.0)
 
 
+class DiscoveryFeedbackRequest(BaseModel):
+    recording_mbid: str = Field(min_length=1, max_length=64)
+    artist: str = Field(min_length=1, max_length=300)
+    title: str = Field(min_length=1, max_length=300)
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    value: int = Field(ge=-1, le=1)
+
+
 class YouTubeSearchRequest(BaseModel):
     artist: str = Field(min_length=1, max_length=300)
     title: str = Field(min_length=1, max_length=300)
@@ -366,6 +374,17 @@ async def refresh_discovery_feed() -> dict[str, object]:
     require_navidrome()
     discovery_feed_engine.request_refresh()
     return {"accepted": True, **discovery_feed_engine.status()}
+
+
+@app.post("/api/discovery/feedback")
+async def discovery_feedback(payload: DiscoveryFeedbackRequest) -> dict[str, object]:
+    return discovery_feed_engine.record_feedback(
+        recording_mbid=payload.recording_mbid,
+        artist=payload.artist,
+        title=payload.title,
+        tags=payload.tags,
+        value=payload.value,
+    )
 
 
 @app.get("/api/imports/youtube/runtime")
