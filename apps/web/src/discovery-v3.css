@@ -1,0 +1,63 @@
+/* Discovery v3: phone-like horizontal artist carousel with a vertical track
+   stack inside each fixed-size artist card. The outer page never expands when
+   an artist has many recommendations. */
+
+.artist-discovery-card {
+  height: 340px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.artist-track-stack {
+  display: grid;
+  grid-auto-flow: row;
+  grid-auto-rows: minmax(118px, auto);
+  gap: 8px;
+  min-width: 0;
+  min-height: 0;
+  padding-right: 3px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-snap-type: y proximity;
+  scrollbar-width: none;
+  touch-action: pan-y;
+  overscroll-behavior-y: auto;
+}
+
+.artist-track-stack::-webkit-scrollbar {
+  display: none;
+}
+
+.discovery-track-tile {
+  min-width: 0;
+  width: 100%;
+  min-height: 118px;
+  scroll-snap-align: start;
+}
+
+/* Previous copy said "swipe inside" because tracks used to be horizontal.
+   Keep the JSX stable while making the visual instruction match the new UX. */
+.artist-discovery-head span {
+  font-size: 0;
+}
+
+.artist-discovery-head span::after {
+  content: "tracks · scroll inside";
+  color: #77717f;
+  font-size: .68rem;
+}
+
+.artist-discovery-foot > span:first-child {
+  font-size: 0;
+}
+
+.artist-discovery-foot > span:first-child::after {
+  content: "Scroll tracks ↑ ↓";
+  color: #6e6875;
+  font-size: .61rem;
+}
+
+@media (max-width: 560px) {
+  .artist-discovery-card {
+    height: 326px;
+  }
+}
