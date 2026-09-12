@@ -53,6 +53,20 @@ type CachedPromise<T> = {
 const albumCache = new Map<string, CachedPromise<ListResponse<Album>>>();
 let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
 
+function mediaCoverUrl(coverId?: string, size = 300): string {
+  return coverId ? `/api/media/cover/${encodeURIComponent(coverId)}?size=${size}` : "";
+}
+
+function warmCovers(items: Array<{ coverArt?: string }>, size: number, limit = 18): void {
+  if (typeof Image === "undefined") return;
+  for (const item of items.slice(0, limit)) {
+    if (!item.coverArt) continue;
+    const image = new Image();
+    image.decoding = "async";
+    image.src = mediaCoverUrl(item.coverArt, size);
+  }
+}
+
 function albumCacheKey(type: string, size: number, offset: number): string {
   return `${type}:${size}:${offset}`;
 }
@@ -84,10 +98,14 @@ function loadArtistsCached(): Promise<ListResponse<Artist>> {
 }
 
 function warmLibraryNavigation(): void {
-  // Do this after API startup/health, without blocking Home. It makes the first
-  // Albums / Artists navigation hit browser memory instead of waiting on Navidrome.
-  void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
-  void loadArtistsCached().catch(() => undefined);
+  // Warm the data and first visible covers without blocking Home. By the time
+  // the user opens Albums / Artists the first screen is usually already local.
+  void loadAlbumsCached("newest", 120, 0)
+    .then((payload) => warmCovers(payload.items, 360, 18))
+    .catch(() => undefined);
+  void loadArtistsCached()
+    .then((payload) => warmCovers(payload.items, 260, 24))
+    .catch(() => undefined);
 }
 
 export const api = {
@@ -194,6 +212,5 @@ export const api = {
   scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
 
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
-  coverUrl: (coverId?: string, size = 300) =>
-    coverId ? `/api/media/cover/${encodeURIComponent(coverId)}?size=${size}` : "",
+  coverUrl: (coverId?: string, size = 300) => mediaCoverUrl(coverId, size),
 };
