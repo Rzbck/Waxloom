@@ -1,0 +1,26 @@
+.playlist-seed-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.playlist-seed-row select {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #302f36;
+  border-radius: 10px;
+  color: #ece8f0;
+  background: #111116;
+  outline: none;
+}
+
+.playlist-seed-row select:focus {
+  border-color: #655676;
+}
+
+@media (max-width: 720px) {
+  .playlist-seed-row {
+    grid-template-columns: 1fr;
+  }
+}
