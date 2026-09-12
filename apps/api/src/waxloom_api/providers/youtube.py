@@ -8,6 +8,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yt_dlp
+from mutagen.easyid3 import EasyID3
+from mutagen.id3 import ID3NoHeaderError
 from rapidfuzz import fuzz
 
 LOW_SIGNAL_KEYWORDS = (
@@ -70,6 +72,17 @@ def _resolve_ffmpeg() -> Path | None:
         Path("/opt/homebrew/bin/ffmpeg"),
     )
     return next((candidate.resolve() for candidate in candidates if candidate.is_file()), None)
+
+
+def _write_tags(path: Path, artist: str, title: str) -> None:
+    try:
+        tags = EasyID3(path)
+    except ID3NoHeaderError:
+        tags = EasyID3()
+    tags["artist"] = [artist]
+    tags["title"] = [title]
+    tags["album"] = ["Waxloom Imports"]
+    tags.save(path)
 
 
 class YouTubeProvider:
@@ -191,8 +204,7 @@ class YouTubeProvider:
     ) -> Path:
         if not _is_youtube_url(source_url):
             raise ValueError("Only youtube.com / youtu.be source URLs are accepted.")
-        ffmpeg = _resolve_ffmpeg()
-        if ffmpeg is None:
+        if _resolve_ffmpeg() is None:
             raise RuntimeError("FFmpeg was not found. Configure FFMPEG_PATH or install FFmpeg in PATH.")
 
         output_root = output_root.resolve()
@@ -223,4 +235,6 @@ class YouTubeProvider:
 
         if not resolved_target.exists() or resolved_target.stat().st_size < 100 * 1024:
             raise RuntimeError("Downloaded audio file is missing or unexpectedly small.")
+
+        _write_tags(resolved_target, artist, title)
         return resolved_target
