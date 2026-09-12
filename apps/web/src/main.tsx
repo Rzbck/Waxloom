@@ -10,6 +10,7 @@ import "./discovery-v2.css";
 import "./discovery-v3.css";
 import "./polish.css";
 import "./icons.css";
+import "./mobile.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
