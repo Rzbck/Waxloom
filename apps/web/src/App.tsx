@@ -92,13 +92,13 @@ export default function App() {
   const [playlistError, setPlaylistError] = useState<string | null>(null);
 
   useEffect(() => {
-    void Promise.all([
-      fetchJson<Health>("/api/health").then(setHealth),
-      fetchJson<IntegrationHealth>("/api/integrations/navidrome/health").then(setNavidromeHealth),
-    ]).catch(() => {
-      setHealth(null);
-      setNavidromeHealth({ status: "unavailable", message: "Waxloom API is unavailable." });
-    });
+    void fetchJson<Health>("/api/health")
+      .then(setHealth)
+      .catch(() => setHealth(null));
+
+    void fetchJson<IntegrationHealth>("/api/integrations/navidrome/health")
+      .then(setNavidromeHealth)
+      .catch(() => setNavidromeHealth({ status: "unavailable", message: "Navidrome health check failed." }));
   }, []);
 
   async function loadPlaylists() {
@@ -115,10 +115,11 @@ export default function App() {
     }
   }
 
-  async function openPlaylist(playlist: PlaylistSummary) {
+  async function openPlaylist(playlist: PlaylistSummary, preserveCurrent = false) {
     setPlaylistLoading(true);
     setPlaylistError(null);
-    setSelectedPlaylist(null);
+    if (!preserveCurrent) setSelectedPlaylist(null);
+
     try {
       const detail = await fetchJson<PlaylistDetail>(`/api/playlists/${encodeURIComponent(playlist.id)}`);
       setSelectedPlaylist(detail);
@@ -229,8 +230,13 @@ export default function App() {
                   <button className="secondary-action" type="button" onClick={() => setSelectedPlaylist(null)}>
                     ← All playlists
                   </button>
-                  <button className="secondary-action" type="button" onClick={() => void openPlaylist(selectedPlaylist)}>
-                    Refresh
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => void openPlaylist(selectedPlaylist, true)}
+                    disabled={playlistLoading}
+                  >
+                    {playlistLoading ? "Refreshing…" : "Refresh"}
                   </button>
                 </div>
 
@@ -244,7 +250,6 @@ export default function App() {
                   </div>
                 </article>
 
-                {playlistLoading && <div className="state-card">Loading playlist…</div>}
                 {playlistError && <div className="state-card state-card-error">{playlistError}</div>}
 
                 <div className="track-list" role="table" aria-label={`${selectedPlaylist.name} tracks`}>
@@ -298,6 +303,13 @@ export default function App() {
                   </div>
                 )}
 
+                {playlistError && (
+                  <div className="state-card state-card-error">
+                    <strong>Could not open playlist.</strong>
+                    <span>{playlistError}</span>
+                  </div>
+                )}
+
                 {playlists && playlists.length > 0 && (
                   <div className="playlist-grid">
                     {playlists.map((playlist) => (
@@ -306,6 +318,7 @@ export default function App() {
                         type="button"
                         key={playlist.id}
                         onClick={() => void openPlaylist(playlist)}
+                        disabled={playlistLoading}
                       >
                         <div className="playlist-card-art" aria-hidden="true">
                           {playlist.name.slice(0, 1).toUpperCase()}
