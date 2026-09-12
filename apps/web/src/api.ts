@@ -45,6 +45,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const LIBRARY_CACHE_MS = 2 * 60 * 1000;
+const ALBUM_DETAIL_CACHE_MS = 10 * 60 * 1000;
 const PREVIEW_CACHE_MS = 15 * 60 * 1000;
 
 const COVER_MEDIA_ORIGIN =
@@ -58,6 +59,7 @@ type CachedPromise<T> = {
 };
 
 const albumCache = new Map<string, CachedPromise<ListResponse<Album>>>();
+const albumDetailCache = new Map<string, CachedPromise<Album>>();
 let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
 const youtubeSearchCache = new Map<string, CachedPromise<ListResponse<YouTubeCandidate>>>();
 
@@ -71,6 +73,51 @@ function albumCacheKey(type: string, size: number, offset: number): string {
   return `${type}:${size}:${offset}`;
 }
 
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function loadAlbumDetailCached(id: string): Promise<Album> {
+  const existing = albumDetailCache.get(id);
+  if (existing && Date.now() - existing.at < ALBUM_DETAIL_CACHE_MS) return existing.promise;
+
+  const encoded = encodeURIComponent(id);
+  const promise = request<Album>(`/api/albums/${encoded}`)
+    .catch(async () => {
+      // One short retry absorbs transient Navidrome/OpenSubsonic failures. The
+      // same promise is shared by prewarm, open and Play so we never stampede
+      // one album endpoint with duplicate requests.
+      await sleep(120);
+      return request<Album>(`/api/albums/${encoded}`);
+    })
+    .catch((error) => {
+      albumDetailCache.delete(id);
+      throw error;
+    });
+
+  albumDetailCache.set(id, { at: Date.now(), promise });
+  return promise;
+}
+
+async function prewarmAlbumDetails(albums: Album[], concurrency = 3, limit = 24): Promise<void> {
+  const ids = [...new Set(albums.map((album) => album.id).filter(Boolean))].slice(0, Math.max(1, limit));
+  if (ids.length === 0) return;
+
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(4, concurrency, ids.length));
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (cursor < ids.length) {
+      const index = cursor;
+      cursor += 1;
+      const id = ids[index];
+      if (!id) return;
+      await loadAlbumDetailCached(id).catch(() => undefined);
+      await sleep(35);
+    }
+  });
+  await Promise.all(workers);
+}
+
 function loadAlbumsCached(type = "newest", size = 80, offset = 0): Promise<ListResponse<Album>> {
   const key = albumCacheKey(type, size, offset);
   const existing = albumCache.get(key);
@@ -78,10 +125,20 @@ function loadAlbumsCached(type = "newest", size = 80, offset = 0): Promise<ListR
 
   const promise = request<ListResponse<Album>>(
     `/api/library/albums?type=${encodeURIComponent(type)}&size=${size}&offset=${offset}`,
-  ).catch((error) => {
-    albumCache.delete(key);
-    throw error;
-  });
+  )
+    .then((payload) => {
+      // Home/newest album Play should already have its track list ready before
+      // the user clicks it. Bounded concurrency keeps this invisible warmup
+      // from competing with playback or cover traffic.
+      if (type === "newest" && offset === 0) {
+        void prewarmAlbumDetails(payload.items, 3, 24);
+      }
+      return payload;
+    })
+    .catch((error) => {
+      albumCache.delete(key);
+      throw error;
+    });
   albumCache.set(key, { at: Date.now(), promise });
   return promise;
 }
@@ -144,7 +201,7 @@ async function prewarmYoutubePreviews(
       const candidate = queue[index];
       if (!candidate) return;
       await youtubeSearchCached(candidate.artist, candidate.title, undefined, 1).catch(() => undefined);
-      await new Promise((resolve) => window.setTimeout(resolve, 120));
+      await sleep(120);
     }
   });
 
@@ -168,7 +225,8 @@ export const api = {
   albums: (type = "newest", size = 80, offset = 0) => loadAlbumsCached(type, size, offset),
   artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
-  album: (id: string) => request<Album>(`/api/albums/${encodeURIComponent(id)}`),
+  album: (id: string) => loadAlbumDetailCached(id),
+  prewarmAlbums: (albums: Album[], concurrency = 3, limit = 24) => prewarmAlbumDetails(albums, concurrency, limit),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
   song: (id: string) => request<Song>(`/api/songs/${encodeURIComponent(id)}`),
   search: (query: string, count = 40) => request<SearchResults>(`/api/search?q=${encodeURIComponent(query)}&count=${count}`),
