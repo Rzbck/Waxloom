@@ -50,25 +50,28 @@ For candidate-specific validation require:
 - relevant security/build/test gate;
 - exact SHA recorded in handoff/PR evidence.
 
-A PASS on another SHA does not validate the candidate.
+A PASS on another SHA does not validate the candidate unless the later commits are explicitly classified as documentation-only/non-runtime and the promotion evidence says so.
 
 ## 5. Promotion
 
 Promotion is separate from implementation and testing.
 
+GitHub branch protection/rulesets are recommended but **not required** when the repository/account plan does not provide them.
+
 Before promotion to `main`:
 
-- GitHub `main` protection/ruleset must be active;
 - re-fetch `main` and candidate;
 - candidate must not be behind/diverged unexpectedly;
 - security gate PASS;
-- required build/test gates PASS on exact SHA;
+- required build/test gates PASS on the candidate/runtime-equivalent SHA;
 - user validation completed when UX/runtime behavior is involved;
 - final diff inspected;
 - `docs/AI_HANDOFF.md` current;
-- explicit human promotion approval.
+- **explicit repository-owner instruction to push/merge to `main`**.
 
-No force-push. Prefer fast-forward/squash/merge according to repository policy once protection is active.
+Default behavior is **do not push to `main`**. If the owner explicitly says to push/merge to `main`, perform the promotion after the gates above even if `main` is unprotected.
+
+Owner authorization does not permit force-push, destructive history rewrite, secret publication, or bypassing failed security/build gates.
 
 ## 6. Recovery / rollback
 
