@@ -23,7 +23,7 @@ type ShelfKey = "closest" | "underground" | "deep";
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v2";
 const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SHELF_PAGE_SIZE = 12;
-const SHELF_TARGET_SIZE = 20;
+const SHELF_TARGET_SIZE = 28;
 
 function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
@@ -100,6 +100,7 @@ function fillShelf(
   fallback: DiscoveryCandidate[],
   used: Set<string>,
   target = SHELF_TARGET_SIZE,
+  maxPerArtist = 2,
 ): DiscoveryCandidate[] {
   const output: DiscoveryCandidate[] = [];
   const append = (candidate: DiscoveryCandidate) => {
@@ -107,12 +108,12 @@ function fillShelf(
     output.push(candidate);
   };
 
-  for (const candidate of diversify(primary, 2)) {
+  for (const candidate of diversify(primary, maxPerArtist)) {
     append(candidate);
     if (output.length >= target) break;
   }
   if (output.length < target) {
-    for (const candidate of diversify(fallback, 2)) {
+    for (const candidate of diversify(fallback, Math.max(2, maxPerArtist))) {
       append(candidate);
       if (output.length >= target) break;
     }
@@ -188,7 +189,7 @@ function DiscoveryTrackCard({
       </div>
       <b className="discovery-song-score">{scorePercent(candidate.rank)}</b>
       <button
-        className={isPlaying ? "compact-action compact-action-playing" : "compact-action"}
+        className={isPlaying ? "compact-action compact-action-play compact-action-playing" : "compact-action compact-action-play"}
         type="button"
         onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
         onPointerDown={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
@@ -206,14 +207,14 @@ function DiscoveryTrackCard({
         aria-label={`Add ${candidate.title} to playlist`}
       >+</button>
       <button
-        className={currentFeedback === 1 ? "taste-chip taste-chip-active" : "taste-chip"}
+        className={currentFeedback === 1 ? "taste-chip taste-chip-like taste-chip-active" : "taste-chip taste-chip-like"}
         type="button"
         onClick={() => onFeedback(candidate, currentFeedback === 1 ? 0 : 1)}
         title="More like this"
         aria-label={`More like ${candidate.title}`}
       >Like</button>
       <button
-        className={currentFeedback === -1 ? "taste-chip taste-chip-less-active" : "taste-chip"}
+        className={currentFeedback === -1 ? "taste-chip taste-chip-less taste-chip-less-active" : "taste-chip taste-chip-less"}
         type="button"
         onClick={() => onFeedback(candidate, currentFeedback === -1 ? 0 : -1)}
         title="Show less like this"
@@ -339,15 +340,27 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
   const rails = useMemo(() => {
     const ranked = activeCandidates(bundle?.external.items ?? [], taste);
-    const used = new Set<string>();
 
-    const closest = fillShelf(ranked, ranked, used);
-    const undergroundPrimary = [...ranked]
-      .filter((candidate) => candidate.source === "listenbrainz")
-      .sort((a, b) => (b.underground + (b.rank + tasteAdjustment(b, taste)) * 0.35) - (a.underground + (a.rank + tasteAdjustment(a, taste)) * 0.35));
-    const underground = fillShelf(undergroundPrimary, ranked, used);
+    const closestUsed = new Set<string>();
+    const closest = fillShelf(ranked, ranked, closestUsed, SHELF_TARGET_SIZE, 2);
+
+    // Underground is intentionally built as its own track shelf. It does not
+    // consume the same artist-limited fallback as Closest, otherwise a rotation
+    // dominated by a handful of artists can collapse this shelf to 2–3 tracks.
+    const undergroundPrimary = [...ranked].sort((a, b) => {
+      const aScore = (a.underground ?? 0.5) * 0.78 + (a.rank + tasteAdjustment(a, taste)) * 0.22;
+      const bScore = (b.underground ?? 0.5) * 0.78 + (b.rank + tasteAdjustment(b, taste)) * 0.22;
+      return bScore - aScore;
+    });
+    const undergroundUsed = new Set(closest.slice(0, 4).map((item) => item.recording_mbid));
+    const underground = fillShelf(undergroundPrimary, ranked, undergroundUsed, SHELF_TARGET_SIZE, 2);
+
     const deepPrimary = ranked.filter((candidate) => candidate.source === "musicbrainz_catalog");
-    const deep = fillShelf(deepPrimary, ranked, used);
+    const deepUsed = new Set([
+      ...closest.slice(0, 4).map((item) => item.recording_mbid),
+      ...underground.slice(0, 4).map((item) => item.recording_mbid),
+    ]);
+    const deep = fillShelf(deepPrimary, ranked, deepUsed, 24, 2);
 
     return { closest, underground, deep, totalTracks: ranked.length };
   }, [bundle, taste]);
@@ -521,7 +534,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onFeedback={updateFeedback}
           />
           <DiscoveryShelf
-            eyebrow="Dig deeper"
+            eyebrow="Dig deeper · obscurity weighted"
             title="More underground"
             items={rails.underground}
             page={shelfPages.underground}
