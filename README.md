@@ -74,23 +74,19 @@ Requirements:
 - `uv`
 - Node.js / npm
 
-Clone the repository, then from its root:
+Clone the repository, then from its root run:
 
 ```powershell
-Copy-Item .env.example .env
-notepad .env
+.\scripts\configure.ps1
 ```
 
-Set at least:
+The Windows configuration helper:
 
-```text
-NAVIDROME_URL=http://127.0.0.1:4533
-NAVIDROME_USERNAME=your-user
-NAVIDROME_PASSWORD=your-password
-AUDIOMUSE_URL=http://127.0.0.1:8042
-AUDIOMUSE_API_TOKEN=your-token
-MUSIC_LIBRARY_PATH=E:\Music
-```
+- detects the local Navidrome installation and `MusicFolder`;
+- reads the AudioMuse plugin URL and API token without printing the token;
+- asks only for the Navidrome account credentials;
+- writes the local `.env` file;
+- backs up an existing `.env` before replacing it.
 
 Then launch:
 
