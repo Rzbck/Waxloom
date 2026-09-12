@@ -15,6 +15,9 @@ from typing import Any
 
 from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
+from waxloom_api.youtube_dig import dig_youtube_gems
+
+_FEED_VERSION = 2
 
 
 class DiscoveryFeedEngine:
@@ -75,7 +78,7 @@ class DiscoveryFeedEngine:
             payload = json.loads(self._snapshot_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or payload.get("version") != _FEED_VERSION:
             return
         snapshot = payload.get("snapshot")
         generated_epoch = payload.get("generated_epoch")
@@ -91,7 +94,7 @@ class DiscoveryFeedEngine:
             return
         self._state_dir.mkdir(parents=True, exist_ok=True)
         payload = {
-            "version": 1,
+            "version": _FEED_VERSION,
             "generated_epoch": self._snapshot_epoch,
             "snapshot": self._snapshot,
         }
@@ -174,6 +177,28 @@ class DiscoveryFeedEngine:
                     result_count=self._pool_size,
                     force_refresh=True,
                 )
+
+                # Build a separate low-exposure YouTube pool in the background.
+                # A failure here must never invalidate the normal Discovery feed.
+                try:
+                    gems = await dig_youtube_gems(snapshot, service.navidrome, limit=48)
+                except Exception:
+                    gems = []
+
+                external = snapshot.setdefault("external", {})
+                existing = [item for item in external.get("items") or [] if isinstance(item, dict)]
+                seen = {str(item.get("recording_mbid") or "") for item in existing}
+                for gem in gems:
+                    key = str(gem.get("recording_mbid") or "")
+                    if key and key not in seen:
+                        existing.append(gem)
+                        seen.add(key)
+                external["items"] = existing
+                external["count"] = len(existing)
+                diagnostics = external.setdefault("diagnostics", {})
+                if isinstance(diagnostics, dict):
+                    diagnostics["youtube_dig_candidates"] = len(gems)
+
                 self._snapshot = snapshot
                 self._snapshot_epoch = time.time()
                 self._completed_epoch = self._snapshot_epoch
