@@ -2,6 +2,7 @@ import type {
   Album,
   Artist,
   AudioMuseSimilarTrack,
+  DiscoveryCandidate,
   DiscoveryFeedResponse,
   DiscoveryFeedStatus,
   DiscoveryResponse,
@@ -195,6 +196,16 @@ export const api = {
   discoveryFeed: () => request<DiscoveryFeedResponse>("/api/discovery/feed"),
   discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
   refreshDiscoveryFeed: () => request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
+  discoveryFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => request<{ ok: boolean; likes: number; dislikes: number; total: number }>("/api/discovery/feedback", {
+    method: "POST",
+    body: JSON.stringify({
+      recording_mbid: candidate.recording_mbid,
+      artist: candidate.artist,
+      title: candidate.title,
+      tags: candidate.tags ?? [],
+      value,
+    }),
+  }),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
   youtubeSearch: (artist: string, title: string, isrc?: string) => youtubeSearchCached(artist, title, isrc),
