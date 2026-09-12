@@ -165,8 +165,6 @@ async def navidrome_health() -> dict[str, object]:
 async def audiomuse_health() -> dict[str, object]:
     if not settings.audiomuse_url:
         return {"status": "not_configured"}
-    # AudioMuse has no provider-neutral ping route. Keep this status non-secret and
-    # verify the actual API on the first similarity request.
     return {"status": "configured"}
 
 
@@ -305,6 +303,24 @@ async def external_discovery(payload: DiscoveryRequest) -> dict[str, object]:
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ListenBrainz discovery is unavailable.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/discovery/automatic")
+async def automatic_discovery(
+    refresh: bool = Query(default=False),
+    count: int = Query(default=80, ge=1, le=100),
+) -> dict[str, object]:
+    require_navidrome()
+    try:
+        return await discovery_service().automatic_discovery(
+            result_count=count,
+            underground_weight=settings.discovery_underground_weight,
+            force_refresh=refresh,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Automatic discovery provider is unavailable.") from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
