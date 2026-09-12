@@ -61,7 +61,8 @@ The profile uses the whole Navidrome collection, not primarily playlists:
 - ListenBrainz similarity when available;
 - MusicBrainz catalogue fallback through AudioMuse-neighbour artists;
 - exact local artist/title matches removed;
-- repeated artists grouped so one catalogue cannot flood the page.
+- repeated artists grouped so one catalogue cannot flood the page;
+- artist grouping now canonicalizes accents/punctuation and collaboration suffixes such as `feat`, `ft`, `with`, `vs`, then forces grouped variants to one visible artist label so the frontend cannot split them back into duplicate cards.
 
 Shelves:
 
@@ -69,18 +70,24 @@ Shelves:
 - `More underground`
 - `Deep cuts from neighbouring artists`
 
-## Discovery interaction / visual rule
+## Discovery interaction / compact visual rule
 
-Owner explicitly rejected desktop-style visible left/right scrollbar controls and expanding cards.
+Latest owner feedback explicitly rejected any Discovery content that extends beyond the content width or creates a long technical page.
 
-Permanent interaction rule:
+Permanent rule:
 
-- shelves behave like phone carousels: horizontal swipe/trackpad with scroll-snap and **no visible scrollbar/arrows**;
-- artist cards have fixed height and show the next artist tile peeking at the edge;
-- tracks **inside** an artist card are now a fixed-height **vertical stack** with wheel/touch scrolling up/down; desktop horizontal track swipe was rejected;
-- no `+10 tracks` / expand-down interaction;
-- opening more tracks must never make the page jump vertically;
-- each track tile contains play, quick add-to-playlist/import and taste controls.
+- each shelf fits inside the current Waxloom content width; no off-screen right-side artist strip;
+- at desktop width the strongest four artist groups are shown in a responsive grid row; smaller widths reduce to 3/2/1 columns;
+- background feed rotation supplies fresh groups over time instead of requiring all candidates to be visible at once;
+- artist cards remain fixed-height and compact;
+- tracks inside a card are **single-line compact rows** in a fixed-height vertical wheel/touch stack;
+- track title + play + quick add + taste icons fit on one row;
+- `Like` / `Less` text is removed visually: verified Lucide/Supericons thumb icons remain, tinted green/red within the Waxloom palette;
+- play/add icons use purple/cyan semantic tinting while preserving the dark UI;
+- card footer text such as `Scroll tracks` is removed;
+- provider/release/tag detail is hidden from the compact row instead of growing cards;
+- `Feed details` is removed from normal visual flow; technical feed status remains available through `/api/discovery/feed/status`;
+- no `+N tracks` expand-down interaction and no action may change card/page height.
 
 ## Discovery preview / global player
 
@@ -105,31 +112,30 @@ Important diagnosis: this is primarily **media connection contention**, not a re
 Current architecture:
 
 - FastAPI/Navidrome media proxy is async;
-- yt-dlp work already runs via `asyncio.to_thread`, outside the event loop;
-- in Vite development, normal API/audio stays on the app origin `:5173`;
-- cover images now use the API origin `:8787` directly, giving browser cover traffic a separate per-origin connection pool;
-- cover prewarming was removed from initial Albums/Artists warmup; only library data is preloaded;
-- therefore a fast cover scroll should no longer monopolize the same browser lane used by play/search/import actions.
-
-If Artist browsing is still visually expensive after this lane separation, next structural fix is true grid virtualization/pagination, not more CSS `content-visibility` tweaks.
+- yt-dlp work runs via `asyncio.to_thread`, outside the event loop;
+- normal API/audio stays on the Vite app origin;
+- in local Vite development cover images use the API `:8787` origin directly so cover traffic has a separate browser connection pool;
+- eager cover prewarming is removed; only Albums/Artists data is warmed in advance;
+- if Artist browsing is still visually expensive after lane separation, next structural fix is true grid virtualization/pagination.
 
 ## YouTube preview/source resilience
 
-A runtime test hit a YouTube candidate that returned `Please sign in` and previously caused the entire `/api/imports/youtube/search` request to return `502`.
+A runtime test hit a YouTube candidate that returned `Please sign in`.
 
 Current provider behavior:
 
 - stage 1 uses flat/cheap YouTube search metadata;
 - stage 2 resolves only top candidates to `bestaudio` preview URLs;
 - sign-in/private/age-gated/bad candidates are skipped individually;
+- interactive provider attempts use a quiet logger so expected per-candidate gated failures no longer flood the Waxloom terminal;
 - the provider continues to the next source instead of failing the whole search;
-- interactive retries/timeouts are bounded so one bad YouTube source cannot make the player look frozen.
+- retries/timeouts are bounded so one bad YouTube source cannot make the player look frozen.
 
 Do not automatically ingest browser cookies as a default workaround. Cookie use would be an explicit future opt-in only if genuinely required.
 
 ## Taste feedback / learning
 
-Discovery has `Like` and `Less` actions per candidate.
+Discovery has icon-only Like/Less actions per candidate.
 
 Feedback is private/local to Waxloom:
 
@@ -144,20 +150,29 @@ Feedback is private/local to Waxloom:
 
 The ranking weights are intentionally bounded so likes improve personalization without collapsing Discovery into a narrow feedback bubble.
 
-## Library navigation UX
+## Tailscale runtime requirement
 
-- Albums `newest/120` and full Artists list are preloaded into a short-lived client cache after API health succeeds;
-- cover **data** is no longer eagerly prewarmed because media fetching must never compete with interactive playback;
-- if Artists still blocks under a very large library, next fix is true virtualization/pagination;
-- small album/track play controls use CSS geometry instead of the Unicode play glyph for stable optical centering.
+Owner uses Tailscale and wants Waxloom reachable from the tailnet automatically whenever the app is running.
+
+Current launcher behavior:
+
+- `scripts/dev.ps1` detects `tailscale.exe` and asks `tailscale ip -4` for the active 100.x address;
+- when available, API and Vite bind specifically to the Tailscale interface address, **not** `0.0.0.0`, so Waxloom is not intentionally exposed on the ordinary LAN;
+- Vite receives the detected host through `WAXLOOM_API_HOST` / `WAXLOOM_DEV_HOST` and proxies `/api` to the API on that same Tailscale address;
+- the launcher prints `http://<tailscale-ip>:5173` and opens that URL locally; the same URL can be used from another allowed tailnet device;
+- when Tailscale is absent/down, runtime remains localhost-only on `127.0.0.1`;
+- direct cover lane follows the browser hostname, so the `:8787` cover path remains valid over the tailnet.
+
+If a second tailnet device cannot connect despite the printed 100.x URL, check Windows Firewall/Tailscale ACLs before changing Waxloom binding.
 
 ## Icon system
 
-Owner requested use of the connected icon plugin for the app instead of ad-hoc glyphs.
+Owner requested use of the connected icon plugin instead of ad-hoc glyphs.
 
 - Supericons was used to choose a coherent Lucide outline vocabulary.
-- Current CSS icon theme applies verified Lucide `home`, `disc-album`, `mic-vocal`, `list-music`, `heart`, `sparkles`, `file-music`, `thumbs-up`, and `thumbs-down` assets to navigation/taste controls without adding a runtime dependency.
-- Continue replacing remaining emoji/font-glyph controls with the same Lucide/Supericons vocabulary instead of inventing new icon styles.
+- Current CSS icon theme applies verified Lucide assets to navigation and taste controls without a runtime icon dependency.
+- SVG masks inherit `currentColor`, so icons may be tinted semantically while staying within the Waxloom design palette.
+- Continue replacing remaining emoji/font-glyph controls with the same Lucide/Supericons vocabulary.
 
 ## Imports
 
@@ -180,24 +195,23 @@ PR #4 includes:
 
 - repo public: no `.env`, credentials, cookies, keys, private DBs, media or private library exports in Git;
 - persistent Discovery/taste state lives under local app data, never Git;
-- browser talks only to Waxloom `/api/*` for private integrations except dev-only direct cover-art lane on local `:8787`;
 - `scripts/security-gate.ps1` remains mandatory;
 - 1 active chantier = 1 branch = 1 dedicated worktree;
 - historical `E:\_Project\Waxloom` remains `HOLD_DIRTY` because of old untracked `apps/api/uv.lock`; do not clean/reset merely to continue;
 - no force-push/destructive reset/blind clean.
 
-## Exact next runtime gate — concurrency / Discovery card stack
+## Exact next runtime gate — compact Discovery + Tailscale
 
 1. require security + Windows build PASS on fresh branch HEAD;
 2. fast-forward existing `discovery-imports-20260912` worktree to exact SHA and require CLEAN;
 3. restart Waxloom;
-4. open Artists and scroll aggressively while starting/stopping a **local Navidrome song**; playback controls must stay responsive while cover logs continue;
-5. confirm covers are requested directly from local API media lane and no cover storm blocks normal `/api/*` actions;
-6. open Discovery and confirm outer artist shelves still swipe horizontally;
-7. inside one artist card, use mouse wheel/touch to scroll the track stack **vertically**; card/page height must remain fixed;
-8. play Discovery candidate and verify global player/Next works;
-9. retry a candidate around the previous YouTube sign-in failure; one gated source must not turn the whole search into 502;
-10. verify Lucide/Supericons navigation and Like/Less icons render cleanly;
+4. verify launcher detects Tailscale and prints a `http://100.x.x.x:5173` URL; test that URL from one other allowed tailnet device if convenient;
+5. open Discovery: each shelf must stay within content width with no clipped right-side cards;
+6. verify the page is materially shorter: compact top status, compact cards, one-line tracks, no `Scroll tracks` text and no `Feed details` block;
+7. mouse-wheel inside an artist card and confirm extra tracks scroll inside without changing page/card height;
+8. confirm Like/Less are icon-only and tinted, play/add remain compact;
+9. verify repeated collaboration/name variants collapse into one artist card where applicable;
+10. retry Discovery play around the previous gated YouTube result; expected sign-in candidate failures should be skipped silently and must not become a whole-request 502;
 11. then test one authorized quick add/import path.
 
 ## Rollback
