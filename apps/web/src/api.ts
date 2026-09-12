@@ -1,7 +1,13 @@
 import type {
   Album,
   Artist,
+  AudioMuseSimilarTrack,
+  DiscoveryCandidate,
+  DiscoveryFeedResponse,
+  DiscoveryFeedStatus,
+  DiscoveryResponse,
   Health,
+  ImportResult,
   IntegrationHealth,
   ListResponse,
   PlayQueueResponse,
@@ -10,6 +16,8 @@ import type {
   SearchResults,
   Song,
   StarredResults,
+  YouTubeCandidate,
+  YouTubeRuntime,
 } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -36,40 +44,122 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export const api = {
-  health: () => request<Health>("/api/health"),
-  navidromeHealth: () => request<IntegrationHealth>("/api/integrations/navidrome/health"),
+const LIBRARY_CACHE_MS = 2 * 60 * 1000;
+const PREVIEW_CACHE_MS = 20 * 60 * 1000;
 
-  albums: (type = "newest", size = 80, offset = 0) =>
-    request<ListResponse<Album>>(
-      `/api/library/albums?type=${encodeURIComponent(type)}&size=${size}&offset=${offset}`,
-    ),
-  artists: () => request<ListResponse<Artist>>("/api/library/artists"),
+// During Vite development all normal API/audio requests go through :5173.
+// Put cover art on the API origin directly so a fast scroll cannot consume the
+// browser's per-origin HTTP/1 connection pool and delay play/search/import.
+const COVER_MEDIA_ORIGIN =
+  typeof window !== "undefined" && window.location.port === "5173"
+    ? `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8787`
+    : "";
+
+type CachedPromise<T> = {
+  at: number;
+  promise: Promise<T>;
+};
+
+const albumCache = new Map<string, CachedPromise<ListResponse<Album>>>();
+let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
+const youtubeSearchCache = new Map<string, CachedPromise<ListResponse<YouTubeCandidate>>>();
+
+function mediaCoverUrl(coverId?: string, size = 300): string {
+  return coverId
+    ? `${COVER_MEDIA_ORIGIN}/api/media/cover/${encodeURIComponent(coverId)}?size=${size}`
+    : "";
+}
+
+function albumCacheKey(type: string, size: number, offset: number): string {
+  return `${type}:${size}:${offset}`;
+}
+
+function loadAlbumsCached(type = "newest", size = 80, offset = 0): Promise<ListResponse<Album>> {
+  const key = albumCacheKey(type, size, offset);
+  const existing = albumCache.get(key);
+  if (existing && Date.now() - existing.at < LIBRARY_CACHE_MS) return existing.promise;
+
+  const promise = request<ListResponse<Album>>(
+    `/api/library/albums?type=${encodeURIComponent(type)}&size=${size}&offset=${offset}`,
+  ).catch((error) => {
+    albumCache.delete(key);
+    throw error;
+  });
+  albumCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
+function loadArtistsCached(): Promise<ListResponse<Artist>> {
+  if (artistsCache && Date.now() - artistsCache.at < LIBRARY_CACHE_MS) return artistsCache.promise;
+
+  const promise = request<ListResponse<Artist>>("/api/library/artists").catch((error) => {
+    artistsCache = null;
+    throw error;
+  });
+  artistsCache = { at: Date.now(), promise };
+  return promise;
+}
+
+function youtubeKey(artist: string, title: string, isrc?: string): string {
+  return `${artist.trim().toLocaleLowerCase()}\n${title.trim().toLocaleLowerCase()}\n${isrc ?? ""}`;
+}
+
+function youtubeSearchCached(artist: string, title: string, isrc?: string): Promise<ListResponse<YouTubeCandidate>> {
+  const key = youtubeKey(artist, title, isrc);
+  const existing = youtubeSearchCache.get(key);
+  if (existing && Date.now() - existing.at < PREVIEW_CACHE_MS) return existing.promise;
+
+  const promise = request<ListResponse<YouTubeCandidate>>("/api/imports/youtube/search", {
+    method: "POST",
+    body: JSON.stringify({ artist, title, isrc }),
+  }).catch((error) => {
+    youtubeSearchCache.delete(key);
+    throw error;
+  });
+  youtubeSearchCache.set(key, { at: Date.now(), promise });
+  return promise;
+}
+
+function warmLibraryNavigation(): void {
+  // Warm data only. Cover preloading used to compete with interactive media/API
+  // traffic on first navigation; the browser's native lazy images can fill in
+  // covers independently through COVER_MEDIA_ORIGIN.
+  void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
+  void loadArtistsCached().catch(() => undefined);
+}
+
+export const api = {
+  health: async () => {
+    const value = await request<Health>("/api/health");
+    warmLibraryNavigation();
+    return value;
+  },
+  navidromeHealth: () => request<IntegrationHealth>("/api/integrations/navidrome/health"),
+  audiomuseHealth: () => request<IntegrationHealth>("/api/integrations/audiomuse/health"),
+
+  albums: (type = "newest", size = 80, offset = 0) => loadAlbumsCached(type, size, offset),
+  artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
   album: (id: string) => request<Album>(`/api/albums/${encodeURIComponent(id)}`),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
   song: (id: string) => request<Song>(`/api/songs/${encodeURIComponent(id)}`),
-  search: (query: string, count = 40) =>
-    request<SearchResults>(`/api/search?q=${encodeURIComponent(query)}&count=${count}`),
+  search: (query: string, count = 40) => request<SearchResults>(`/api/search?q=${encodeURIComponent(query)}&count=${count}`),
   starred: () => request<StarredResults>("/api/starred"),
-  setStarred: (id: string, starred: boolean) =>
-    request<{ ok: boolean }>("/api/starred", {
-      method: "PUT",
-      body: JSON.stringify({ id, starred }),
-    }),
-  scrobble: (id: string, submission: boolean) =>
-    request<{ ok: boolean }>("/api/scrobble", {
-      method: "POST",
-      body: JSON.stringify({ id, submission }),
-    }),
+  setStarred: (id: string, starred: boolean) => request<{ ok: boolean }>("/api/starred", {
+    method: "PUT",
+    body: JSON.stringify({ id, starred }),
+  }),
+  scrobble: (id: string, submission: boolean) => request<{ ok: boolean }>("/api/scrobble", {
+    method: "POST",
+    body: JSON.stringify({ id, submission }),
+  }),
 
   playlists: () => request<ListResponse<PlaylistSummary>>("/api/playlists"),
   playlist: (id: string) => request<PlaylistDetail>(`/api/playlists/${encodeURIComponent(id)}`),
-  createPlaylist: (name: string, songIds: string[] = []) =>
-    request<{ ok: boolean; playlist?: PlaylistSummary }>("/api/playlists", {
-      method: "POST",
-      body: JSON.stringify({ name, song_ids: songIds }),
-    }),
+  createPlaylist: (name: string, songIds: string[] = []) => request<{ ok: boolean; playlist?: PlaylistSummary }>("/api/playlists", {
+    method: "POST",
+    body: JSON.stringify({ name, song_ids: songIds }),
+  }),
   updatePlaylist: (
     id: string,
     payload: {
@@ -79,22 +169,68 @@ export const api = {
       song_ids_to_add?: string[];
       song_indexes_to_remove?: number[];
     },
-  ) =>
-    request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    }),
-  deletePlaylist: (id: string) =>
-    request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  ) => request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  }),
+  deletePlaylist: (id: string) => request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   playQueue: () => request<PlayQueueResponse>("/api/player/queue"),
-  savePlayQueue: (ids: string[], current: string | null, position = 0) =>
-    request<{ ok: boolean }>("/api/player/queue", {
-      method: "PUT",
-      body: JSON.stringify({ ids, current, position }),
-    }),
+  savePlayQueue: (ids: string[], current: string | null, position = 0) => request<{ ok: boolean }>("/api/player/queue", {
+    method: "PUT",
+    body: JSON.stringify({ ids, current, position }),
+  }),
 
+  localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack>>(
+    `/api/discovery/local-similar/${encodeURIComponent(songId)}?count=${count}`,
+  ),
+  discover: (seedSongIds: string[], undergroundWeight = 0.75, resultCount = 50) => request<DiscoveryResponse>("/api/discovery/external", {
+    method: "POST",
+    body: JSON.stringify({
+      seed_song_ids: seedSongIds,
+      underground_weight: undergroundWeight,
+      result_count: resultCount,
+    }),
+  }),
+  discoveryFeed: () => request<DiscoveryFeedResponse>("/api/discovery/feed"),
+  discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
+  refreshDiscoveryFeed: () => request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
+  discoveryFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => request<{ ok: boolean; likes: number; dislikes: number; total: number }>("/api/discovery/feedback", {
+    method: "POST",
+    body: JSON.stringify({
+      recording_mbid: candidate.recording_mbid,
+      artist: candidate.artist,
+      title: candidate.title,
+      tags: candidate.tags ?? [],
+      value,
+    }),
+  }),
+
+  youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
+  youtubeSearch: (artist: string, title: string, isrc?: string) => youtubeSearchCached(artist, title, isrc),
+  prefetchYoutubePreview: (artist: string, title: string) => {
+    void youtubeSearchCached(artist, title).catch(() => undefined);
+  },
+  youtubeImport: (
+    artist: string,
+    title: string,
+    sourceUrl: string,
+    playlistId: string | null,
+    authorized: boolean,
+  ) => request<ImportResult>("/api/imports/youtube", {
+    method: "POST",
+    body: JSON.stringify({
+      artist,
+      title,
+      source_url: sourceUrl,
+      playlist_id: playlistId,
+      authorized,
+    }),
+  }),
+  scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
+
+  // Keep interactive audio on the normal application origin. In development
+  // this remains on :5173 while covers use the independent :8787 lane.
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
-  coverUrl: (coverId?: string, size = 300) =>
-    coverId ? `/api/media/cover/${encodeURIComponent(coverId)}?size=${size}` : "",
+  coverUrl: (coverId?: string, size = 300) => mediaCoverUrl(coverId, size),
 };

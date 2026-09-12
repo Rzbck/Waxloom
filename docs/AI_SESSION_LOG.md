@@ -21,9 +21,22 @@ SECURITY: frontend only calls Waxloom `/api/*`; Navidrome credentials remain ser
 OWNER REQUIREMENT: Waxloom must become the primary Navidrome music client, not a playlist viewer. Player/library/search/favorites/queue must live inside Waxloom before Discovery/Imports are treated as the main differentiator.
 BRANCH: `feat/navidrome-core-player-20260912`, stacked on the playlist branch.
 PR: #3 targeting `feat/navidrome-playlists-ui-20260912`.
-IMPLEMENTATION COMMIT: `2393ef8f808c7f84f66b2ccce12c938b376cf6f3`; later handoff/log commits are documentation-only unless otherwise noted.
-IMPLEMENTED / NOT USER VALIDATED: Home newest/random; Albums browse/detail; Artists browse/detail; global search; Favorites; playlist CRUD/add/remove; server-side stream + cover proxy; global audio player; seek/volume/prev/next/shuffle/repeat; persistent Navidrome queue; scrobble now-playing/submission.
-AUTOMATED GATE PASS ON IMPLEMENTATION COMMIT: security, PowerShell parse, Python API install/compile/import, npm install, React/TypeScript/Vite production build, direct Node/Vite HTTP smoke.
+IMPLEMENTATION COMMIT: `2393ef8f808c7f84f66b2ccce12c938b376cf6f3`.
+IMPLEMENTED: Home newest/random; Albums browse/detail; Artists browse/detail; global search; Favorites; playlist CRUD/add/remove; server-side stream + cover proxy; global audio player; seek/volume/prev/next/shuffle/repeat; persistent Navidrome queue; scrobble now-playing/submission.
+AUTOMATED GATE PASS: security, PowerShell parse, Python API install/compile/import, npm install, React/TypeScript/Vite production build, direct Node/Vite HTTP smoke.
+USER VALIDATED: owner tested the core player and explicitly said to keep it as the base.
+BUG REPORTED: Home `Shuffle something` repeatedly started the same track because it used index 0 of one startup random batch.
 SECURITY: browser never receives Navidrome password/auth parameters; stream/cover remain server-side proxied.
-SCOPE BOUNDARY: admin/users, shares, radio management, podcasts, bookmarks/audiobooks, jukebox hardware, smart-playlist authoring remain separate parity tranches; see `docs/NAVIDROME_CORE_SCOPE.md`.
-NEXT: exact-head real-library runtime gate for PR #3, then continue immediately with Waxloom Discovery/AudioMuse/Imports rather than stopping at Navidrome parity.
+
+### 2026-09-12 — Discovery + AudioMuse + authorized imports
+BRANCH: `feat/discovery-imports-20260912`, stacked on the user-validated core-player branch.
+PR: #4 targeting `feat/navidrome-core-player-20260912`.
+SHUFFLE FIX: every click now requests a fresh Navidrome random batch and selects a random start index, avoiding the current song when possible.
+USER VALIDATED: shuffle variation now works correctly on the PR #4 runtime.
+USER VALIDATED: AudioMuse local sonic-neighbour cards render/populate correctly.
+RUNTIME BLOCKER: external discovery returned HTTP 200 but `0 candidates`; therefore API transport worked but seed resolution / ListenBrainz similarity coverage / duplicate filtering needed diagnosis.
+DISCOVERY HARDENING: prefer Labs `acr-lookup` before fuzzy recording-search; grouped similar-recordings fallback to per-seed lookup; sparse coverage fans out through limited AudioMuse local neighbours as extra MusicBrainz anchors; visible diagnostics show resolved seeds / expanded anchors / ListenBrainz rows / unique candidates / local duplicate removals; local duplicate checks made concurrent.
+UI PERF FOLLOW-UP: entering Artists causes many cover requests; existing browser lazy-loading remains, and PR #4 now adds CSS rendering containment/content-visibility to reduce off-screen layout/paint cost for large artist/media grids.
+IMPORTS IMPLEMENTED / NOT USER VALIDATED: ShazamDownloader-derived yt-dlp/RapidFuzz source search; explicit source selection; authorized-media confirmation enforced server-side; safe library-contained output; FFmpeg resolution; MP3 extraction; deterministic ID3 artist/title/album tags; Navidrome scan/poll; optional playlist insertion.
+SECURITY: no auto-download, no non-YouTube source URL, no download without `authorized=true`, no absolute library path returned, no provider secret exposed to browser.
+NEXT TEST: exact-head Windows worktree; rerun the seed set that returned 0 and read the new diagnostics; try 10–30 playlist seeds if needed; verify Artists navigation remains responsive while covers load; then continue to YouTube candidate search/import if outside-library candidates appear.

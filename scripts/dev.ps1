@@ -35,6 +35,38 @@ function Resolve-NpmCommand {
     return $npm
 }
 
+function Resolve-TailscaleCommand {
+    $command = Get-Command "tailscale.exe" -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+
+    $command = Get-Command "tailscale" -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+
+    if ($env:ProgramFiles) {
+        $candidate = Join-Path $env:ProgramFiles "Tailscale\tailscale.exe"
+        if (Test-Path $candidate -PathType Leaf) { return $candidate }
+    }
+
+    return $null
+}
+
+function Get-TailscaleIPv4([string]$TailscaleExe) {
+    if (-not $TailscaleExe) { return $null }
+    try {
+        $lines = @(& $TailscaleExe ip -4 2>$null)
+        foreach ($line in $lines) {
+            $candidate = "$line".Trim()
+            if ($candidate -match '^100\.(?:\d{1,3}\.){2}\d{1,3}$') {
+                return $candidate
+            }
+        }
+    }
+    catch {
+        # Tailscale is optional. Localhost remains the safe fallback.
+    }
+    return $null
+}
+
 function Invoke-InDirectory {
     param(
         [Parameter(Mandatory)][string]$Path,
@@ -100,6 +132,17 @@ $uv = Require-Command "uv"
 $npm = Resolve-NpmCommand
 $node = Require-Command "node.exe"
 $null = Require-Command "git"
+$tailscaleExe = Resolve-TailscaleCommand
+$tailscaleIp = Get-TailscaleIPv4 $tailscaleExe
+$serviceHost = if ($tailscaleIp) { $tailscaleIp } else { "127.0.0.1" }
+$apiUrl = "http://${serviceHost}:8787"
+$uiUrl = "http://${serviceHost}:5173"
+
+# Vite reads this for its API proxy target. Binding to the Tailscale interface
+# only (rather than 0.0.0.0) keeps Waxloom off the ordinary LAN while making it
+# reachable from the user's tailnet. Without Tailscale, everything stays local.
+$env:WAXLOOM_API_HOST = $serviceHost
+$env:WAXLOOM_DEV_HOST = $serviceHost
 
 if (-not (Test-Path (Join-Path $root ".env"))) {
     throw ".env is missing. Run .\scripts\configure.ps1 first."
@@ -115,6 +158,12 @@ Write-Host "web  : $webRoot" -ForegroundColor DarkGray
 Write-Host "uv   : $($uv.Source)" -ForegroundColor DarkGray
 Write-Host "npm  : $($npm.Source)" -ForegroundColor DarkGray
 Write-Host "node : $($node.Source)" -ForegroundColor DarkGray
+if ($tailscaleIp) {
+    Write-Host "tail : $tailscaleIp (Waxloom will listen on the Tailscale interface)" -ForegroundColor Magenta
+}
+else {
+    Write-Host "tail : not detected; localhost only" -ForegroundColor DarkGray
+}
 
 Assert-RepositoryClean "initial preflight"
 
@@ -170,7 +219,7 @@ try {
         -FilePath $apiPython `
         -ArgumentList @(
             "-m", "uvicorn", "waxloom_api.main:app",
-            "--host", "127.0.0.1",
+            "--host", $serviceHost,
             "--port", "8787"
         ) `
         -WorkingDirectory $root `
@@ -178,27 +227,32 @@ try {
         -PassThru
 
     Write-Host "[Waxloom] Waiting for API..." -ForegroundColor DarkGray
-    Wait-Http "http://127.0.0.1:8787/api/health" $apiProcess 30
-    Write-Host "[Waxloom] API ready: http://127.0.0.1:8787" -ForegroundColor Green
+    Wait-Http "$apiUrl/api/health" $apiProcess 30
+    Write-Host "[Waxloom] API ready: $apiUrl" -ForegroundColor Green
 
     # Run Vite with node.exe directly instead of routing through cmd.exe/npm.cmd.
     # This avoids cmd.exe quote stripping when npm lives under "Program Files".
     $webProcess = Start-Process `
         -FilePath $node.Source `
-        -ArgumentList @(".\node_modules\vite\bin\vite.js", "--host", "127.0.0.1", "--port", "5173") `
+        -ArgumentList @(".\node_modules\vite\bin\vite.js", "--host", $serviceHost, "--port", "5173") `
         -WorkingDirectory $webRoot `
         -NoNewWindow `
         -PassThru
 
     Write-Host "[Waxloom] Waiting for UI..." -ForegroundColor DarkGray
-    Wait-Http "http://127.0.0.1:5173" $webProcess 45
-    Write-Host "[Waxloom] UI ready : http://127.0.0.1:5173" -ForegroundColor Green
+    Wait-Http $uiUrl $webProcess 45
+    Write-Host "[Waxloom] UI ready : $uiUrl" -ForegroundColor Green
+
+    if ($tailscaleIp) {
+        Write-Host "[Waxloom] Tailscale: $uiUrl" -ForegroundColor Magenta
+        Write-Host "[Waxloom] Open this same URL from any device allowed by your tailnet ACLs." -ForegroundColor DarkGray
+    }
 
     try {
-        Start-Process "http://127.0.0.1:5173"
+        Start-Process $uiUrl
     }
     catch {
-        Write-Host "[Waxloom] Browser auto-open failed. Open http://127.0.0.1:5173 manually." -ForegroundColor Yellow
+        Write-Host "[Waxloom] Browser auto-open failed. Open $uiUrl manually." -ForegroundColor Yellow
     }
 
     Write-Host ""

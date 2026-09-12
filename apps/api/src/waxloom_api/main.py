@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import os
+import tempfile
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -9,7 +13,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from waxloom_api import __version__
+from waxloom_api.discovery import DiscoveryService
+from waxloom_api.discovery_feed import DiscoveryFeedEngine
+from waxloom_api.imports import ImportService
+from waxloom_api.providers.audiomuse import AudioMuseClient
+from waxloom_api.providers.listenbrainz import ListenBrainzLabsClient
 from waxloom_api.providers.navidrome import NavidromeClient, NavidromeError
+from waxloom_api.providers.youtube import YouTubeProvider
 from waxloom_api.settings import settings
 
 app = FastAPI(
@@ -48,12 +58,78 @@ class PlaylistUpdateRequest(BaseModel):
     song_indexes_to_remove: list[int] = Field(default_factory=list)
 
 
+class DiscoveryRequest(BaseModel):
+    seed_song_ids: list[str] = Field(min_length=1, max_length=30)
+    result_count: int = Field(default=50, ge=1, le=100)
+    underground_weight: float = Field(default=0.75, ge=0.0, le=1.0)
+
+
+class DiscoveryFeedbackRequest(BaseModel):
+    recording_mbid: str = Field(min_length=1, max_length=64)
+    artist: str = Field(min_length=1, max_length=300)
+    title: str = Field(min_length=1, max_length=300)
+    tags: list[str] = Field(default_factory=list, max_length=12)
+    value: int = Field(ge=-1, le=1)
+
+
+class YouTubeSearchRequest(BaseModel):
+    artist: str = Field(min_length=1, max_length=300)
+    title: str = Field(min_length=1, max_length=300)
+    isrc: str | None = Field(default=None, max_length=32)
+
+
+class YouTubeImportRequest(BaseModel):
+    artist: str = Field(min_length=1, max_length=300)
+    title: str = Field(min_length=1, max_length=300)
+    source_url: str = Field(min_length=1, max_length=2000)
+    playlist_id: str | None = None
+    authorized: bool = False
+
+
+def waxloom_state_dir() -> Path:
+    return Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()) / "Waxloom"
+
+
 def navidrome_client() -> NavidromeClient:
     return NavidromeClient(
         settings.navidrome_url,
         settings.navidrome_username,
         settings.navidrome_password,
     )
+
+
+def audiomuse_client() -> AudioMuseClient:
+    return AudioMuseClient(settings.audiomuse_url, settings.audiomuse_api_token)
+
+
+def listenbrainz_client() -> ListenBrainzLabsClient:
+    return ListenBrainzLabsClient(settings.listenbrainz_labs_base_url)
+
+
+def youtube_provider() -> YouTubeProvider:
+    return YouTubeProvider(cache_dir=waxloom_state_dir() / "yt-dlp-cache")
+
+
+def discovery_service() -> DiscoveryService:
+    return DiscoveryService(
+        navidrome=navidrome_client(),
+        listenbrainz=listenbrainz_client(),
+        audiomuse=audiomuse_client(),
+    )
+
+
+def import_service() -> ImportService:
+    return ImportService(
+        navidrome=navidrome_client(),
+        youtube=youtube_provider(),
+        library_root=settings.music_library_path,
+    )
+
+
+discovery_feed_engine = DiscoveryFeedEngine(
+    service_factory=discovery_service,
+    state_dir=waxloom_state_dir(),
+)
 
 
 def require_navidrome() -> None:
@@ -68,6 +144,16 @@ async def call_navidrome(coro: Any) -> Any:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="Navidrome is unavailable.") from exc
+
+
+@app.on_event("startup")
+async def start_discovery_feed() -> None:
+    await discovery_feed_engine.start()
+
+
+@app.on_event("shutdown")
+async def stop_discovery_feed() -> None:
+    await discovery_feed_engine.stop()
 
 
 @app.get("/api/health")
@@ -101,6 +187,13 @@ async def navidrome_health() -> dict[str, object]:
     except Exception as exc:
         return {"status": "unavailable", "message": str(exc)}
     return {"status": "ok"}
+
+
+@app.get("/api/integrations/audiomuse/health")
+async def audiomuse_health() -> dict[str, object]:
+    if not settings.audiomuse_url:
+        return {"status": "not_configured"}
+    return {"status": "configured"}
 
 
 @app.get("/api/library/albums")
@@ -148,7 +241,11 @@ async def genres() -> dict[str, object]:
 
 
 @app.get("/api/library/genres/{genre}/songs")
-async def genre_songs(genre: str, count: int = Query(default=100, ge=1, le=500), offset: int = Query(default=0, ge=0)) -> dict[str, object]:
+async def genre_songs(
+    genre: str,
+    count: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, object]:
     require_navidrome()
     items = await call_navidrome(navidrome_client().get_songs_by_genre(genre, count=count, offset=offset))
     return {"items": items, "count": len(items)}
@@ -215,6 +312,128 @@ async def save_play_queue(payload: PlayQueueRequest) -> dict[str, object]:
         )
     )
     return {"ok": True}
+
+
+@app.get("/api/discovery/local-similar/{song_id}")
+async def local_similar(song_id: str, count: int = Query(default=40, ge=1, le=200)) -> dict[str, object]:
+    require_navidrome()
+    try:
+        items = await discovery_service().local_similar(song_id, count=count)
+    except (httpx.HTTPError, RuntimeError) as exc:
+        raise HTTPException(status_code=502, detail=f"AudioMuse similarity failed: {exc}") from exc
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/discovery/external")
+async def external_discovery(payload: DiscoveryRequest) -> dict[str, object]:
+    require_navidrome()
+    try:
+        return await discovery_service().external_discovery(
+            payload.seed_song_ids,
+            result_count=payload.result_count,
+            underground_weight=payload.underground_weight,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="ListenBrainz discovery is unavailable.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/discovery/automatic")
+async def automatic_discovery(
+    refresh: bool = Query(default=False),
+    count: int = Query(default=80, ge=1, le=100),
+) -> dict[str, object]:
+    require_navidrome()
+    try:
+        return await discovery_service().automatic_discovery(
+            result_count=count,
+            underground_weight=settings.discovery_underground_weight,
+            force_refresh=refresh,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Automatic discovery provider is unavailable.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/api/discovery/feed")
+async def discovery_feed() -> dict[str, object]:
+    require_navidrome()
+    return discovery_feed_engine.feed()
+
+
+@app.get("/api/discovery/feed/status")
+async def discovery_feed_status() -> dict[str, object]:
+    require_navidrome()
+    return discovery_feed_engine.status()
+
+
+@app.post("/api/discovery/feed/refresh")
+async def refresh_discovery_feed() -> dict[str, object]:
+    require_navidrome()
+    discovery_feed_engine.request_refresh()
+    return {"accepted": True, **discovery_feed_engine.status()}
+
+
+@app.post("/api/discovery/feedback")
+async def discovery_feedback(payload: DiscoveryFeedbackRequest) -> dict[str, object]:
+    return discovery_feed_engine.record_feedback(
+        recording_mbid=payload.recording_mbid,
+        artist=payload.artist,
+        title=payload.title,
+        tags=payload.tags,
+        value=payload.value,
+    )
+
+
+@app.get("/api/imports/youtube/runtime")
+async def youtube_runtime() -> dict[str, object]:
+    status = await asyncio.to_thread(youtube_provider().runtime_status)
+    return {"status": status, "library_configured": bool(settings.music_library_path)}
+
+
+@app.post("/api/imports/youtube/search")
+async def youtube_search(payload: YouTubeSearchRequest) -> dict[str, object]:
+    try:
+        items = await asyncio.to_thread(
+            youtube_provider().search_candidates,
+            payload.artist,
+            payload.title,
+            isrc=payload.isrc,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"YouTube search failed: {exc}") from exc
+    return {"items": items, "count": len(items)}
+
+
+@app.post("/api/imports/youtube")
+async def youtube_import(payload: YouTubeImportRequest) -> dict[str, object]:
+    require_navidrome()
+    if not payload.authorized:
+        raise HTTPException(
+            status_code=400,
+            detail="Confirm that you are authorized to save this media before importing it.",
+        )
+    try:
+        result = await import_service().import_youtube(
+            artist=payload.artist,
+            title=payload.title,
+            source_url=payload.source_url,
+            playlist_id=payload.playlist_id,
+        )
+        discovery_feed_engine.request_refresh()
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Import failed: {exc}") from exc
+
+
+@app.get("/api/imports/scan-status")
+async def scan_status() -> dict[str, object]:
+    require_navidrome()
+    return await call_navidrome(navidrome_client().get_scan_status())
 
 
 async def _stream_upstream(

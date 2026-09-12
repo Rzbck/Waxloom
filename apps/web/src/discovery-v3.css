@@ -1,0 +1,301 @@
+/* Discovery v3: dense desktop shelves that stay inside the Waxloom viewport.
+   Artist groups use one responsive row; tracks are compact vertical rows inside
+   each card. No nested horizontal deck, no visible scrollbar instructions and
+   no expanding layout. */
+
+.discovery-auto-layout {
+  gap: 18px;
+}
+
+.discovery-profile-compact {
+  padding: 14px 16px;
+}
+
+.discovery-profile-compact .section-toolbar {
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 0;
+}
+
+.discovery-profile-compact .section-toolbar .muted {
+  display: none;
+}
+
+.discovery-profile-compact h2 {
+  margin: 2px 0 0;
+  font-size: clamp(1.15rem, 1.8vw, 1.55rem);
+}
+
+.discovery-feed-status {
+  margin-top: 8px;
+}
+
+.profile-stat-grid-library {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 9px;
+}
+
+.profile-stat-grid-library > div {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+
+.profile-stat-grid-library strong {
+  font-size: .82rem;
+}
+
+.profile-stat-grid-library span {
+  font-size: .6rem;
+}
+
+.discovery-rail-section {
+  min-width: 0;
+  overflow: visible;
+}
+
+.discovery-rail-toolbar {
+  align-items: end;
+  margin-bottom: 7px;
+  padding-right: 0;
+}
+
+.discovery-rail-toolbar h2 {
+  margin: 2px 0 0;
+  font-size: clamp(1.22rem, 2vw, 1.65rem);
+}
+
+.discovery-rail-toolbar .muted {
+  display: none;
+}
+
+/* Keep the complete visible shelf inside the content width. The feed already
+   rotates in the background, so showing the four strongest artist groups per
+   shelf is preferable to an off-screen horizontal strip on desktop. */
+.artist-discovery-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  overflow: visible;
+  scroll-snap-type: none;
+  cursor: default;
+}
+
+.artist-discovery-rail > .artist-discovery-card:nth-child(n + 5) {
+  display: none;
+}
+
+.artist-discovery-card {
+  min-width: 0;
+  width: 100%;
+  height: 188px;
+  padding: 9px;
+  gap: 7px;
+  grid-template-rows: auto minmax(0, 1fr);
+  border-radius: 13px;
+  scroll-snap-align: none;
+  contain-intrinsic-size: 290px 188px;
+}
+
+.artist-discovery-head {
+  min-width: 0;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+.artist-discovery-head p {
+  font-size: .84rem;
+}
+
+/* Count/instruction copy is redundant in a fixed compact card. */
+.artist-discovery-head span,
+.artist-discovery-foot {
+  display: none;
+}
+
+.artist-discovery-head b {
+  font-size: .66rem;
+}
+
+/* Mouse wheel / touch scroll stays inside the card only when the artist has
+   more rows than can fit. The page itself never expands for extra tracks. */
+.artist-track-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0 2px 2px 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-snap-type: none;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 12px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 12px), transparent 100%);
+}
+
+.artist-track-stack::-webkit-scrollbar {
+  display: none;
+}
+
+.discovery-track-tile {
+  flex: 0 0 38px;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-rows: 1fr;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 5px 4px 8px;
+  border-radius: 9px;
+  scroll-snap-align: none;
+}
+
+.artist-track-copy {
+  display: block;
+  min-width: 0;
+}
+
+.artist-track-copy strong {
+  display: block;
+  overflow: hidden;
+  color: #ece8ef;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .72rem;
+  line-height: 1.1;
+}
+
+.artist-track-copy span,
+.track-tile-tags {
+  display: none;
+}
+
+.discovery-track-primary-actions,
+.taste-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.taste-actions {
+  grid-column: auto;
+}
+
+.compact-action,
+.taste-chip {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 25px;
+  min-width: 25px;
+  padding: 0;
+  border-radius: 7px;
+}
+
+.compact-action {
+  color: #c6afe0;
+  border-color: rgba(162, 124, 205, .24);
+  background: rgba(112, 76, 150, .06);
+}
+
+.compact-action:hover,
+.compact-action-playing {
+  color: #f0e5fb;
+  border-color: rgba(184, 143, 229, .52);
+  background: rgba(137, 91, 183, .16);
+}
+
+.compact-action-add {
+  color: #8bc9d9;
+  border-color: rgba(90, 182, 205, .25);
+  background: rgba(58, 142, 162, .06);
+  font-size: .9rem;
+}
+
+.compact-action-add:hover {
+  color: #c7f0f7;
+  border-color: rgba(105, 203, 226, .5);
+  background: rgba(69, 161, 184, .15);
+}
+
+/* Supericons/Lucide masks in icons.css inherit currentColor. Keep the buttons
+   icon-only and tint them as semantic feedback without introducing emoji. */
+.taste-chip {
+  color: #7da98b;
+  border: 1px solid rgba(104, 171, 128, .2);
+  background: rgba(72, 127, 91, .05);
+  font-size: 0;
+}
+
+.taste-chip + .taste-chip {
+  color: #a77b82;
+  border-color: rgba(184, 103, 115, .2);
+  background: rgba(133, 70, 80, .05);
+}
+
+.taste-chip:hover,
+.taste-chip-active {
+  color: #b8e3c5;
+  border-color: rgba(118, 219, 165, .5);
+  background: rgba(118, 219, 165, .13);
+}
+
+.taste-chip + .taste-chip:hover,
+.taste-chip-less-active {
+  color: #efb1b8;
+  border-color: rgba(235, 115, 122, .46);
+  background: rgba(235, 115, 122, .12);
+}
+
+/* Product feedback: technical feed internals should not occupy the discovery
+   page. They remain available through /api/discovery/feed/status for debug. */
+.discovery-details {
+  display: none;
+}
+
+@media (max-width: 1280px) {
+  .artist-discovery-rail {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .artist-discovery-rail > .artist-discovery-card:nth-child(4) {
+    display: none;
+  }
+}
+
+@media (max-width: 920px) {
+  .artist-discovery-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .artist-discovery-rail > .artist-discovery-card:nth-child(3) {
+    display: none;
+  }
+}
+
+@media (max-width: 620px) {
+  .artist-discovery-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .artist-discovery-rail > .artist-discovery-card:nth-child(2) {
+    display: none;
+  }
+
+  .artist-discovery-card {
+    height: 184px;
+  }
+}

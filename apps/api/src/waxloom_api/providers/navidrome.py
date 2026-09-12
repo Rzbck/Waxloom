@@ -222,6 +222,14 @@ class NavidromeClient:
     async def scrobble(self, song_id: str, *, submission: bool) -> None:
         await self._request("scrobble", id=song_id, submission=submission)
 
+    async def start_scan(self, *, full_scan: bool = False) -> None:
+        await self._request("startScan", fullScan=full_scan)
+
+    async def get_scan_status(self) -> dict[str, Any]:
+        root = await self._request("getScanStatus")
+        status = root.get("scanStatus") or {}
+        return status if isinstance(status, dict) else {}
+
     async def get_play_queue(self) -> dict[str, Any]:
         root = await self._request("getPlayQueue")
         queue = root.get("playQueue") or {}
