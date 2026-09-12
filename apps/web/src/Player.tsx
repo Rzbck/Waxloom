@@ -117,7 +117,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const existing = previewResolveRef.current.get(track.id);
     if (existing) return existing;
 
-    const promise = api.youtubeSearch(track.artist, track.title)
+    const promise = api.youtubeSearch(track.artist, track.title, undefined, 1)
       .then((payload) => {
         const best = payload.items.find((item) => Boolean(item.preview_url));
         if (!best?.preview_url) return null;
