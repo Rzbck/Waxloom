@@ -51,8 +51,6 @@ $secretPatterns = @(
     @{ Name = 'GitHub fine-grained token'; Regex = 'github_pat_[A-Za-z0-9_]{20,}' },
     @{ Name = 'OpenAI-style secret'; Regex = 'sk-[A-Za-z0-9_-]{20,}' },
     @{ Name = 'private key'; Regex = '-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----' },
-    @{ Name = 'non-placeholder NAVIDROME_PASSWORD'; Regex = '(?m)^\s*NAVIDROME_PASSWORD\s*=\s*(?!\s*$)(?!your-|<)[^\r\n]+' },
-    @{ Name = 'non-placeholder AUDIOMUSE_API_TOKEN'; Regex = '(?m)^\s*AUDIOMUSE_API_TOKEN\s*=\s*(?!\s*$)(?!your-|<)[^\r\n]+' },
     @{ Name = 'machine-specific Windows user path'; Regex = '(?i)C:\\Users\\(?!YourName\\|<)[^\\\r\n]+\\' }
 )
 
@@ -70,7 +68,9 @@ foreach ($path in $tracked) {
     }
 
     try {
-        $content = [IO.File]::ReadAllText((Resolve-Path $path).Path)
+        $fullPath = (Resolve-Path $path).Path
+        $content = [IO.File]::ReadAllText($fullPath)
+        $lines = [IO.File]::ReadAllLines($fullPath)
     }
     catch {
         continue
@@ -79,6 +79,18 @@ foreach ($path in $tracked) {
     foreach ($rule in $secretPatterns) {
         if ($content -match $rule.Regex) {
             Fail "$($rule.Name) pattern found in tracked file: $path"
+        }
+    }
+
+    # Known Waxloom secret-bearing config keys are parsed line-by-line so an
+    # empty value can never consume the following line as regex whitespace.
+    foreach ($line in $lines) {
+        if ($line -match '^[ \t]*(NAVIDROME_PASSWORD|AUDIOMUSE_API_TOKEN)[ \t]*=(.*)$') {
+            $key = $Matches[1]
+            $value = $Matches[2].Trim()
+            if ($value -and $value -notmatch '^(your-|<)') {
+                Fail "non-placeholder $key value found in tracked file: $path"
+            }
         }
     }
 }
@@ -91,8 +103,7 @@ if ($LASTEXITCODE -ne 0) {
 
 if ($script:failed) {
     Write-Host "[security] BLOCKED" -ForegroundColor Red
-    exit 9
+    throw "Public-repository security gate failed."
 }
 
 Write-Host "[security] PASS - no tracked secret/material blocker detected." -ForegroundColor Green
-exit 0
