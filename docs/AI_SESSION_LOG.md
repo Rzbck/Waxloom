@@ -32,8 +32,11 @@ SECURITY: browser never receives Navidrome password/auth parameters; stream/cove
 BRANCH: `feat/discovery-imports-20260912`, stacked on the user-validated core-player branch.
 PR: #4 targeting `feat/navidrome-core-player-20260912`.
 SHUFFLE FIX: every click now requests a fresh Navidrome random batch and selects a random start index, avoiding the current song when possible.
-DISCOVERY IMPLEMENTED / NOT USER VALIDATED: search/current-track/playlist seeds; AudioMuse local sonic neighbours; ListenBrainz Labs recording resolution + similar recordings; Navidrome duplicate filtering; underground slider/ranking; best-effort tag/popularity enrichment; MusicBrainz links.
+USER VALIDATED: shuffle variation now works correctly on the PR #4 runtime.
+USER VALIDATED: AudioMuse local sonic-neighbour cards render/populate correctly.
+RUNTIME BLOCKER: external discovery returned HTTP 200 but `0 candidates`; therefore API transport worked but seed resolution / ListenBrainz similarity coverage / duplicate filtering needed diagnosis.
+DISCOVERY HARDENING: prefer Labs `acr-lookup` before fuzzy recording-search; grouped similar-recordings fallback to per-seed lookup; sparse coverage fans out through limited AudioMuse local neighbours as extra MusicBrainz anchors; visible diagnostics show resolved seeds / expanded anchors / ListenBrainz rows / unique candidates / local duplicate removals; local duplicate checks made concurrent.
+UI PERF FOLLOW-UP: entering Artists causes many cover requests; existing browser lazy-loading remains, and PR #4 now adds CSS rendering containment/content-visibility to reduce off-screen layout/paint cost for large artist/media grids.
 IMPORTS IMPLEMENTED / NOT USER VALIDATED: ShazamDownloader-derived yt-dlp/RapidFuzz source search; explicit source selection; authorized-media confirmation enforced server-side; safe library-contained output; FFmpeg resolution; MP3 extraction; deterministic ID3 artist/title/album tags; Navidrome scan/poll; optional playlist insertion.
 SECURITY: no auto-download, no non-YouTube source URL, no download without `authorized=true`, no absolute library path returned, no provider secret exposed to browser.
-AUTOMATED STATUS: early PR #4 implementation passed security + API install/import + TypeScript/Vite build + smoke; final hardening commits require fresh exact-head CI PASS before local runtime validation.
-NEXT TEST: exact-head Windows worktree; verify real shuffle variation, Discovery seeds/AudioMuse/ListenBrainz results, YouTube candidate search, then one authorized import into a disposable playlist and clean shutdown.
+NEXT TEST: exact-head Windows worktree; rerun the seed set that returned 0 and read the new diagnostics; try 10–30 playlist seeds if needed; verify Artists navigation remains responsive while covers load; then continue to YouTube candidate search/import if outside-library candidates appear.
