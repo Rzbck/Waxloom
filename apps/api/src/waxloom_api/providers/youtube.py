@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import copy
 import os
 import re
 import shutil
+import threading
+import time
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -26,15 +29,11 @@ LOW_SIGNAL_KEYWORDS = (
     "tutorial",
 )
 
+PREVIEW_SEARCH_CACHE_SECONDS = 15 * 60
+
 
 class _QuietInteractiveLogger:
-    """Suppress expected per-candidate yt-dlp noise during interactive search.
-
-    Waxloom deliberately tries several public candidates because some YouTube
-    videos can be private, age-gated or sign-in-gated. Those failures are normal
-    candidate misses, not whole-request errors, so they should not flood the
-    Waxloom terminal while the provider continues to the next source.
-    """
+    """Suppress expected per-candidate yt-dlp noise during interactive search."""
 
     def debug(self, message: str) -> None:
         return None
@@ -116,6 +115,33 @@ def _write_tags(path: Path, artist: str, title: str) -> None:
 class YouTubeProvider:
     def __init__(self, *, cache_dir: Path) -> None:
         self.cache_dir = cache_dir
+        self._search_cache: dict[str, tuple[float, int, list[dict[str, Any]]]] = {}
+        self._search_cache_lock = threading.Lock()
+
+    @staticmethod
+    def _search_key(artist: str, title: str, isrc: str | None) -> str:
+        return f"{_normalize(artist)}\n{_normalize(title)}\n{(isrc or '').strip().casefold()}"
+
+    def _cached_search(self, key: str, requested: int) -> list[dict[str, Any]] | None:
+        now = time.monotonic()
+        with self._search_cache_lock:
+            cached = self._search_cache.get(key)
+            if cached is None:
+                return None
+            created, cached_request_size, items = cached
+            if now - created >= PREVIEW_SEARCH_CACHE_SECONDS:
+                self._search_cache.pop(key, None)
+                return None
+            if cached_request_size < requested:
+                return None
+            return copy.deepcopy(items[:requested])
+
+    def _store_search(self, key: str, requested: int, items: list[dict[str, Any]]) -> None:
+        with self._search_cache_lock:
+            current = self._search_cache.get(key)
+            if current and current[1] > requested and time.monotonic() - current[0] < PREVIEW_SEARCH_CACHE_SECONDS:
+                return
+            self._search_cache[key] = (time.monotonic(), requested, copy.deepcopy(items))
 
     def _base_options(self) -> dict[str, Any]:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -125,8 +151,6 @@ class YouTubeProvider:
             "ignoreerrors": False,
             "cachedir": str(self.cache_dir),
             "noprogress": True,
-            # Interactive preview/search must fail fast enough that the player can
-            # skip a bad source instead of looking frozen behind YouTube retries.
             "socket_timeout": 12,
             "retries": 1,
             "extractor_retries": 1,
@@ -200,14 +224,16 @@ class YouTubeProvider:
         isrc: str | None = None,
         search_results: int = 8,
     ) -> list[dict[str, Any]]:
+        search_results = max(1, min(search_results, 8))
+        cache_key = self._search_key(artist, title, isrc)
+        if cached := self._cached_search(cache_key, search_results):
+            return cached
+
         queries = [f"{artist} - {title}", f"{artist} {title} official audio"]
         if isrc:
             queries.insert(0, f"{isrc} {artist} {title}")
         queries = list(dict.fromkeys(query.strip() for query in queries if query.strip()))
 
-        # Stage 1 is flat/cheap. Do not ask YouTube to resolve every search hit to
-        # a playback URL because a single sign-in-gated video used to abort the
-        # whole Waxloom request with 502.
         search_options = self._base_options()
         search_options.update(
             {
@@ -224,7 +250,7 @@ class YouTubeProvider:
             for query in queries:
                 try:
                     payload = downloader.extract_info(
-                        f"ytsearch{max(1, min(search_results * 2, 20))}:{query}",
+                        f"ytsearch{max(2, min(search_results * 2, 20))}:{query}",
                         download=False,
                     )
                 except DownloadError:
@@ -254,11 +280,9 @@ class YouTubeProvider:
 
         ranked = sorted(flat.values(), key=lambda item: float(item["score"]), reverse=True)
         if not ranked:
+            self._store_search(cache_key, search_results, [])
             return []
 
-        # Stage 2 resolves only the best candidates. Sign-in/private/age-gated
-        # sources are skipped individually and the search continues to the next
-        # hit rather than failing the whole API call.
         resolve_options = self._base_options()
         resolve_options.update(
             {
@@ -272,8 +296,9 @@ class YouTubeProvider:
         )
 
         resolved: list[dict[str, Any]] = []
+        attempt_count = max(4, search_results * 2)
         with yt_dlp.YoutubeDL(resolve_options) as downloader:
-            for candidate in ranked[: max(search_results * 2, 10)]:
+            for candidate in ranked[:attempt_count]:
                 try:
                     entry = downloader.extract_info(str(candidate["url"]), download=False)
                 except (DownloadError, OSError, ValueError):
@@ -298,7 +323,9 @@ class YouTubeProvider:
                 if len(resolved) >= search_results:
                     break
 
-        return sorted(resolved, key=lambda item: float(item["score"]), reverse=True)
+        result = sorted(resolved, key=lambda item: float(item["score"]), reverse=True)
+        self._store_search(cache_key, search_results, result)
+        return copy.deepcopy(result)
 
     def download_selected(
         self,
