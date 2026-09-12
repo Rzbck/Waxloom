@@ -84,10 +84,9 @@ function loadAlbumDetailCached(id: string): Promise<Album> {
   const encoded = encodeURIComponent(id);
   const promise = request<Album>(`/api/albums/${encoded}`)
     .catch(async () => {
-      // One short retry absorbs transient Navidrome/OpenSubsonic failures. The
-      // same promise is shared by prewarm, open and Play so we never stampede
-      // one album endpoint with duplicate requests.
-      await sleep(120);
+      // Album details are loaded only on demand. One short retry absorbs a
+      // transient Navidrome failure without background request storms.
+      await sleep(140);
       return request<Album>(`/api/albums/${encoded}`);
     })
     .catch((error) => {
@@ -99,25 +98,6 @@ function loadAlbumDetailCached(id: string): Promise<Album> {
   return promise;
 }
 
-async function prewarmAlbumDetails(albums: Album[], concurrency = 3, limit = 24): Promise<void> {
-  const ids = [...new Set(albums.map((album) => album.id).filter(Boolean))].slice(0, Math.max(1, limit));
-  if (ids.length === 0) return;
-
-  let cursor = 0;
-  const workerCount = Math.max(1, Math.min(4, concurrency, ids.length));
-  const workers = Array.from({ length: workerCount }, async () => {
-    while (cursor < ids.length) {
-      const index = cursor;
-      cursor += 1;
-      const id = ids[index];
-      if (!id) return;
-      await loadAlbumDetailCached(id).catch(() => undefined);
-      await sleep(35);
-    }
-  });
-  await Promise.all(workers);
-}
-
 function loadAlbumsCached(type = "newest", size = 80, offset = 0): Promise<ListResponse<Album>> {
   const key = albumCacheKey(type, size, offset);
   const existing = albumCache.get(key);
@@ -125,20 +105,10 @@ function loadAlbumsCached(type = "newest", size = 80, offset = 0): Promise<ListR
 
   const promise = request<ListResponse<Album>>(
     `/api/library/albums?type=${encodeURIComponent(type)}&size=${size}&offset=${offset}`,
-  )
-    .then((payload) => {
-      // Home/newest album Play should already have its track list ready before
-      // the user clicks it. Bounded concurrency keeps this invisible warmup
-      // from competing with playback or cover traffic.
-      if (type === "newest" && offset === 0) {
-        void prewarmAlbumDetails(payload.items, 3, 24);
-      }
-      return payload;
-    })
-    .catch((error) => {
-      albumCache.delete(key);
-      throw error;
-    });
+  ).catch((error) => {
+    albumCache.delete(key);
+    throw error;
+  });
   albumCache.set(key, { at: Date.now(), promise });
   return promise;
 }
@@ -209,6 +179,8 @@ async function prewarmYoutubePreviews(
 }
 
 function warmLibraryNavigation(): void {
+  // Warm only cheap library indexes. Never preload album tracks from local
+  // storage: album details are fetched on demand and then cached.
   void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
   void loadArtistsCached().catch(() => undefined);
 }
@@ -226,7 +198,6 @@ export const api = {
   artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
   album: (id: string) => loadAlbumDetailCached(id),
-  prewarmAlbums: (albums: Album[], concurrency = 3, limit = 24) => prewarmAlbumDetails(albums, concurrency, limit),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
   song: (id: string) => request<Song>(`/api/songs/${encodeURIComponent(id)}`),
   search: (query: string, count = 40) => request<SearchResults>(`/api/search?q=${encodeURIComponent(query)}&count=${count}`),
