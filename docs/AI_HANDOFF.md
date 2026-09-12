@@ -75,16 +75,16 @@ Owner explicitly rejected desktop-style visible left/right scrollbar controls an
 
 Permanent interaction rule:
 
-- shelves behave like phone carousels: horizontal swipe/trackpad drag with scroll-snap and **no visible scrollbar/arrows**;
-- artist cards have fixed height and show the next tile peeking at the edge;
-- tracks inside an artist card are a second fixed-height horizontal swipe deck;
+- shelves behave like phone carousels: horizontal swipe/trackpad with scroll-snap and **no visible scrollbar/arrows**;
+- artist cards have fixed height and show the next artist tile peeking at the edge;
+- tracks **inside** an artist card are now a fixed-height **vertical stack** with wheel/touch scrolling up/down; desktop horizontal track swipe was rejected;
 - no `+10 tracks` / expand-down interaction;
 - opening more tracks must never make the page jump vertically;
 - each track tile contains play, quick add-to-playlist/import and taste controls.
 
 ## Discovery preview / global player
 
-Discovery preview is now part of the **global Waxloom player**, not a hidden player owned by the Discovery page.
+Discovery preview is part of the **global Waxloom player**, not a hidden player owned by the Discovery page.
 
 Rules:
 
@@ -93,12 +93,43 @@ Rules:
 - Previous / Next / shuffle / repeat / seek / volume use the same global player controls;
 - switching back to a local Navidrome track returns the player to normal Navidrome mode;
 - yt-dlp search results are cached in the browser for a short period;
-- first visible Discovery sources are prewarmed and the player pre-resolves the next preview track to reduce the delay between songs;
+- first visible Discovery sources are prewarmed and the player pre-resolves the next preview track;
 - preview UI remains inside Waxloom: no iframe, no YouTube page, no layout expansion.
+
+## Media concurrency / responsiveness rule
+
+Owner observed heavy Artist scrolling producing many `/api/media/cover/...` requests and felt playback/actions could be delayed.
+
+Important diagnosis: this is primarily **media connection contention**, not a reason to run multiple Uvicorn workers. Multiple API workers would duplicate stateful background Discovery jobs and are therefore not the fix.
+
+Current architecture:
+
+- FastAPI/Navidrome media proxy is async;
+- yt-dlp work already runs via `asyncio.to_thread`, outside the event loop;
+- in Vite development, normal API/audio stays on the app origin `:5173`;
+- cover images now use the API origin `:8787` directly, giving browser cover traffic a separate per-origin connection pool;
+- cover prewarming was removed from initial Albums/Artists warmup; only library data is preloaded;
+- therefore a fast cover scroll should no longer monopolize the same browser lane used by play/search/import actions.
+
+If Artist browsing is still visually expensive after this lane separation, next structural fix is true grid virtualization/pagination, not more CSS `content-visibility` tweaks.
+
+## YouTube preview/source resilience
+
+A runtime test hit a YouTube candidate that returned `Please sign in` and previously caused the entire `/api/imports/youtube/search` request to return `502`.
+
+Current provider behavior:
+
+- stage 1 uses flat/cheap YouTube search metadata;
+- stage 2 resolves only top candidates to `bestaudio` preview URLs;
+- sign-in/private/age-gated/bad candidates are skipped individually;
+- the provider continues to the next source instead of failing the whole search;
+- interactive retries/timeouts are bounded so one bad YouTube source cannot make the player look frozen.
+
+Do not automatically ingest browser cookies as a default workaround. Cookie use would be an explicit future opt-in only if genuinely required.
 
 ## Taste feedback / learning
 
-Discovery now has `Like` and `Less` actions per candidate.
+Discovery has `Like` and `Less` actions per candidate.
 
 Feedback is private/local to Waxloom:
 
@@ -116,9 +147,17 @@ The ranking weights are intentionally bounded so likes improve personalization w
 ## Library navigation UX
 
 - Albums `newest/120` and full Artists list are preloaded into a short-lived client cache after API health succeeds;
-- first visible album/artist covers are prewarmed;
-- if Artists still blocks under a very large library, next fix is true virtualization/pagination, not additional CSS-only tweaks;
+- cover **data** is no longer eagerly prewarmed because media fetching must never compete with interactive playback;
+- if Artists still blocks under a very large library, next fix is true virtualization/pagination;
 - small album/track play controls use CSS geometry instead of the Unicode play glyph for stable optical centering.
+
+## Icon system
+
+Owner requested use of the connected icon plugin for the app instead of ad-hoc glyphs.
+
+- Supericons was used to choose a coherent Lucide outline vocabulary.
+- Current CSS icon theme applies verified Lucide `home`, `disc-album`, `mic-vocal`, `list-music`, `heart`, `sparkles`, `file-music`, `thumbs-up`, and `thumbs-down` assets to navigation/taste controls without adding a runtime dependency.
+- Continue replacing remaining emoji/font-glyph controls with the same Lucide/Supericons vocabulary instead of inventing new icon styles.
 
 ## Imports
 
@@ -141,28 +180,25 @@ PR #4 includes:
 
 - repo public: no `.env`, credentials, cookies, keys, private DBs, media or private library exports in Git;
 - persistent Discovery/taste state lives under local app data, never Git;
-- browser talks only to Waxloom `/api/*` for private integrations;
+- browser talks only to Waxloom `/api/*` for private integrations except dev-only direct cover-art lane on local `:8787`;
 - `scripts/security-gate.ps1` remains mandatory;
 - 1 active chantier = 1 branch = 1 dedicated worktree;
 - historical `E:\_Project\Waxloom` remains `HOLD_DIRTY` because of old untracked `apps/api/uv.lock`; do not clean/reset merely to continue;
 - no force-push/destructive reset/blind clean.
 
-## Exact next runtime gate — Discovery swipe/player/taste
+## Exact next runtime gate — concurrency / Discovery card stack
 
 1. require security + Windows build PASS on fresh branch HEAD;
 2. fast-forward existing `discovery-imports-20260912` worktree to exact SHA and require CLEAN;
 3. restart Waxloom;
-4. open Discovery and confirm shelves have no visible horizontal scrollbar/arrows;
-5. swipe/trackpad horizontally between artist tiles;
-6. inside one artist tile, swipe horizontally through all its tracks without changing card/page height;
-7. play a Discovery track and confirm it appears in the global player dock;
-8. use Next / Previous in the global player and confirm preview queue navigation works;
-9. confirm moving to the next preview is materially faster after the first source because next-source prewarm is active;
-10. play a normal Navidrome song and confirm the player leaves preview mode cleanly;
-11. press `Like` on one candidate and `Less` on another; verify UI updates immediately;
-12. reload Discovery and verify feedback persists; disliked exact track should stay out of visible feed;
-13. verify `%LOCALAPPDATA%\Waxloom\discovery-feedback.json` is created and no secret/private media is written there;
-14. then test one authorized quick add/import path.
+4. open Artists and scroll aggressively while starting/stopping a **local Navidrome song**; playback controls must stay responsive while cover logs continue;
+5. confirm covers are requested directly from local API media lane and no cover storm blocks normal `/api/*` actions;
+6. open Discovery and confirm outer artist shelves still swipe horizontally;
+7. inside one artist card, use mouse wheel/touch to scroll the track stack **vertically**; card/page height must remain fixed;
+8. play Discovery candidate and verify global player/Next works;
+9. retry a candidate around the previous YouTube sign-in failure; one gated source must not turn the whole search into 502;
+10. verify Lucide/Supericons navigation and Like/Less icons render cleanly;
+11. then test one authorized quick add/import path.
 
 ## Rollback
 
