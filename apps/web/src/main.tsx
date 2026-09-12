@@ -14,6 +14,7 @@ import "./mobile.css";
 import "./mobile-hotfix.css";
 import "./discovery-icons-hotfix.css";
 import "./layout-polish-v4.css";
+import "./icon-centering-v5.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
