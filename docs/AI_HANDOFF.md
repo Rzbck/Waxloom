@@ -7,9 +7,10 @@ Date: 2026-09-12
 - Repository: `Rzbck/Waxloom` (public)
 - Published baseline: `main@8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`
 - Current recovery branch: `fix/bootstrap-workflow-security-20260912`
-- Current candidate: `f1bb36e7af6d35e950ab2a08aa1e73f46303046e`
+- Runtime bootstrap implementation commit: `f1bb36e7af6d35e950ab2a08aa1e73f46303046e`
+- Candidate SHA for validation: **always resolve the fresh remote HEAD of the recovery branch immediately before testing; do not hardcode a self-referential handoff SHA.**
 - Baseline classification: `IMPLEMENTED / NOT USER VALIDATED`
-- Public-repository security CI: `AUTOMATED GATE PASS` on the current candidate.
+- Public-repository security CI: `AUTOMATED GATE PASS` on the recovery branch after the bootstrap hardening changes.
 - Promotion to `main`: `BLOCKED` pending exact-head Windows runtime validation and server-side main protection.
 
 ## What is already known to work locally
@@ -59,7 +60,7 @@ The same branch introduces durable worktree/Git/handoff rules modeled on the pro
 
 GitHub currently reports `main` as unprotected. Project policy treats that as a promotion blocker.
 
-Blocking public-repository rules live in `/HANDOFF.md`. `scripts/security-gate.ps1` checks tracked files for forbidden secret material and verifies `.env` remains ignored. Windows GitHub Actions security gate passes on the current candidate.
+Blocking public-repository rules live in `/HANDOFF.md`. `scripts/security-gate.ps1` checks tracked files for forbidden secret material and verifies `.env` remains ignored. Windows GitHub Actions security gate passes on the recovery branch.
 
 ## Exact next step
 
@@ -69,13 +70,15 @@ On the user's machine:
 
 1. inventory with `git worktree list --porcelain`;
 2. leave `E:\_Project\Waxloom` untouched if it still contains the untracked `apps/api/uv.lock`;
-3. create or reuse a dedicated worktree directly from `origin/fix/bootstrap-workflow-security-20260912`;
-4. require `HEAD local == HEAD origin/fix/bootstrap-workflow-security-20260912 == f1bb36e7af6d35e950ab2a08aa1e73f46303046e` and CLEAN;
-5. copy the ignored local `.env` to the candidate worktree without printing it;
-6. run `./scripts/security-gate.ps1`;
-7. run `./scripts/dev.ps1`;
-8. verify API + UI readiness and clean Ctrl+C shutdown;
-9. record the exact tested SHA here before any promotion decision.
+3. fetch `origin/fix/bootstrap-workflow-security-20260912`;
+4. resolve the fresh remote branch HEAD and use that exact SHA as the expected candidate;
+5. create or reuse a dedicated worktree directly from that remote branch;
+6. require `HEAD local == HEAD origin/fix/bootstrap-workflow-security-20260912 == expected candidate SHA` and CLEAN;
+7. copy the ignored local `.env` to the candidate worktree without printing it;
+8. run `./scripts/security-gate.ps1`;
+9. run `./scripts/dev.ps1`;
+10. verify API + UI readiness and clean Ctrl+C shutdown;
+11. only after the run, record the exact tested SHA as validation evidence.
 
 ## Rollback / base
 
