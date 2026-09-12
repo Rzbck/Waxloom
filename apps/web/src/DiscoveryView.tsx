@@ -6,6 +6,7 @@ import type {
   AudioMuseSimilarTrack,
   DiscoveryCandidate,
   DiscoveryResponse,
+  PlaylistSummary,
   SearchResults,
   Song,
 } from "./types";
@@ -16,11 +17,18 @@ function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
 }
 
-export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candidate: DiscoveryCandidate) => void }) {
+export function DiscoveryView({
+  playlists,
+  onImportCandidate,
+}: {
+  playlists: PlaylistSummary[];
+  onImportCandidate: (candidate: DiscoveryCandidate) => void;
+}) {
   const player = usePlayer();
   const [seedQuery, setSeedQuery] = useState("");
   const [seedResults, setSeedResults] = useState<SearchResults | null>(null);
   const [seeds, setSeeds] = useState<Song[]>([]);
+  const [seedPlaylistId, setSeedPlaylistId] = useState("");
   const [underground, setUnderground] = useState(75);
   const [result, setResult] = useState<DiscoveryResponse | null>(null);
   const [localSimilar, setLocalSimilar] = useState<AudioMuseSimilarTrack[]>([]);
@@ -48,6 +56,20 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
   function removeSeed(id: string) {
     setSeeds((current) => current.filter((song) => song.id !== id));
+  }
+
+  async function usePlaylistSeeds() {
+    if (!seedPlaylistId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const playlist = await api.playlist(seedPlaylistId);
+      setSeeds((playlist.entry ?? []).slice(0, 30));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load playlist seeds.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function generate() {
@@ -83,11 +105,23 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
           )}
         </div>
 
+        <div className="playlist-seed-row">
+          <select value={seedPlaylistId} onChange={(event) => setSeedPlaylistId(event.target.value)}>
+            <option value="">Use a Navidrome playlist as seeds…</option>
+            {playlists.map((playlist) => (
+              <option key={playlist.id} value={playlist.id}>{playlist.name} · {playlist.songCount ?? 0} tracks</option>
+            ))}
+          </select>
+          <button className="secondary-action" type="button" onClick={() => void usePlaylistSeeds()} disabled={!seedPlaylistId || loading}>
+            Use playlist
+          </button>
+        </div>
+
         <form className="seed-search" onSubmit={(event) => void searchSeeds(event)}>
           <input
             value={seedQuery}
             onChange={(event) => setSeedQuery(event.target.value)}
-            placeholder="Search your Navidrome library for seed tracks…"
+            placeholder="Or search your Navidrome library for seed tracks…"
           />
           <button className="secondary-action" type="submit" disabled={loading}>Search</button>
         </form>
