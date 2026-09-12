@@ -57,3 +57,44 @@ jobs:
         shell: pwsh
         working-directory: apps/web
         run: npm.cmd run build
+
+      - name: Smoke direct Vite launcher
+        shell: pwsh
+        working-directory: apps/web
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $node = (Get-Command node.exe).Source
+          $process = Start-Process `
+            -FilePath $node `
+            -ArgumentList @('.\node_modules\vite\bin\vite.js', '--host', '127.0.0.1', '--port', '5173') `
+            -WorkingDirectory (Get-Location).Path `
+            -NoNewWindow `
+            -PassThru
+
+          try {
+            $deadline = (Get-Date).AddSeconds(30)
+            $ready = $false
+            while ((Get-Date) -lt $deadline) {
+              $process.Refresh()
+              if ($process.HasExited) {
+                throw "Vite exited before readiness (exit code $($process.ExitCode))."
+              }
+              try {
+                $response = Invoke-WebRequest -Uri 'http://127.0.0.1:5173' -TimeoutSec 2 -ErrorAction Stop
+                if ($response.StatusCode -eq 200) {
+                  $ready = $true
+                  break
+                }
+              }
+              catch {
+                Start-Sleep -Milliseconds 500
+              }
+            }
+            if (-not $ready) { throw 'Timed out waiting for Vite.' }
+            Write-Host 'Vite direct-launch smoke PASS'
+          }
+          finally {
+            if ($process -and -not $process.HasExited) {
+              taskkill.exe /PID $process.Id /T /F *> $null
+            }
+          }
