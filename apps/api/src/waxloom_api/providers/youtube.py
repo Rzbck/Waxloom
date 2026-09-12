@@ -52,6 +52,14 @@ def _is_youtube_url(value: str) -> bool:
     }
 
 
+def _is_direct_https_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    return parsed.scheme == "https" and bool(parsed.hostname) and not _is_youtube_url(value)
+
+
 def _resolve_ffmpeg() -> Path | None:
     if explicit := os.environ.get("FFMPEG_PATH"):
         path = Path(explicit).expanduser()
@@ -162,7 +170,15 @@ class YouTubeProvider:
         queries = list(dict.fromkeys(query.strip() for query in queries if query.strip()))
 
         options = self._base_options()
-        options.update({"extract_flat": False, "skip_download": True})
+        options.update(
+            {
+                "extract_flat": False,
+                "skip_download": True,
+                "noplaylist": True,
+                # Prefer a browser-friendly audio-only stream for in-app preview.
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
+            }
+        )
         candidates: dict[str, dict[str, Any]] = {}
         with yt_dlp.YoutubeDL(options) as downloader:
             for query in queries:
@@ -174,10 +190,12 @@ class YouTubeProvider:
                 for entry in entries:
                     if not isinstance(entry, dict):
                         continue
-                    url = str(entry.get("webpage_url") or entry.get("url") or "")
+                    url = str(entry.get("webpage_url") or entry.get("original_url") or "")
                     candidate_title = str(entry.get("title") or "")
                     if not url or not candidate_title or not _is_youtube_url(url):
                         continue
+
+                    preview_url = str(entry.get("url") or "")
                     candidate = {
                         "title": candidate_title,
                         "url": url,
@@ -185,6 +203,8 @@ class YouTubeProvider:
                         "channel": entry.get("channel"),
                         "duration": entry.get("duration"),
                         "thumbnail": entry.get("thumbnail"),
+                        "preview_url": preview_url if _is_direct_https_url(preview_url) else None,
+                        "preview_ext": entry.get("ext"),
                     }
                     candidate["score"] = self._score(artist, title, candidate)
                     previous = candidates.get(url)
