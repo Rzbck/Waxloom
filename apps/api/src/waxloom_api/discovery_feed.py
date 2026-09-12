@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from waxloom_api.discovery import DiscoveryService
+from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
 
 
 class DiscoveryFeedEngine:
@@ -30,6 +31,7 @@ class DiscoveryFeedEngine:
         self._service_factory = service_factory
         self._state_dir = state_dir
         self._snapshot_path = state_dir / "discovery-feed.json"
+        self._feedback = DiscoveryFeedbackStore(state_dir / "discovery-feedback.json")
         self._refresh_seconds = max(15 * 60, refresh_seconds)
         self._rotation_seconds = max(15 * 60, rotation_seconds)
         self._pool_size = max(40, min(120, pool_size))
@@ -101,11 +103,28 @@ class DiscoveryFeedEngine:
     def request_refresh(self) -> None:
         self._wake.set()
 
+    def record_feedback(
+        self,
+        *,
+        recording_mbid: str,
+        artist: str,
+        title: str,
+        tags: list[str],
+        value: int,
+    ) -> dict[str, Any]:
+        summary = self._feedback.set(
+            recording_mbid=recording_mbid,
+            artist=artist,
+            title=title,
+            tags=tags,
+            value=value,
+        )
+        return {"ok": True, "value": value, **summary}
+
     def _is_stale(self) -> bool:
         return self._snapshot_epoch is None or time.time() - self._snapshot_epoch >= self._refresh_seconds
 
     async def _run(self) -> None:
-        # Give the API a moment to finish startup; then work independently of the UI.
         await asyncio.sleep(1.0)
         while True:
             if self._is_stale():
@@ -145,27 +164,32 @@ class DiscoveryFeedEngine:
                 self._persist()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # Keep the last good feed if providers fail.
+            except Exception as exc:
                 self._error = str(exc)
                 self._status = "ready" if self._snapshot is not None else "error"
+
+    def _candidate_score(self, item: dict[str, Any]) -> float:
+        return float(item.get("rank") or 0.0) + self._feedback.adjustment(item)
 
     def _rotated_items(self, items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
         slot = int(time.time() // self._rotation_seconds)
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for item in items:
+            if self._feedback.exact(str(item.get("recording_mbid") or "")) < 0:
+                continue
             artist = str(item.get("artist") or "unknown artist").strip().casefold()
             grouped[artist].append(item)
 
         def artist_score(entry: tuple[str, list[dict[str, Any]]]) -> tuple[float, str]:
             artist, tracks = entry
-            best = max(float(track.get("rank") or 0.0) for track in tracks)
+            best = max(self._candidate_score(track) for track in tracks)
             digest = hashlib.sha1(f"{slot}:{artist}".encode("utf-8", errors="ignore")).hexdigest()
             jitter = int(digest[:8], 16) / 0xFFFFFFFF
-            return (best * 0.78 + jitter * 0.22, artist)
+            return (best * 0.82 + jitter * 0.18, artist)
 
         ordered_groups = sorted(grouped.items(), key=artist_score, reverse=True)
         for _, tracks in ordered_groups:
-            tracks.sort(key=lambda track: float(track.get("rank") or 0.0), reverse=True)
+            tracks.sort(key=self._candidate_score, reverse=True)
 
         output: list[dict[str, Any]] = []
         depth = 0
@@ -173,7 +197,7 @@ class DiscoveryFeedEngine:
             added = False
             for _, tracks in ordered_groups:
                 if depth < len(tracks):
-                    output.append(tracks[depth])
+                    output.append(self._feedback.annotate(tracks[depth]))
                     added = True
                     if len(output) >= self._visible_size:
                         break
@@ -192,6 +216,7 @@ class DiscoveryFeedEngine:
                 "profile": None,
                 "seeds": [],
                 "external": {"items": [], "count": 0},
+                "feedback": self._feedback.summary(),
                 "error": self._error,
             }
 
@@ -214,6 +239,7 @@ class DiscoveryFeedEngine:
             "next_refresh_at": self._iso(next_refresh),
             "rotation_id": rotation_id,
             "rotation_seconds": self._rotation_seconds,
+            "feedback": self._feedback.summary(),
             "error": self._error,
         }
 
@@ -234,5 +260,6 @@ class DiscoveryFeedEngine:
             "next_refresh_at": self._iso(next_refresh),
             "refresh_hours": round(self._refresh_seconds / 3600, 2),
             "rotation_minutes": round(self._rotation_seconds / 60, 1),
+            "feedback": self._feedback.summary(),
             "error": self._error,
         }
