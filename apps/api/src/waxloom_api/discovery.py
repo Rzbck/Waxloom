@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
+import time
 from collections import Counter
 from typing import Any
 
@@ -12,11 +14,18 @@ from waxloom_api.providers.listenbrainz import ListenBrainzLabsClient
 from waxloom_api.providers.musicbrainz import MusicBrainzClient
 from waxloom_api.providers.navidrome import NavidromeClient
 
+_LIBRARY_CACHE_TTL = 10 * 60
+_library_snapshot_cache: tuple[float, dict[str, Any]] | None = None
+
 
 def _normalize(value: str) -> str:
     value = value.casefold()
     value = re.sub(r"[^\w\s]", " ", value, flags=re.UNICODE)
     return " ".join(value.split())
+
+
+def _stable_key(value: str) -> str:
+    return hashlib.sha1(value.encode("utf-8", errors="ignore")).hexdigest()
 
 
 def _song_mbid(song: dict[str, Any]) -> str | None:
@@ -101,7 +110,7 @@ class DiscoveryService:
         batches = await asyncio.gather(
             *(
                 self.local_similar(str(song.get("id") or ""), count=8)
-                for song in seed_songs[:5]
+                for song in seed_songs[:8]
                 if song.get("id")
             ),
             return_exceptions=True,
@@ -212,7 +221,7 @@ class DiscoveryService:
                 "underground": round(underground, 4),
                 "rank": round(rank, 4),
                 "tags": enrichment.get("tags") or [],
-                "reason": "ListenBrainz similarity across your listening profile",
+                "reason": "ListenBrainz similarity across your library profile",
                 "musicbrainz_url": f"https://musicbrainz.org/recording/{item['recording_mbid']}",
             }
 
@@ -271,7 +280,7 @@ class DiscoveryService:
                         "underground": 0.55,
                         "rank": round(0.68 * similarity + 0.32 * 0.55, 4),
                         "source": "musicbrainz_catalog",
-                        "reason": f"More from {artist}, reached through AudioMuse",
+                        "reason": f"Reached through sonically neighbouring artist {artist}",
                     }
                 )
 
@@ -368,4 +377,144 @@ class DiscoveryService:
             "underground_weight": max(0.0, min(1.0, underground_weight)),
             "diagnostics": diagnostics,
             "warning": warning,
+        }
+
+    async def _library_snapshot(self, *, force_refresh: bool = False) -> dict[str, Any]:
+        global _library_snapshot_cache
+        now = time.monotonic()
+        if (
+            not force_refresh
+            and _library_snapshot_cache is not None
+            and now - _library_snapshot_cache[0] < _LIBRARY_CACHE_TTL
+        ):
+            return _library_snapshot_cache[1]
+
+        albums: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            batch = await self.navidrome.get_album_list("alphabeticalByName", size=500, offset=offset)
+            albums.extend(batch)
+            if len(batch) < 500:
+                break
+            offset += len(batch)
+
+        semaphore = asyncio.Semaphore(10)
+
+        async def load_album(album: dict[str, Any]) -> dict[str, Any] | None:
+            album_id = str(album.get("id") or "")
+            if not album_id:
+                return None
+            try:
+                async with semaphore:
+                    return await self.navidrome.get_album(album_id)
+            except Exception:
+                return None
+
+        details = await asyncio.gather(*(load_album(album) for album in albums))
+        songs_by_id: dict[str, dict[str, Any]] = {}
+        for detail in details:
+            if not detail:
+                continue
+            for song in detail.get("song") or []:
+                if not isinstance(song, dict):
+                    continue
+                song_id = str(song.get("id") or "")
+                if song_id:
+                    songs_by_id[song_id] = song
+
+        if not songs_by_id:
+            for song in await self.navidrome.get_random_songs(size=500):
+                song_id = str(song.get("id") or "")
+                if song_id:
+                    songs_by_id[song_id] = song
+
+        snapshot = {
+            "albums": albums,
+            "songs": list(songs_by_id.values()),
+        }
+        _library_snapshot_cache = (now, snapshot)
+        return snapshot
+
+    async def _representative_library_seeds(
+        self,
+        *,
+        force_refresh: bool = False,
+        seed_count: int = 30,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        snapshot, starred, queue = await asyncio.gather(
+            self._library_snapshot(force_refresh=force_refresh),
+            self.navidrome.get_starred(),
+            self.navidrome.get_play_queue(),
+        )
+        songs = [song for song in snapshot["songs"] if isinstance(song, dict)]
+        starred_ids = {str(song.get("id") or "") for song in starred.get("songs") or [] if isinstance(song, dict)}
+        queue_ids = {str(song.get("id") or "") for song in queue.get("entry") or [] if isinstance(song, dict)}
+
+        def preference(song: dict[str, Any]) -> int:
+            song_id = str(song.get("id") or "")
+            return (4 if song_id in starred_ids else 0) + (2 if song_id in queue_ids else 0)
+
+        ranked = sorted(
+            songs,
+            key=lambda song: (
+                -preference(song),
+                _stable_key(str(song.get("id") or f"{song.get('artist')}::{song.get('title')}")),
+            ),
+        )
+
+        selected: list[dict[str, Any]] = []
+        selected_ids: set[str] = set()
+        artist_counts: Counter[str] = Counter()
+        genre_counts: Counter[str] = Counter()
+
+        for artist_cap in (1, 2, 3):
+            for song in ranked:
+                song_id = str(song.get("id") or "")
+                if not song_id or song_id in selected_ids:
+                    continue
+                artist = _normalize(str(song.get("artist") or "unknown artist"))
+                genre = _normalize(str(song.get("genre") or "unknown genre"))
+                if artist_counts[artist] >= artist_cap:
+                    continue
+                if genre and genre != "unknown genre" and genre_counts[genre] >= 5:
+                    continue
+                selected.append(song)
+                selected_ids.add(song_id)
+                artist_counts[artist] += 1
+                genre_counts[genre] += 1
+                if len(selected) >= seed_count:
+                    break
+            if len(selected) >= seed_count:
+                break
+
+        profile = {
+            "library_tracks": len(songs),
+            "library_albums": len(snapshot["albums"]),
+            "library_artists": len({_normalize(str(song.get("artist") or "")) for song in songs if song.get("artist")}),
+            "library_genres": len({_normalize(str(song.get("genre") or "")) for song in songs if song.get("genre")}),
+            "favorites": len(starred_ids),
+            "queue_tracks": len(queue_ids),
+            "representative_seeds": len(selected),
+            "representative_artists": len({_normalize(str(song.get("artist") or "")) for song in selected if song.get("artist")}),
+        }
+        return selected, profile
+
+    async def automatic_discovery(
+        self,
+        *,
+        result_count: int = 80,
+        underground_weight: float = 0.75,
+        force_refresh: bool = False,
+    ) -> dict[str, Any]:
+        seeds, profile = await self._representative_library_seeds(force_refresh=force_refresh)
+        seed_ids = [str(song.get("id") or "") for song in seeds if song.get("id")]
+        external = await self.external_discovery(
+            seed_ids,
+            result_count=result_count,
+            underground_weight=underground_weight,
+        )
+        return {
+            "profile": profile,
+            "seeds": seeds,
+            "external": external,
         }
