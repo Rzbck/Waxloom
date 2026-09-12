@@ -5,6 +5,8 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $apiRoot = (Resolve-Path (Join-Path $root "apps\api")).Path
 $webRoot = (Resolve-Path (Join-Path $root "apps\web")).Path
 $webPackage = Join-Path $webRoot "package.json"
+$apiVenv = Join-Path $apiRoot ".venv"
+$apiPython = Join-Path $apiVenv "Scripts\python.exe"
 
 function Write-Section([string]$Title) {
     Write-Host ""
@@ -47,6 +49,19 @@ function Invoke-InDirectory {
     }
 }
 
+function Assert-RepositoryClean([string]$Stage) {
+    $dirty = @(& git -C $root status --porcelain --untracked-files=all)
+    if ($LASTEXITCODE -ne 0) {
+        throw "git status failed during: $Stage"
+    }
+    if ($dirty.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Unexpected repository mutations during: $Stage" -ForegroundColor Red
+        $dirty | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        throw "Development bootstrap mutated tracked/untracked repository content. STOP."
+    }
+}
+
 function Wait-Http([string]$Url, [System.Diagnostics.Process]$Process, [int]$TimeoutSeconds = 30) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
@@ -83,6 +98,7 @@ function Stop-ProcessTree([System.Diagnostics.Process]$Process) {
 $uv = Require-Command "uv"
 $npm = Resolve-NpmCommand
 $cmd = Require-Command "cmd.exe"
+$null = Require-Command "git"
 
 if (-not (Test-Path (Join-Path $root ".env"))) {
     throw ".env is missing. Run .\scripts\configure.ps1 first."
@@ -98,31 +114,42 @@ Write-Host "web  : $webRoot" -ForegroundColor DarkGray
 Write-Host "uv   : $($uv.Source)" -ForegroundColor DarkGray
 Write-Host "npm  : $($npm.Source)" -ForegroundColor DarkGray
 
+Assert-RepositoryClean "initial preflight"
+
 $securityGate = Join-Path $root "scripts\security-gate.ps1"
 if (Test-Path $securityGate -PathType Leaf) {
     Write-Host ""
     Write-Host "Running public-repository security gate..." -ForegroundColor Yellow
     & $securityGate
-    if ($LASTEXITCODE -ne 0) {
-        throw "Security gate failed with exit code $LASTEXITCODE"
-    }
 }
 
 Write-Host ""
-Write-Host "Syncing Python dependencies..." -ForegroundColor Yellow
-& $uv.Source sync --project $apiRoot
+Write-Host "Preparing isolated Python environment..." -ForegroundColor Yellow
+if (-not (Test-Path $apiPython -PathType Leaf)) {
+    & $uv.Source venv $apiVenv --python 3.12
+    if ($LASTEXITCODE -ne 0) {
+        throw "uv venv failed with exit code $LASTEXITCODE"
+    }
+}
+
+& $uv.Source pip install --python $apiPython -e $apiRoot
 if ($LASTEXITCODE -ne 0) {
-    throw "uv sync failed with exit code $LASTEXITCODE"
+    throw "uv pip install failed with exit code $LASTEXITCODE"
 }
 
 Write-Host ""
 Write-Host "Installing web dependencies from apps/web..." -ForegroundColor Yellow
 Invoke-InDirectory -Path $webRoot -Script {
-    & $npm.Source install
+    # package-lock.json is intentionally not generated during bootstrap. A
+    # versioned lockfile policy will be introduced as a separate dependency
+    # reproducibility tranche after the Windows bootstrap is qualified.
+    & $npm.Source install --package-lock=false
     if ($LASTEXITCODE -ne 0) {
         throw "npm install failed with exit code $LASTEXITCODE"
     }
 }
+
+Assert-RepositoryClean "dependency bootstrap"
 
 $apiProcess = $null
 $webProcess = $null
@@ -134,14 +161,13 @@ try {
     Write-Host ""
 
     $apiProcess = Start-Process `
-        -FilePath $uv.Source `
+        -FilePath $apiPython `
         -ArgumentList @(
-            "run", "--project", $apiRoot,
-            "uvicorn", "waxloom_api.main:app",
+            "-m", "uvicorn", "waxloom_api.main:app",
             "--host", "127.0.0.1",
             "--port", "8787"
         ) `
-        -WorkingDirectory $root `
+        -WorkingDirectory $apiRoot `
         -NoNewWindow `
         -PassThru
 
