@@ -1,224 +1,221 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api";
-import { usePlayer } from "./Player";
 import type {
-  AudioMuseSimilarTrack,
+  AutomaticDiscoveryResponse,
   DiscoveryCandidate,
-  DiscoveryResponse,
-  Song,
+  PlaylistSummary,
 } from "./types";
 
 import "./discovery.css";
 
-type ProfileStats = {
-  playlists: number;
-  playlistTracks: number;
-  favorites: number;
-  queueTracks: number;
-  uniqueTracks: number;
-  representativeSeeds: number;
-  representativeArtists: number;
+type ArtistGroup = {
+  key: string;
+  artist: string;
+  items: DiscoveryCandidate[];
+  bestRank: number;
+  bestUnderground: number;
 };
 
-type AutomaticDiscovery = {
-  profile: ProfileStats;
-  seeds: Song[];
-  localSimilar: AudioMuseSimilarTrack[];
-  external: DiscoveryResponse;
+type PreviewState = {
+  recordingMbid: string;
+  embedUrl: string;
+  sourceTitle: string;
 };
-
-type WeightedSong = { song: Song; score: number };
 
 const CACHE_MS = 10 * 60 * 1000;
-let discoveryCache: { at: number; value: AutomaticDiscovery } | null = null;
-let discoveryInFlight: Promise<AutomaticDiscovery> | null = null;
+let discoveryCache: { at: number; value: AutomaticDiscoveryResponse } | null = null;
+let discoveryPromise: Promise<AutomaticDiscoveryResponse> | null = null;
 
 function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
 }
 
-function normalizedArtist(song: Song): string {
-  return (song.artist ?? "unknown artist").trim().toLocaleLowerCase();
+function artistKey(value: string): string {
+  return value.trim().toLocaleLowerCase();
 }
 
-function addWeighted(pool: Map<string, WeightedSong>, song: Song, score: number) {
-  if (!song.id) return;
-  const previous = pool.get(song.id);
-  pool.set(song.id, { song, score: (previous?.score ?? 0) + score });
+function groupCandidates(items: DiscoveryCandidate[]): ArtistGroup[] {
+  const groups = new Map<string, ArtistGroup>();
+  for (const candidate of items) {
+    const key = artistKey(candidate.artist) || candidate.recording_mbid;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.items.push(candidate);
+      existing.bestRank = Math.max(existing.bestRank, candidate.rank);
+      existing.bestUnderground = Math.max(existing.bestUnderground, candidate.underground);
+    } else {
+      groups.set(key, {
+        key,
+        artist: candidate.artist,
+        items: [candidate],
+        bestRank: candidate.rank,
+        bestUnderground: candidate.underground,
+      });
+    }
+  }
+  for (const group of groups.values()) {
+    group.items.sort((a, b) => b.rank - a.rank);
+  }
+  return [...groups.values()].sort((a, b) => b.bestRank - a.bestRank);
 }
 
-async function buildAutomaticDiscovery(currentSong: Song | null): Promise<AutomaticDiscovery> {
-  const [playlistPayload, starred, queue, random] = await Promise.all([
-    api.playlists(),
-    api.starred(),
-    api.playQueue(),
-    api.randomSongs(100),
-  ]);
-
-  const playlistDetails = await Promise.all(
-    playlistPayload.items.map((playlist) => api.playlist(playlist.id).catch(() => null)),
-  );
-
-  const pool = new Map<string, WeightedSong>();
-  let playlistTracks = 0;
-
-  for (const playlist of playlistDetails) {
-    for (const song of playlist?.entry ?? []) {
-      playlistTracks += 1;
-      addWeighted(pool, song, 5);
+function youtubeVideoId(value: string): string | null {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLocaleLowerCase();
+    if (host === "youtu.be") return url.pathname.split("/").filter(Boolean)[0] ?? null;
+    if (host.endsWith("youtube.com")) {
+      const direct = url.searchParams.get("v");
+      if (direct) return direct;
+      const parts = url.pathname.split("/").filter(Boolean);
+      if (["shorts", "embed", "live"].includes(parts[0] ?? "")) return parts[1] ?? null;
     }
+  } catch {
+    return null;
   }
-  for (const song of starred.songs ?? []) addWeighted(pool, song, 10);
-  for (const song of queue.entry ?? []) addWeighted(pool, song, 4);
-  for (const song of random.items) addWeighted(pool, song, 1);
-  if (currentSong) addWeighted(pool, currentSong, 12);
-
-  const ranked = [...pool.values()].sort((a, b) => b.score - a.score || a.song.id.localeCompare(b.song.id));
-  const artistCounts = new Map<string, number>();
-  const seeds: Song[] = [];
-
-  for (const item of ranked) {
-    const artist = normalizedArtist(item.song);
-    const count = artistCounts.get(artist) ?? 0;
-    if (count >= 2) continue;
-    seeds.push(item.song);
-    artistCounts.set(artist, count + 1);
-    if (seeds.length >= 24) break;
-  }
-
-  if (seeds.length < 12) {
-    const known = new Set(seeds.map((song) => song.id));
-    for (const song of random.items) {
-      if (known.has(song.id)) continue;
-      seeds.push(song);
-      known.add(song.id);
-      if (seeds.length >= 24) break;
-    }
-  }
-
-  if (seeds.length === 0) throw new Error("Waxloom could not build a listening profile from your library.");
-
-  const [external, localBatches] = await Promise.all([
-    api.discover(seeds.map((song) => song.id), 0.75, 50),
-    Promise.all(
-      seeds.slice(0, 8).map((song) =>
-        api.localSimilar(song.id, 10).catch(() => ({ items: [], count: 0 })),
-      ),
-    ),
-  ]);
-
-  const localBest = new Map<string, AudioMuseSimilarTrack>();
-  const seedIds = new Set(seeds.map((song) => song.id));
-  for (const batch of localBatches) {
-    for (const track of batch.items) {
-      if (!track.id || seedIds.has(track.id)) continue;
-      const previous = localBest.get(track.id);
-      if (
-        !previous ||
-        Number(track.similarity ?? 0) > Number(previous.similarity ?? 0)
-      ) {
-        localBest.set(track.id, track);
-      }
-    }
-  }
-  const localSimilar = [...localBest.values()]
-    .sort((a, b) => Number(b.similarity ?? 0) - Number(a.similarity ?? 0))
-    .slice(0, 24);
-
-  return {
-    profile: {
-      playlists: playlistPayload.items.length,
-      playlistTracks,
-      favorites: starred.songs?.length ?? 0,
-      queueTracks: queue.entry?.length ?? 0,
-      uniqueTracks: pool.size,
-      representativeSeeds: seeds.length,
-      representativeArtists: new Set(seeds.map(normalizedArtist)).size,
-    },
-    seeds,
-    localSimilar,
-    external,
-  };
+  return null;
 }
 
-async function getAutomaticDiscovery(currentSong: Song | null, force = false): Promise<AutomaticDiscovery> {
+async function loadAutomatic(force: boolean): Promise<AutomaticDiscoveryResponse> {
   if (!force && discoveryCache && Date.now() - discoveryCache.at < CACHE_MS) {
     return discoveryCache.value;
   }
-  if (!force && discoveryInFlight) return discoveryInFlight;
-
-  const job = buildAutomaticDiscovery(currentSong);
-  discoveryInFlight = job;
+  if (!force && discoveryPromise) return discoveryPromise;
+  const promise = api.automaticDiscovery(force, 80);
+  discoveryPromise = promise;
   try {
-    const value = await job;
+    const value = await promise;
     discoveryCache = { at: Date.now(), value };
     return value;
   } finally {
-    if (discoveryInFlight === job) discoveryInFlight = null;
+    if (discoveryPromise === promise) discoveryPromise = null;
   }
 }
 
-function RecommendationCard({
-  candidate,
-  onImportCandidate,
+function ArtistGroupCard({
+  group,
+  preview,
+  previewLoading,
+  onPreview,
+  onQuickAdd,
 }: {
-  candidate: DiscoveryCandidate;
-  onImportCandidate: (candidate: DiscoveryCandidate) => void;
+  group: ArtistGroup;
+  preview: PreviewState | null;
+  previewLoading: string | null;
+  onPreview: (candidate: DiscoveryCandidate) => void;
+  onQuickAdd: (candidate: DiscoveryCandidate) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? group.items : group.items.slice(0, 3);
+
   return (
-    <article className="recommendation-card">
-      <div className="recommendation-copy">
-        <strong>{candidate.title}</strong>
-        <span>{candidate.artist}</span>
-        <small>{candidate.release || candidate.reason || "Outside your library"}</small>
-        {candidate.reason && <p>{candidate.reason}</p>}
-        {candidate.tags.length > 0 && (
-          <div className="tag-row">
-            {candidate.tags.slice(0, 4).map((tag) => <span key={tag}>{tag}</span>)}
+    <article className="artist-discovery-card">
+      <header className="artist-discovery-head">
+        <div>
+          <p>{group.artist}</p>
+          <span>{group.items.length} suggestion{group.items.length > 1 ? "s" : ""}</span>
+        </div>
+        <b>{scorePercent(group.bestRank)}</b>
+      </header>
+
+      <div className="artist-track-stack">
+        {visible.map((candidate) => (
+          <div className="artist-track-row" key={candidate.recording_mbid}>
+            <div className="artist-track-copy">
+              <strong>{candidate.title}</strong>
+              <span>{candidate.release || candidate.reason || "Outside your library"}</span>
+            </div>
+            <button
+              className="compact-action"
+              type="button"
+              onClick={() => onPreview(candidate)}
+              disabled={previewLoading === candidate.recording_mbid}
+              title="Preview"
+            >
+              {previewLoading === candidate.recording_mbid ? "…" : "▶"}
+            </button>
+            <button className="compact-action compact-action-add" type="button" onClick={() => onQuickAdd(candidate)} title="Add to playlist">
+              +
+            </button>
+
+            {preview?.recordingMbid === candidate.recording_mbid && (
+              <div className="inline-preview">
+                <iframe
+                  src={preview.embedUrl}
+                  title={`Preview ${candidate.artist} - ${candidate.title}`}
+                  allow="autoplay; encrypted-media; picture-in-picture"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                  allowFullScreen
+                />
+                <small>{preview.sourceTitle}</small>
+              </div>
+            )}
           </div>
+        ))}
+      </div>
+
+      <footer className="artist-discovery-foot">
+        <span>{group.items[0]?.tags?.slice(0, 3).join(" · ") || group.items[0]?.source || "recommendation"}</span>
+        {group.items.length > 3 && (
+          <button className="text-action" type="button" onClick={() => setExpanded((value) => !value)}>
+            {expanded ? "Collapse" : `+${group.items.length - 3} tracks`}
+          </button>
         )}
-      </div>
-      <div className="recommendation-scores">
-        <span>match <b>{scorePercent(candidate.similarity)}</b></span>
-        {candidate.source === "listenbrainz" && (
-          <span>underground <b>{scorePercent(candidate.underground)}</b></span>
-        )}
-      </div>
-      <div className="discovery-actions">
-        <a className="mini-action discovery-link" href={candidate.musicbrainz_url} target="_blank" rel="noreferrer">MB</a>
-        <button className="primary-action" type="button" onClick={() => onImportCandidate(candidate)}>Find source →</button>
-      </div>
+      </footer>
     </article>
   );
 }
 
-function RecommendationRail({
+function DiscoveryRail({
   eyebrow,
   title,
   subtitle,
-  items,
-  onImportCandidate,
+  groups,
+  preview,
+  previewLoading,
+  onPreview,
+  onQuickAdd,
 }: {
   eyebrow: string;
   title: string;
   subtitle: string;
-  items: DiscoveryCandidate[];
-  onImportCandidate: (candidate: DiscoveryCandidate) => void;
+  groups: ArtistGroup[];
+  preview: PreviewState | null;
+  previewLoading: string | null;
+  onPreview: (candidate: DiscoveryCandidate) => void;
+  onQuickAdd: (candidate: DiscoveryCandidate) => void;
 }) {
-  if (items.length === 0) return null;
+  const railRef = useRef<HTMLDivElement>(null);
+  if (groups.length === 0) return null;
+
+  function scroll(direction: -1 | 1) {
+    railRef.current?.scrollBy({ left: direction * Math.max(360, window.innerWidth * 0.65), behavior: "smooth" });
+  }
+
   return (
-    <section className="recommendation-section">
-      <div className="section-toolbar">
+    <section className="discovery-rail-section">
+      <div className="section-toolbar discovery-rail-toolbar">
         <div>
           <p className="eyebrow">{eyebrow}</p>
           <h2>{title}</h2>
           <p className="muted">{subtitle}</p>
         </div>
+        <div className="rail-arrows">
+          <button type="button" onClick={() => scroll(-1)} aria-label="Scroll left">←</button>
+          <button type="button" onClick={() => scroll(1)} aria-label="Scroll right">→</button>
+        </div>
       </div>
-      <div className="recommendation-grid">
-        {items.map((candidate) => (
-          <RecommendationCard key={candidate.recording_mbid} candidate={candidate} onImportCandidate={onImportCandidate} />
+      <div className="artist-discovery-rail" ref={railRef}>
+        {groups.map((group) => (
+          <ArtistGroupCard
+            key={group.key}
+            group={group}
+            preview={preview}
+            previewLoading={previewLoading}
+            onPreview={onPreview}
+            onQuickAdd={onQuickAdd}
+          />
         ))}
       </div>
     </section>
@@ -226,17 +223,26 @@ function RecommendationRail({
 }
 
 export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candidate: DiscoveryCandidate) => void }) {
-  const player = usePlayer();
-  const [bundle, setBundle] = useState<AutomaticDiscovery | null>(null);
+  const [bundle, setBundle] = useState<AutomaticDiscoveryResponse | null>(null);
+  const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<string | null>(null);
+  const [quickTarget, setQuickTarget] = useState<DiscoveryCandidate | null>(null);
+  const [importing, setImporting] = useState<string | null>(null);
 
   async function load(force = false) {
     setLoading(true);
     setError(null);
     try {
-      const value = await getAutomaticDiscovery(player.currentSong ?? null, force);
+      const [value, playlistPayload] = await Promise.all([
+        loadAutomatic(force),
+        api.playlists(),
+      ]);
       setBundle(value);
+      setPlaylists(playlistPayload.items);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Automatic discovery failed.");
     } finally {
@@ -249,93 +255,143 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   }, []);
 
   const rails = useMemo(() => {
-    const items = bundle?.external.items ?? [];
-    const close = items.slice(0, 16);
-    const used = new Set(close.map((item) => item.recording_mbid));
-    const underground = [...items]
-      .filter((item) => item.source === "listenbrainz" && !used.has(item.recording_mbid))
-      .sort((a, b) => b.underground - a.underground || b.rank - a.rank)
-      .slice(0, 16);
-    underground.forEach((item) => used.add(item.recording_mbid));
-    const deepCuts = items
-      .filter((item) => item.source === "musicbrainz_catalog" && !used.has(item.recording_mbid))
-      .slice(0, 16);
-    return { close, underground, deepCuts };
+    const groups = groupCandidates(bundle?.external.items ?? []);
+    const closest = groups.slice(0, 12);
+    const used = new Set(closest.map((group) => group.key));
+    const underground = [...groups]
+      .filter((group) => !used.has(group.key) && group.items.some((item) => item.source === "listenbrainz"))
+      .sort((a, b) => b.bestUnderground - a.bestUnderground || b.bestRank - a.bestRank)
+      .slice(0, 12);
+    underground.forEach((group) => used.add(group.key));
+    const deep = groups
+      .filter((group) => !used.has(group.key) && group.items.some((item) => item.source === "musicbrainz_catalog"))
+      .slice(0, 12);
+    return { closest, underground, deep, totalArtists: groups.length };
   }, [bundle]);
+
+  async function previewCandidate(candidate: DiscoveryCandidate) {
+    if (preview?.recordingMbid === candidate.recording_mbid) {
+      setPreview(null);
+      return;
+    }
+    setPreviewLoading(candidate.recording_mbid);
+    setError(null);
+    try {
+      const payload = await api.youtubeSearch(candidate.artist, candidate.title);
+      const best = payload.items[0];
+      if (!best) throw new Error("No preview source found.");
+      const id = youtubeVideoId(best.url);
+      if (!id) throw new Error("The best source could not be embedded.");
+      setPreview({
+        recordingMbid: candidate.recording_mbid,
+        embedUrl: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(id)}?autoplay=1&rel=0`,
+        sourceTitle: best.title,
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Preview search failed.");
+    } finally {
+      setPreviewLoading(null);
+    }
+  }
+
+  async function addToPlaylist(playlist: PlaylistSummary) {
+    if (!quickTarget) return;
+    const candidate = quickTarget;
+    const authKey = "waxloom.authorizedMediaImports";
+    let authorized = window.localStorage.getItem(authKey) === "true";
+    if (!authorized) {
+      authorized = window.confirm(
+        "Waxloom can automatically search for a matching YouTube source, download it and add it to this playlist. Confirm that you are authorized to save the media you import this way.",
+      );
+      if (!authorized) return;
+      window.localStorage.setItem(authKey, "true");
+    }
+
+    setImporting(candidate.recording_mbid);
+    setError(null);
+    setNotice(null);
+    try {
+      const search = await api.youtubeSearch(candidate.artist, candidate.title);
+      const best = search.items[0];
+      if (!best || best.score < 80) {
+        setQuickTarget(null);
+        setNotice("The automatic source match was ambiguous. Choose the source manually before importing.");
+        onImportCandidate(candidate);
+        return;
+      }
+      const result = await api.youtubeImport(candidate.artist, candidate.title, best.url, playlist.id, true);
+      setNotice(
+        result.status === "already_local"
+          ? `Already local — added the existing track to “${playlist.name}”.`
+          : result.playlist_added
+            ? `Downloaded and added to “${playlist.name}”.`
+            : "Downloaded. Navidrome is still indexing it; playlist insertion may follow after the scan.",
+      );
+      setQuickTarget(null);
+      discoveryCache = null;
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Automatic import failed.");
+    } finally {
+      setImporting(null);
+    }
+  }
 
   return (
     <div className="discovery-layout discovery-auto-layout">
-      <section className="panel discovery-profile-panel">
+      <section className="panel discovery-profile-panel discovery-profile-compact">
         <div className="section-toolbar">
           <div>
-            <p className="eyebrow">Automatic discovery</p>
-            <h2>Built from the music you already chose.</h2>
-            <p className="muted">No seed picking and no Generate button. Waxloom reads your playlists, favorites, queue and library, then builds a diversified listening profile automatically.</p>
+            <p className="eyebrow">Automatic discovery · outside your library</p>
+            <h2>Recommendations from your whole collection.</h2>
+            <p className="muted">Waxloom scans the full Navidrome library, builds a diversified profile across artists and genres, then uses AudioMuse, ListenBrainz and MusicBrainz internally. Local songs are not shown here.</p>
           </div>
           <button className="secondary-action" type="button" onClick={() => void load(true)} disabled={loading}>Refresh</button>
         </div>
-
         {bundle && (
-          <div className="profile-stat-grid">
-            <div><strong>{bundle.profile.playlists}</strong><span>playlists</span></div>
-            <div><strong>{bundle.profile.uniqueTracks}</strong><span>profile tracks</span></div>
-            <div><strong>{bundle.profile.favorites}</strong><span>favorites</span></div>
-            <div><strong>{bundle.profile.representativeArtists}</strong><span>artists represented</span></div>
-            <div><strong>{bundle.profile.representativeSeeds}</strong><span>smart anchors</span></div>
+          <div className="profile-stat-grid profile-stat-grid-library">
+            <div><strong>{bundle.profile.library_tracks}</strong><span>library tracks</span></div>
+            <div><strong>{bundle.profile.library_albums}</strong><span>albums</span></div>
+            <div><strong>{bundle.profile.library_artists}</strong><span>artists</span></div>
+            <div><strong>{bundle.profile.library_genres}</strong><span>genres</span></div>
+            <div><strong>{bundle.profile.representative_seeds}</strong><span>smart anchors</span></div>
           </div>
         )}
-        {loading && <div className="discovery-building">Analysing playlists, favorites and sonic neighbours…</div>}
+        {loading && <div className="discovery-building">Scanning your library and building recommendations…</div>}
         {error && <div className="state-card state-card-error">{error}</div>}
+        {notice && <div className="state-card state-card-success">{notice}</div>}
       </section>
-
-      {bundle && bundle.localSimilar.length > 0 && (
-        <section>
-          <div className="section-toolbar">
-            <div>
-              <p className="eyebrow">AudioMuse · already yours</p>
-              <h2>Sonic matches inside your library</h2>
-              <p className="muted">Local tracks that sit close to the overall profile Waxloom built from your listening.</p>
-            </div>
-          </div>
-          <div className="local-similar-grid">
-            {bundle.localSimilar.slice(0, 18).map((track) => (
-              <button
-                className="local-similar-card"
-                type="button"
-                key={track.id}
-                onClick={() => player.playNow({ id: track.id, title: track.title, artist: track.artist, album: track.album })}
-              >
-                <span className="local-play">▶</span>
-                <div><strong>{track.title ?? "Unknown title"}</strong><span>{track.artist ?? "Unknown artist"}</span></div>
-                <small>{typeof track.similarity === "number" ? scorePercent(track.similarity) : "AudioMuse"}</small>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
 
       {bundle && (
         <>
-          <RecommendationRail
-            eyebrow="Best matches · outside your library"
-            title="Closest to your taste right now"
-            subtitle="Ranked from the full profile, not a single manually selected track."
-            items={rails.close}
-            onImportCandidate={onImportCandidate}
+          <DiscoveryRail
+            eyebrow={`Best matches · ${rails.totalArtists} artists found`}
+            title="Closest to your collection"
+            subtitle="Artists are grouped so one catalogue cannot flood the page. Scroll horizontally."
+            groups={rails.closest}
+            preview={preview}
+            previewLoading={previewLoading}
+            onPreview={(candidate) => void previewCandidate(candidate)}
+            onQuickAdd={setQuickTarget}
           />
-          <RecommendationRail
+          <DiscoveryRail
             eyebrow="Dig deeper"
             title="More underground"
-            subtitle="Lower-popularity ListenBrainz candidates that still remain connected to your profile."
-            items={rails.underground}
-            onImportCandidate={onImportCandidate}
+            subtitle="Less obvious ListenBrainz matches, still connected to the full-library profile."
+            groups={rails.underground}
+            preview={preview}
+            previewLoading={previewLoading}
+            onPreview={(candidate) => void previewCandidate(candidate)}
+            onQuickAdd={setQuickTarget}
           />
-          <RecommendationRail
-            eyebrow="AudioMuse → MusicBrainz"
+          <DiscoveryRail
+            eyebrow="Catalogue exploration"
             title="Deep cuts from neighbouring artists"
-            subtitle="Fallback catalogue picks reached through artists that AudioMuse says are sonically close to you."
-            items={rails.deepCuts}
-            onImportCandidate={onImportCandidate}
+            subtitle="MusicBrainz catalogue paths reached through AudioMuse when collaborative similarity is sparse."
+            groups={rails.deep}
+            preview={preview}
+            previewLoading={previewLoading}
+            onPreview={(candidate) => void previewCandidate(candidate)}
+            onQuickAdd={setQuickTarget}
           />
 
           {bundle.external.warning && bundle.external.count > 0 && (
@@ -347,16 +403,42 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
           <details className="discovery-details">
             <summary>How Waxloom built this page</summary>
-            <p>
-              {bundle.profile.playlists} playlists · {bundle.profile.playlistTracks} playlist entries · {bundle.profile.queueTracks} queued · {bundle.profile.representativeSeeds} diversified anchors.
-            </p>
+            <p>{bundle.profile.library_tracks} tracks · {bundle.profile.library_albums} albums · {bundle.profile.library_artists} artists · {bundle.profile.representative_seeds} diversified anchors.</p>
             {bundle.external.diagnostics && (
-              <p>
-                ListenBrainz: {bundle.external.diagnostics.resolved_seeds}/{bundle.external.diagnostics.requested_seeds} seeds resolved · {bundle.external.diagnostics.similar_rows} similarity rows · {bundle.external.diagnostics.catalog_fallback_candidates ?? 0} MusicBrainz fallback candidates · {bundle.external.diagnostics.local_duplicates_removed} local duplicates removed.
-              </p>
+              <p>ListenBrainz: {bundle.external.diagnostics.resolved_seeds}/{bundle.external.diagnostics.requested_seeds} anchors resolved · {bundle.external.diagnostics.similar_rows} similarity rows · {bundle.external.diagnostics.catalog_fallback_candidates ?? 0} MusicBrainz fallback candidates · {bundle.external.diagnostics.local_duplicates_removed} local duplicates removed.</p>
             )}
           </details>
         </>
+      )}
+
+      {quickTarget && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => setQuickTarget(null)}>
+          <section className="modal discovery-playlist-modal" role="dialog" aria-modal="true" aria-label="Download and add to playlist" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-head">
+              <div>
+                <p className="eyebrow">Download + add</p>
+                <h3>{quickTarget.artist} — {quickTarget.title}</h3>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setQuickTarget(null)}>×</button>
+            </div>
+            <p className="muted">Choose the destination playlist. Waxloom uses the highest-confidence source automatically; ambiguous matches fall back to manual source selection.</p>
+            <div className="modal-list">
+              {playlists.map((playlist) => (
+                <button
+                  className="modal-list-item"
+                  type="button"
+                  key={playlist.id}
+                  disabled={importing === quickTarget.recording_mbid}
+                  onClick={() => void addToPlaylist(playlist)}
+                >
+                  <strong>{playlist.name}</strong>
+                  <span>{playlist.songCount ?? 0} tracks</span>
+                </button>
+              ))}
+            </div>
+            <button className="secondary-action" type="button" onClick={() => { setQuickTarget(null); onImportCandidate(quickTarget); }}>Choose source manually →</button>
+          </section>
+        </div>
       )}
     </div>
   );
