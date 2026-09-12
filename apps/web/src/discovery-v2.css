@@ -1,0 +1,277 @@
+.discovery-auto-layout {
+  gap: 34px;
+}
+
+.discovery-profile-compact {
+  padding: 20px 22px;
+}
+
+.profile-stat-grid-library {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.profile-stat-grid-library > div {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #28262e;
+  border-radius: 10px;
+  background: #141319;
+}
+
+.profile-stat-grid-library strong {
+  font-size: 1.02rem;
+}
+
+.profile-stat-grid-library span {
+  color: #7d7785;
+  font-size: 0.7rem;
+}
+
+.discovery-rail-section {
+  min-width: 0;
+}
+
+.discovery-rail-toolbar {
+  align-items: end;
+}
+
+.rail-arrows {
+  display: flex;
+  gap: 7px;
+}
+
+.rail-arrows button {
+  width: 38px;
+  height: 34px;
+  border: 1px solid #302d36;
+  border-radius: 9px;
+  color: #d7cfdf;
+  background: #151419;
+  cursor: pointer;
+}
+
+.rail-arrows button:hover {
+  border-color: #655676;
+  background: #1b1820;
+}
+
+.artist-discovery-rail {
+  display: flex;
+  gap: 12px;
+  padding: 3px 2px 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+  overscroll-behavior-inline: contain;
+}
+
+.artist-discovery-card {
+  flex: 0 0 min(360px, 82vw);
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 210px;
+  padding: 14px;
+  border: 1px solid #28262e;
+  border-radius: 14px;
+  background: #131217;
+  scroll-snap-align: start;
+  content-visibility: auto;
+  contain: layout paint style;
+  contain-intrinsic-size: 360px 230px;
+}
+
+.artist-discovery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid #24222a;
+}
+
+.artist-discovery-head > div {
+  min-width: 0;
+}
+
+.artist-discovery-head p {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.96rem;
+  font-weight: 780;
+}
+
+.artist-discovery-head span {
+  color: #77717f;
+  font-size: 0.69rem;
+}
+
+.artist-discovery-head b {
+  color: #bda8d5;
+  font-size: 0.76rem;
+}
+
+.artist-track-stack {
+  display: grid;
+  gap: 5px;
+}
+
+.artist-track-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 31px 31px;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 7px 7px 9px;
+  border-radius: 9px;
+  background: #18171d;
+}
+
+.artist-track-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.artist-track-copy strong,
+.artist-track-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artist-track-copy strong {
+  font-size: 0.79rem;
+}
+
+.artist-track-copy span {
+  color: #77717f;
+  font-size: 0.65rem;
+}
+
+.compact-action {
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  padding: 0;
+  border: 1px solid #34303b;
+  border-radius: 8px;
+  color: #c8b7dc;
+  background: #111015;
+  cursor: pointer;
+}
+
+.compact-action:hover {
+  border-color: #745e8e;
+  background: #1d1824;
+}
+
+.compact-action-add {
+  font-size: 1.05rem;
+}
+
+.inline-preview {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 5px;
+  margin-top: 3px;
+}
+
+.inline-preview iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 8px;
+  background: #08080a;
+}
+
+.inline-preview small {
+  overflow: hidden;
+  color: #77717f;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.62rem;
+}
+
+.artist-discovery-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  min-width: 0;
+}
+
+.artist-discovery-foot > span {
+  overflow: hidden;
+  color: #6e6875;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.62rem;
+}
+
+.text-action {
+  flex: none;
+  padding: 0;
+  border: 0;
+  color: #a893be;
+  font-size: 0.68rem;
+  background: transparent;
+  cursor: pointer;
+}
+
+.discovery-playlist-modal {
+  max-width: 620px;
+}
+
+.discovery-building {
+  margin-top: 14px;
+  color: #a89daf;
+  font-size: 0.8rem;
+}
+
+.discovery-note {
+  padding: 10px 12px;
+  border: 1px solid #302a37;
+  border-radius: 10px;
+  color: #8f8698;
+  background: #151219;
+}
+
+.discovery-details {
+  padding: 10px 12px;
+  border-top: 1px solid #24222a;
+  color: #716b79;
+  font-size: 0.73rem;
+}
+
+.discovery-details summary {
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .profile-stat-grid-library {
+    grid-template-columns: repeat(2, minmax(110px, 1fr));
+  }
+
+  .rail-arrows {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .artist-discovery-card {
+    flex-basis: 88vw;
+  }
+
+  .profile-stat-grid-library {
+    grid-template-columns: 1fr 1fr;
+  }
+}
