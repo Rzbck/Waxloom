@@ -1,0 +1,59 @@
+name: Windows build gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Toolchain versions
+        shell: pwsh
+        run: |
+          python --version
+          node --version
+          npm.cmd --version
+          $PSVersionTable.PSVersion
+
+      - name: Parse PowerShell scripts
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Path scripts -Filter *.ps1 -File | ForEach-Object {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              Write-Host "Parse errors in $($_.FullName)" -ForegroundColor Red
+              $errors | ForEach-Object { Write-Host $_.Message -ForegroundColor Red }
+            }
+          }
+          if ($failed) { throw 'PowerShell parse gate failed.' }
+
+      - name: Build and import API
+        shell: pwsh
+        run: |
+          python -m venv .ci-venv
+          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check -e .\apps\api
+          .\.ci-venv\Scripts\python.exe -m compileall -q .\apps\api\src
+          .\.ci-venv\Scripts\python.exe -c "from waxloom_api.main import app; assert app.title == 'Waxloom API'; print('Waxloom API import PASS')"
+
+      - name: Install web dependencies
+        shell: pwsh
+        working-directory: apps/web
+        run: npm.cmd install --package-lock=false
+
+      - name: Build web
+        shell: pwsh
+        working-directory: apps/web
+        run: npm.cmd run build
