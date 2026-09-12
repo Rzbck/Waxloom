@@ -137,6 +137,23 @@ export type DiscoveryResponse = {
   diagnostics?: DiscoveryDiagnostics;
 };
 
+export type DiscoveryLibraryProfile = {
+  library_tracks: number;
+  library_albums: number;
+  library_artists: number;
+  library_genres: number;
+  favorites: number;
+  queue_tracks: number;
+  representative_seeds: number;
+  representative_artists: number;
+};
+
+export type AutomaticDiscoveryResponse = {
+  profile: DiscoveryLibraryProfile;
+  seeds: Song[];
+  external: DiscoveryResponse;
+};
+
 export type AudioMuseSimilarTrack = {
   id: string;
   title?: string;
