@@ -3,6 +3,8 @@ import type {
   Artist,
   AudioMuseSimilarTrack,
   AutomaticDiscoveryResponse,
+  DiscoveryFeedResponse,
+  DiscoveryFeedStatus,
   DiscoveryResponse,
   Health,
   ImportResult,
@@ -118,6 +120,12 @@ export const api = {
     request<AutomaticDiscoveryResponse>(
       `/api/discovery/automatic?refresh=${refresh ? "true" : "false"}&count=${count}`,
     ),
+  discoveryFeed: () => request<DiscoveryFeedResponse>("/api/discovery/feed"),
+  discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
+  refreshDiscoveryFeed: () =>
+    request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", {
+      method: "POST",
+    }),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
   youtubeSearch: (artist: string, title: string, isrc?: string) =>
