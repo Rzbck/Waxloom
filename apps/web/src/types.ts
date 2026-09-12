@@ -109,6 +109,7 @@ export type DiscoveryDiagnostics = {
   expanded_seeds: number;
   similar_rows: number;
   unique_external_candidates: number;
+  catalog_fallback_candidates?: number;
   local_duplicates_removed: number;
 };
 
@@ -123,6 +124,8 @@ export type DiscoveryCandidate = {
   rank: number;
   tags: string[];
   musicbrainz_url: string;
+  source?: "listenbrainz" | "musicbrainz_catalog" | string;
+  reason?: string;
 };
 
 export type DiscoveryResponse = {
