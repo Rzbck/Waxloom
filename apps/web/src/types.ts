@@ -37,6 +37,17 @@ export type Song = {
   musicBrainzId?: string;
 };
 
+export type PreviewTrack = {
+  id: string;
+  recording_mbid: string;
+  title: string;
+  artist: string;
+  release?: string;
+  duration?: number;
+  preview_url?: string | null;
+  source_title?: string;
+};
+
 export type Album = {
   id: string;
   name?: string;
@@ -126,6 +137,7 @@ export type DiscoveryCandidate = {
   musicbrainz_url: string;
   source?: "listenbrainz" | "musicbrainz_catalog" | string;
   reason?: string;
+  feedback?: -1 | 0 | 1;
 };
 
 export type DiscoveryResponse = {
@@ -164,6 +176,7 @@ export type DiscoveryFeedResponse = {
   profile: DiscoveryLibraryProfile | null;
   seeds: Song[];
   external: DiscoveryResponse;
+  feedback?: { likes: number; dislikes: number; total: number };
   error?: string | null;
 };
 
@@ -177,6 +190,7 @@ export type DiscoveryFeedStatus = {
   next_refresh_at: string | null;
   refresh_hours: number;
   rotation_minutes: number;
+  feedback?: { likes: number; dislikes: number; total: number };
   error?: string | null;
 };
 
