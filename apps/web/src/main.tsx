@@ -12,6 +12,7 @@ import "./polish.css";
 import "./icons.css";
 import "./mobile.css";
 import "./mobile-hotfix.css";
+import "./discovery-icons-hotfix.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
