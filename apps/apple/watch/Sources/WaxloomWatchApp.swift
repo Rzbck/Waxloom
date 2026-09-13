@@ -31,17 +31,18 @@ private struct WatchNowPlayingPage: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Circle()
                     .fill(remote.phoneReachable ? Color.green : Color.orange)
                     .frame(width: 7, height: 7)
-                Text(remote.phoneReachable ? "WAXLOOM" : "IPHONE OFFLINE")
-                    .font(.system(size: 9, weight: .black))
-                    .foregroundStyle(remote.phoneReachable ? Color.secondary : Color.orange)
+                WaxloomBrandLockup(compact: true)
+                    .scaleEffect(0.84, anchor: .leading)
                 Spacer()
-                Image(systemName: remote.snapshot.isPlaying ? "waveform" : "pause.fill")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(WaxloomWatchStyle.accent)
+                if !remote.phoneReachable {
+                    Image(systemName: "iphone.slash")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.orange)
+                }
             }
 
             Spacer(minLength: 0)
@@ -55,9 +56,9 @@ private struct WatchNowPlayingPage: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                Image(systemName: remote.snapshot.isPlaying ? "waveform.path" : "music.note")
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(WaxloomWatchStyle.accent)
+                WaxloomMark(lineWidth: 10)
+                    .frame(width: 72, height: 50)
+                    .opacity(remote.snapshot.sessionID == "idle" ? 0.72 : 1)
             }
             .frame(height: 68)
 
@@ -192,9 +193,8 @@ private struct WatchStatusPage: View {
                     .font(.system(size: 9, weight: .black))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("Waxloom")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(WaxloomWatchStyle.accent)
+                WaxloomMark(lineWidth: 6)
+                    .frame(width: 28, height: 20)
             }
 
             WatchStatusRow(
