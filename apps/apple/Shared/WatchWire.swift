@@ -4,6 +4,8 @@ enum PlaybackCommand: String, Codable, CaseIterable {
     case playPause = "play_pause"
     case next
     case previous
+    case seekBackward15 = "seek_backward_15"
+    case seekForward15 = "seek_forward_15"
 }
 
 enum PlaybackCommandResult: String, Codable {
