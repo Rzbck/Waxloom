@@ -92,6 +92,7 @@ def waxloom_state_dir() -> Path:
 
 
 _youtube_provider = YouTubeProvider(cache_dir=waxloom_state_dir() / "yt-dlp-cache")
+_import_service: ImportService | None = None
 
 
 def navidrome_client() -> NavidromeClient:
@@ -123,11 +124,15 @@ def discovery_service() -> DiscoveryService:
 
 
 def import_service() -> ImportService:
-    return ImportService(
-        navidrome=navidrome_client(),
-        youtube=youtube_provider(),
-        library_root=settings.music_library_path,
-    )
+    global _import_service
+    if _import_service is None:
+        _import_service = ImportService(
+            navidrome=navidrome_client(),
+            youtube=youtube_provider(),
+            library_root=settings.music_library_path,
+            state_dir=waxloom_state_dir(),
+        )
+    return _import_service
 
 
 discovery_feed_engine = DiscoveryFeedEngine(
@@ -151,13 +156,17 @@ async def call_navidrome(coro: Any) -> Any:
 
 
 @app.on_event("startup")
-async def start_discovery_feed() -> None:
+async def start_background_services() -> None:
     await discovery_feed_engine.start()
+    if settings.music_library_path:
+        await import_service().start()
 
 
 @app.on_event("shutdown")
-async def stop_discovery_feed() -> None:
+async def stop_background_services() -> None:
     await discovery_feed_engine.stop()
+    if _import_service is not None:
+        await _import_service.stop()
 
 
 @app.get("/api/health")
