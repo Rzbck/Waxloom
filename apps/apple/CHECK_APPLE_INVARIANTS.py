@@ -116,10 +116,13 @@ require(player, "await player.seek(to: .zero)", "Preview switch starts at zero")
 require(player, "currentPreview?.recordingMbid == candidate.recordingMbid", "Same preview pause/resume")
 
 # Bad source must stay separate from musical Less on both iPhone and Watch gateway.
-require(product_views, "value: 0, badSource: true", "iPhone bad-source separation")
-require(catalog_service, "value: 0,", "Watch bad-source musical value")
+# The backend deliberately interprets sourceRejectTag + -1 as a source-rejection row,
+# outside the musical taste table; tagged 0 removes a rejection.
+require(product_views, "badSource: true", "iPhone bad-source marker")
 require(catalog_service, "badSource: true", "Watch bad-source marker")
 require(api_client, 'sourceRejectTag = "__waxloom_source:not_music__"', "Bad-source persistence tag")
+require(api_client, "let feedbackValue = badSource ? -1 : value", "Bad-source negative is source-only")
+require(api_client, "value: feedbackValue", "Bad-source encoded feedback value")
 
 # Full server API adapters stay centralized in the iPhone client.
 for function in (
