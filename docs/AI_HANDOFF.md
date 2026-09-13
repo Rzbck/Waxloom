@@ -141,16 +141,35 @@ The server now maintains a bounded rolling cache for the currently visible Disco
 - import authorization remains required; when the selected source matches a cached item, the cached source-quality file is promoted to the library instead of downloaded again;
 - cache hard cap is 6 GiB, and failed sources back off before retry.
 
-Validation state: `IMPLEMENTED / CI GREEN / NOT USER VALIDATED`.
+Validation state:
+
+- web cached Discovery playback is `USER VALIDATED` on the Windows host;
+- cache endpoint transport to the iPhone is `USER VALIDATED`: physical iPhone taps produced repeated `GET /api/discovery/previews/<recording>` requests and the server returned byte-range `206` responses in a few milliseconds;
+- native iPhone audio playback remained blocked on the `7e9ae29...` app despite successful `206` media delivery, proving the active blocker is in the native AVPlayer startup path rather than cache/Tailscale/server transport.
+
+Native playback diagnosis/fix:
+
+- the previous `startPreview` replaced the remote item and then awaited `player.seek(to: .zero)` before switching to preview state and before calling `play()`;
+- physical logs showed the media Range probes were served while the app could remain in library mode long enough for library queue persistence to continue, consistent with the awaited remote seek blocking preview startup;
+- commit `365d7cc45b0d2997d6c0b4b731926ee08d9287b2` removes that blocking startup order: preview state is published immediately, AVURLAsset playability is loaded explicitly, stale concurrent loads are rejected, a fresh item starts at 0:00 by construction, then `playImmediately(atRate:)` starts audio;
+- invariant commit `a20fad967f4ad565d97f17b1fafe0ea6deaba242` forbids reintroducing the blocking awaited seek and requires the explicit asset-readiness/immediate-play path;
+- this native fix is `IMPLEMENTED / NOT USER VALIDATED` until the exact-SHA IPA is installed and exercised on the physical iPhone.
 
 Physical next test:
 
-1. restart the hidden Waxloom scheduled task on the new branch head;
-2. query `/api/discovery/previews/status` and watch `ready` rise toward `active`;
-3. verify cached browser/iPhone preview starts quickly;
-4. verify Less/X removes that item from the active cache;
-5. verify feed rotation removes stale files;
-6. verify adding a cached matching source promotes locally without a second source download.
+1. install the exact final branch-head IPA after CI succeeds;
+2. tap a ready Discovery track once and confirm audio starts without another tap;
+3. switch A -> B and confirm B starts at 0:00;
+4. tap the active preview and confirm pause/resume preserves position;
+5. verify previous/next starts each newly selected preview at 0:00;
+6. keep `scripts/WATCH_WAXLOOM_LOG.ps1` open if needed and confirm the server continues to return fast `206` preview responses.
+
+## Runtime log / web identity
+
+- Waxloom runtime now writes a bounded rotating local log under `%LOCALAPPDATA%\Waxloom\logs\waxloom-runtime.log`.
+- `scripts/WATCH_WAXLOOM_LOG.ps1` follows that log live without stopping the hidden Waxloom server when the viewer is closed.
+- logs record request path/status/timing and preview/stream identifiers only; secrets, auth headers, cookies and request bodies must not be logged.
+- the web app now has a Waxloom favicon in `apps/web/public/favicon.svg`, wired from `apps/web/index.html`.
 
 ## Windows service topology / automatic startup
 
