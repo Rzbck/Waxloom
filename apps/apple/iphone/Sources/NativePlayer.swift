@@ -30,6 +30,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
     private var periodicObserver: Any?
     private var lastWatchProgressBucket = -1
     private var lastQueuePersistBucket = -1
+    private var lastPreviewProgressTraceID: String?
 
     var queue: [WaxloomSong] { libraryQueue }
     var queueIndex: Int { libraryIndex }
@@ -211,6 +212,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         errorMessage = nil
         lastWatchProgressBucket = -1
         lastQueuePersistBucket = -1
+        lastPreviewProgressTraceID = nil
         revision += 1
 
         if autoplay {
@@ -236,16 +238,35 @@ final class NativePlayerModel: NSObject, ObservableObject {
             .appendingPathComponent(recordingMbid, isDirectory: false)
     }
 
+    private func tracePreview(_ event: String, candidate: WaxloomDiscoveryCandidate, baseURL: URL) {
+        let endpoint = baseURL
+            .appendingPathComponent("api", isDirectory: true)
+            .appendingPathComponent("player", isDirectory: true)
+            .appendingPathComponent("trace", isDirectory: false)
+        let payload: [String: Any] = [
+            "event": event,
+            "song_id": candidate.recordingMbid,
+            "client_epoch_ms": Int(Date().timeIntervalSince1970 * 1000),
+        ]
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+        Task {
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
     private func startPreview(_ candidate: WaxloomDiscoveryCandidate, baseURL: URL) async {
         previewLoadGeneration += 1
         let generation = previewLoadGeneration
         let url = discoveryPreviewURL(baseURL: baseURL, recordingMbid: candidate.recordingMbid)
-        let asset = AVURLAsset(url: url)
 
-        // A replacement AVPlayerItem starts at 0:00 by construction. Do not
-        // await a remote seek before setting preview state: AVPlayer may probe
-        // the HTTP Range endpoint while that seek is pending, which used to
-        // leave Discovery stuck before play() was ever reached.
+        // The cache endpoint is already a byte-range capable Waxloom-local media
+        // source. Do not preload isPlayable/duration and do not seek before play:
+        // those metadata probes can complete several HTTP Range requests while
+        // AVPlayer never reaches the actual playback call on iPhone.
         mode = .preview
         currentPreview = candidate
         currentSong = nil
@@ -255,44 +276,48 @@ final class NativePlayerModel: NSObject, ObservableObject {
         isPlaying = false
         lastWatchProgressBucket = -1
         lastQueuePersistBucket = -1
+        lastPreviewProgressTraceID = nil
         revision += 1
         updateNowPlaying()
         publishSnapshot()
+        tracePreview("preview_tap", candidate: candidate, baseURL: baseURL)
 
-        do {
-            let playable = try await asset.load(.isPlayable)
-            guard generation == previewLoadGeneration,
-                  currentPreview?.recordingMbid == candidate.recordingMbid else { return }
-            guard playable else {
-                errorMessage = "Discovery preview is not playable on this iPhone."
-                revision += 1
-                updateNowPlayingRate()
-                publishSnapshot()
-                return
+        try? AVAudioSession.sharedInstance().setActive(true)
+        guard generation == previewLoadGeneration,
+              currentPreview?.recordingMbid == candidate.recordingMbid else { return }
+
+        let item = AVPlayerItem(url: url)
+        item.preferredForwardBufferDuration = 1.0
+        player.automaticallyWaitsToMinimizeStalling = false
+        player.replaceCurrentItem(with: item)
+        tracePreview("preview_item_set", candidate: candidate, baseURL: baseURL)
+
+        guard generation == previewLoadGeneration,
+              currentPreview?.recordingMbid == candidate.recordingMbid else { return }
+
+        player.playImmediately(atRate: 1.0)
+        isPlaying = true
+        revision += 1
+        updateNowPlaying()
+        publishSnapshot()
+        tracePreview("preview_play_called", candidate: candidate, baseURL: baseURL)
+
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard let self,
+                  generation == self.previewLoadGeneration,
+                  self.currentPreview?.recordingMbid == candidate.recordingMbid,
+                  self.elapsedSeconds < 0.05 else { return }
+            if item.status == .failed {
+                self.isPlaying = false
+                self.errorMessage = "Discovery preview: \(item.error?.localizedDescription ?? "AVPlayer item failed")"
+                self.revision += 1
+                self.updateNowPlaying()
+                self.publishSnapshot()
+                self.tracePreview("preview_item_failed", candidate: candidate, baseURL: baseURL)
+            } else {
+                self.tracePreview("preview_no_progress", candidate: candidate, baseURL: baseURL)
             }
-
-            let item = AVPlayerItem(asset: asset)
-            player.replaceCurrentItem(with: item)
-            if let duration = try? await asset.load(.duration), duration.seconds.isFinite, duration.seconds > 0 {
-                durationSeconds = duration.seconds
-            }
-            guard generation == previewLoadGeneration,
-                  currentPreview?.recordingMbid == candidate.recordingMbid else { return }
-
-            player.playImmediately(atRate: 1.0)
-            isPlaying = true
-            revision += 1
-            updateNowPlaying()
-            publishSnapshot()
-        } catch {
-            guard generation == previewLoadGeneration,
-                  currentPreview?.recordingMbid == candidate.recordingMbid else { return }
-            player.replaceCurrentItem(with: nil)
-            isPlaying = false
-            errorMessage = "Discovery preview: \(error.localizedDescription)"
-            revision += 1
-            updateNowPlaying()
-            publishSnapshot()
         }
     }
 
@@ -392,6 +417,15 @@ final class NativePlayerModel: NSObject, ObservableObject {
                     self.durationSeconds = itemDuration
                 }
                 self.updateNowPlayingElapsed()
+
+                if self.mode == .preview,
+                   let preview = self.currentPreview,
+                   self.elapsedSeconds > 0.05,
+                   self.lastPreviewProgressTraceID != preview.recordingMbid,
+                   let baseURL = self.baseURL {
+                    self.lastPreviewProgressTraceID = preview.recordingMbid
+                    self.tracePreview("preview_progress", candidate: preview, baseURL: baseURL)
+                }
 
                 if self.isPlaying {
                     let bucket = Int(self.elapsedSeconds / 5)
