@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
+import tempfile
 import time
 from collections.abc import Mapping
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -22,8 +27,30 @@ def _stamp(epoch_ms: int | None = None) -> str:
     return now.strftime("%H:%M:%S.%f")[:-3]
 
 
+def _runtime_log_path() -> Path:
+    root = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()) / "Waxloom" / "logs"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / "waxloom-runtime.log"
+
+
+_runtime_logger = logging.getLogger("waxloom.runtime")
+_runtime_logger.setLevel(logging.INFO)
+_runtime_logger.propagate = False
+if not _runtime_logger.handlers:
+    _runtime_handler = RotatingFileHandler(
+        _runtime_log_path(),
+        maxBytes=4 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    _runtime_handler.setFormatter(logging.Formatter("%(message)s"))
+    _runtime_logger.addHandler(_runtime_handler)
+
+
 def _log(message: str, *, epoch_ms: int | None = None) -> None:
-    print(f"[{_stamp(epoch_ms)}] {message}", flush=True)
+    line = f"[{_stamp(epoch_ms)}] {message}"
+    print(line, flush=True)
+    _runtime_logger.info(line)
 
 
 class _NoCloseLease:
@@ -182,7 +209,13 @@ class CoverGate:
 
 
 class TimestampAccessLog:
-    """Millisecond request timing for the local development runtime."""
+    """Millisecond request timing for the local development runtime.
+
+    The same sanitized access lines are also persisted to a small rotating file
+    under the local Waxloom state directory so the hidden Scheduled Task remains
+    diagnosable without exposing credentials, request bodies, cookies or query
+    strings.
+    """
 
     def __init__(self, app: Any) -> None:
         self.app = app
@@ -201,6 +234,9 @@ class TimestampAccessLog:
         if path.startswith("/api/media/stream/"):
             song_id = path.rsplit("/", 1)[-1]
             _log(f"STREAM request song={song_id}", epoch_ms=arrived_epoch_ms)
+        elif path.startswith("/api/discovery/previews/"):
+            recording_mbid = path.rsplit("/", 1)[-1]
+            _log(f"PREVIEW request recording={recording_mbid}", epoch_ms=arrived_epoch_ms)
 
         async def timed_send(message: dict[str, Any]) -> None:
             nonlocal response_started
