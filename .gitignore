@@ -36,3 +36,13 @@ logs/
 cookies*.txt
 *.sqlite
 *.sqlite3
+
+# Apple local signing / build artifacts
+artifacts/
+DerivedData/
+*.ipa
+*.mobileprovision
+*.p12
+*.p8
+*.cer
+*.xcarchive/

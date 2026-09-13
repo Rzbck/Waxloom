@@ -1,0 +1,32 @@
+name: WaxloomWatch
+options:
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  WaxloomWatch:
+    type: application
+    platform: watchOS
+    deploymentTarget: "10.0"
+    sources:
+      - path: Sources
+      - path: ../Shared
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Waxloom
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        WKApplication: true
+        WKCompanionAppBundleIdentifier: com.rzbck.waxloom
+        WKRunsIndependentlyOfCompanionApp: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rzbck.waxloom.watchkitapp
+        PRODUCT_NAME: WaxloomWatch
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        TARGETED_DEVICE_FAMILY: "4"
+        SKIP_INSTALL: NO
+    scheme: {}
