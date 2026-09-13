@@ -17,7 +17,7 @@ from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
 from waxloom_api.youtube_dig import dig_youtube_gems
 
-_FEED_VERSION = 3
+_FEED_VERSION = 4
 
 _STYLE_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("post-punk", ("post punk", "coldwave", "darkwave", "new wave", "goth", "shoegaze", "dream pop")),
@@ -198,8 +198,6 @@ class DiscoveryFeedEngine:
                     force_refresh=True,
                 )
 
-                # Build a separate low-exposure/high-engagement YouTube pool in
-                # the background. Failure never invalidates the normal feed.
                 try:
                     gems = await dig_youtube_gems(snapshot, service.navidrome, limit=48)
                 except Exception:
@@ -279,8 +277,6 @@ class DiscoveryFeedEngine:
             if len(output) >= self._visible_size:
                 return output
 
-        # If the providers simply do not offer enough style variety, fill the
-        # remaining slots rather than returning a short feed.
         for item in ordered:
             try_add(item, enforce_style=False)
             if len(output) >= self._visible_size:
@@ -326,8 +322,6 @@ class DiscoveryFeedEngine:
 
         output = self._style_balanced(output, items)
 
-        # Reserve a meaningful slice of every visible rotation for direct
-        # YouTube digs. The dig itself is already style-balanced.
         dig_items = [
             item
             for item in items
