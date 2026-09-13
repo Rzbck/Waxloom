@@ -28,7 +28,7 @@ The saved endpoint reconnects automatically on launch. Health validation is sing
 
 ## Discovery preview playback
 
-Discovery previews use the Waxloom server's rolling temporary cache rather than resolving a fresh provider stream on every tap. A new remote AVPlayer item starts at 0:00 by construction; native startup must not await a remote seek before preview state and playback are established. The player explicitly checks asset playability, rejects stale concurrent loads, and starts the selected preview immediately once the cached asset is ready.
+Discovery previews use the Waxloom server's rolling temporary cache rather than resolving a fresh provider stream on every tap. The native player constructs `AVPlayerItem(url:)` directly from the byte-range capable Waxloom cache endpoint and calls `playImmediately(atRate:)` without pre-play seek, playability loading, or duration loading. Stale concurrent selections are rejected, and non-secret native stage traces (`preview_tap`, `preview_item_set`, `preview_play_called`, `preview_progress`, `preview_no_progress`, `preview_item_failed`) are sent to the existing Waxloom runtime logger for physical-device diagnosis without an Xcode console.
 
 ## Watch control contract
 
