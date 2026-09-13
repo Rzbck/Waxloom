@@ -115,6 +115,17 @@ require(player, "changePlaybackPositionCommand", "System seek")
 require(player, "await player.seek(to: .zero)", "Preview switch starts at zero")
 require(player, "currentPreview?.recordingMbid == candidate.recordingMbid", "Same preview pause/resume")
 
+# Playback UI must never cover the bottom tab navigation.
+mini_player_insets = product_views.count(".productMiniPlayerInset(connection: connection, player: player)")
+if mini_player_insets < 5:
+    errors.append(f"iPhone playback navigation: expected mini-player inset on 5 tabs, found {mini_player_insets}")
+require(product_views, ".toolbarBackground(.visible, for: .tabBar)", "Visible iPhone tab bar during playback")
+forbid(
+    product_views,
+    '.tint(ProductTheme.accent)\n        .safeAreaInset(edge: .bottom',
+    "Root TabView mini-player overlay",
+)
+
 # Bad source must stay separate from musical Less on both iPhone and Watch gateway.
 # The backend deliberately interprets sourceRejectTag + -1 as a source-rejection row,
 # outside the musical taste table; tagged 0 removes a rejection.
