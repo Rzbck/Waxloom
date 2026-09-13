@@ -20,7 +20,7 @@ type TasteEntry = {
 type TasteState = Record<string, TasteEntry>;
 type ShelfKey = "closest" | "underground" | "deep";
 
-const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v3";
+const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
 const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SHELF_PAGE_SIZE = 12;
 const SHELF_TARGET_SIZE = 20;
@@ -341,13 +341,9 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     const ranked = activeCandidates(bundle?.external.items ?? [], taste);
     const used = new Set<string>();
 
-    // Closest remains similarity-first and intentionally excludes YouTube-dig
-    // material so rare gems are preserved for the dedicated digging shelf.
     const closestPool = ranked.filter((candidate) => candidate.source !== "youtube_dig");
     const closest = fillShelf(closestPool, closestPool, used);
 
-    // Real digging: direct YouTube discoveries with low exposure come first.
-    // Only very-high-rarity ListenBrainz material may fill remaining slots.
     const youtubeDigPrimary = [...ranked]
       .filter((candidate) => candidate.source === "youtube_dig")
       .sort((a, b) => (b.underground + b.rank * 0.25) - (a.underground + a.rank * 0.25));
@@ -451,7 +447,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       const best = search.items[0];
       if (!best || best.score < 80) {
         setQuickTarget(null);
-        setNotice("The automatic source match was ambiguous. Choose the source manually before importing.");
+        setNotice("The automatic source match was ambiguous or did not pass the music-only check. Choose the source manually before importing.");
         onImportCandidate(candidate);
         return;
       }
@@ -460,8 +456,10 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
         result.status === "already_local"
           ? `Already local — added the existing track to “${playlist.name}”.`
           : result.playlist_added
-            ? `Downloaded and added to “${playlist.name}”.`
-            : "Downloaded. Navidrome is still indexing it; playlist insertion may follow after the scan.",
+            ? `Downloaded at source-best audio quality and added to “${playlist.name}”.`
+            : result.playlist_pending
+              ? `Downloaded at source-best audio quality. Waxloom queued the add to “${playlist.name}” and will complete it automatically after Navidrome indexes the track.`
+              : "Downloaded at source-best audio quality. Navidrome is still indexing it.",
       );
       setQuickTarget(null);
     } catch (caught) {
@@ -531,7 +529,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onFeedback={updateFeedback}
           />
           <DiscoveryShelf
-            eyebrow="YouTube dig · low-exposure tracks"
+            eyebrow="YouTube dig · music-verified · low exposure / high engagement"
             title="More underground"
             items={rails.underground}
             page={shelfPages.underground}
@@ -566,7 +564,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
               <div><p className="eyebrow">Download + add</p><h3>{quickTarget.artist} — {quickTarget.title}</h3></div>
               <button className="icon-button" type="button" onClick={() => setQuickTarget(null)}>×</button>
             </div>
-            <p className="muted">Choose the destination playlist. Waxloom uses the highest-confidence source automatically; ambiguous matches fall back to manual source selection.</p>
+            <p className="muted">Choose the destination playlist. Waxloom uses the highest-confidence music-only source automatically; ambiguous matches fall back to manual source selection.</p>
             <div className="modal-list">
               {playlists.map((playlist) => (
                 <button className="modal-list-item" type="button" key={playlist.id} disabled={importing === quickTarget.recording_mbid} onClick={() => void addToPlaylist(playlist)}>
