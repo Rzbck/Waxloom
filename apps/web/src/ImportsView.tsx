@@ -21,7 +21,6 @@ function formatDuration(seconds?: number): string {
 
 export function ImportsView({
   target,
-  playlists,
   onImported,
 }: {
   target: DiscoveryCandidate | null;
@@ -33,7 +32,6 @@ export function ImportsView({
   const [runtime, setRuntime] = useState<YouTubeRuntime | null>(null);
   const [candidates, setCandidates] = useState<YouTubeCandidate[]>([]);
   const [selectedUrl, setSelectedUrl] = useState("");
-  const [playlistId, setPlaylistId] = useState("");
   const [authorized, setAuthorized] = useState(false);
   const [searching, setSearching] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -92,7 +90,7 @@ export function ImportsView({
         artist.trim(),
         title.trim(),
         selected.url,
-        playlistId || null,
+        null,
         authorized,
       );
       setResult(imported);
@@ -104,7 +102,7 @@ export function ImportsView({
     }
   }
 
-  const runtimeReady = Boolean(runtime?.status.ffmpeg && runtime?.status.yt_dlp && runtime?.library_configured);
+  const runtimeReady = Boolean(runtime?.status.yt_dlp && runtime?.library_configured);
 
   return (
     <div className="imports-layout">
@@ -112,8 +110,8 @@ export function ImportsView({
         <div className="section-toolbar section-toolbar-summary">
           <div>
             <p className="eyebrow">Authorized media import</p>
-            <h2>Find the exact source, then choose it yourself.</h2>
-            <p className="muted">Waxloom filters non-music videos and preserves the best available source audio without forcing MP3 transcoding.</p>
+            <h2>Find the exact source, then add it to your library.</h2>
+            <p className="muted">Waxloom stores imported music as a normal local-library track under Artist / Singles. No playlist is required.</p>
           </div>
           <div className={runtimeReady ? "runtime-pill runtime-pill-ok" : "runtime-pill"}>
             {runtimeReady ? "Runtime ready" : "Runtime check"}
@@ -123,9 +121,8 @@ export function ImportsView({
         {runtime && (
           <div className="runtime-grid">
             <div><span>yt-dlp</span><strong>{runtime.status.yt_dlp ? "Ready" : "Missing"}</strong></div>
-            <div><span>FFmpeg</span><strong>{runtime.status.ffmpeg ? "Ready" : "Missing"}</strong></div>
+            <div><span>FFmpeg</span><strong>{runtime.status.ffmpeg ? "Available" : "Not required"}</strong></div>
             <div><span>Node</span><strong>{runtime.status.node ? "Ready" : "Missing"}</strong></div>
-            <div><span>Audio import</span><strong>{runtime.status.download_quality === "source-best" ? "Source best" : "Ready"}</strong></div>
             <div><span>Music library</span><strong>{runtime.library_configured ? "Configured" : "Missing"}</strong></div>
           </div>
         )}
@@ -148,18 +145,22 @@ export function ImportsView({
           <div className="import-origin">
             <span>Discovery candidate</span>
             <strong>{target.artist} — {target.title}</strong>
-            <small>ListenBrainz/MusicBrainz rank {Math.round(target.rank * 100)}%</small>
+            <small>Discovery rank {Math.round(target.rank * 100)}%</small>
           </div>
         )}
 
         {error && <div className="state-card state-card-error">{error}</div>}
         {result && (
           <div className="state-card state-card-success import-result">
-            <strong>{result.status === "already_local" ? "Already in your library." : result.status === "imported" ? "Imported and indexed." : "Downloaded; Navidrome indexing continues in the background."}</strong>
+            <strong>
+              {result.status === "already_local"
+                ? "Already in your library."
+                : result.status === "imported"
+                  ? "Downloaded and indexed in your library."
+                  : "Downloaded to your library; Navidrome is still indexing it."}
+            </strong>
             {result.relative_path && <span>Library path: {result.relative_path}</span>}
-            {result.audio_format && <span>Preserved audio format: {result.audio_format.toUpperCase()}</span>}
-            {result.playlist_added && <span>Added to the selected playlist.</span>}
-            {result.playlist_pending && <span>Playlist add is queued persistently and will complete automatically after Navidrome indexes the track.</span>}
+            {result.audio_format && <span>Source audio container: {result.audio_format.toUpperCase()}</span>}
           </div>
         )}
       </section>
@@ -200,26 +201,17 @@ export function ImportsView({
             );
           })}
           {!searching && candidates.length === 0 && (
-            <div className="empty-state">No music candidate loaded. Search an artist + track or come here from Discovery.</div>
+            <div className="empty-state">No candidate loaded. Search an artist + track or come here from Discovery.</div>
           )}
         </div>
       </section>
 
       <section className="panel import-finalize">
         <div>
-          <p className="eyebrow">Destination</p>
-          <h2>Download + add to your library</h2>
+          <p className="eyebrow">Local library</p>
+          <h2>Download + add to library</h2>
+          <p className="muted">Best available audio is kept without a forced MP3 transcode and saved under Artist / Singles.</p>
         </div>
-
-        <label className="playlist-select-label">
-          <span>Optional playlist</span>
-          <select value={playlistId} onChange={(event) => setPlaylistId(event.target.value)}>
-            <option value="">Do not add to a playlist</option>
-            {playlists.map((playlist) => (
-              <option key={playlist.id} value={playlist.id}>{playlist.name}</option>
-            ))}
-          </select>
-        </label>
 
         <label className="authorization-check">
           <input type="checkbox" checked={authorized} onChange={(event) => setAuthorized(event.target.checked)} />
@@ -232,9 +224,9 @@ export function ImportsView({
           disabled={!selected || !authorized || importing || !runtimeReady}
           onClick={() => void importSelected()}
         >
-          {importing ? "Downloading / scanning…" : selected ? "Download + import" : "Select a source first"}
+          {importing ? "Downloading / scanning…" : selected ? "Download + add to library" : "Select a source first"}
         </button>
-        {!runtimeReady && runtime && <p className="inline-error">Import is blocked until FFmpeg, yt-dlp and the music library are available.</p>}
+        {!runtimeReady && runtime && <p className="inline-error">Import is blocked until yt-dlp and the music library are available.</p>}
       </section>
     </div>
   );
