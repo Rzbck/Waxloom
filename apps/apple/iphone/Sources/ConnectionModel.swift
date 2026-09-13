@@ -30,10 +30,14 @@ final class ConnectionModel: ObservableObject {
         return false
     }
 
+    var baseURL: URL? {
+        try? secureBaseURL(from: serverURLText)
+    }
+
     var statusText: String {
         switch state {
         case .idle:
-            return "Server not configured"
+            return serverURLText.isEmpty ? "Server not configured" : "Saved server ready"
         case .connecting:
             return "Connecting…"
         case .connected:
@@ -41,6 +45,12 @@ final class ConnectionModel: ObservableObject {
         case .failed(let message):
             return message
         }
+    }
+
+    func connectSavedIfNeeded() async {
+        guard !serverURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !isConnected else { return }
+        await connect()
     }
 
     func connect() async {
