@@ -5,62 +5,104 @@ Date: 2026-09-13
 ## Repository state
 
 - Repository: `Rzbck/Waxloom` (public).
-- Published `main`: `8aab2070e067b2f203ce3e8b7ecb85a8d72538f1`.
-- Current chantier / PR #9: `fix/discovery-preview-controls-20260913`.
-- PR #9 is stacked on PR #8 / `feat/discovery-bad-source-feedback-20260913` at `31cf287ab16f9779eb2a47b364e49f9e60226a50`.
-- **Exact runtime candidate USER VALIDATED:** `a2cec448319178144b457e98081e572d1c985a29`.
-- On that exact runtime candidate, GitHub `Public repository security gate` = PASS and `Windows build gate` = PASS.
-- Promotion to `main` still requires explicit owner instruction. Do not infer promotion permission from this validation.
+- Published `main`: `e44183afe9b82c23f6fe77943faec1a1fb7773b0`.
+- PR #9 / validated Discovery stack was promoted to `main` after owner authorization.
+- Post-merge GitHub `Public repository security gate` = PASS.
+- Post-merge GitHub `Windows build gate` = PASS.
+- Current chantier: `feat/iphone-app-20260913`.
+- Branch point: published `main` `e44183afe9b82c23f6fe77943faec1a1fb7773b0`.
+- Dedicated Windows worktree created by owner: `E:\_Project\_WAXLOOM_WORKTREES\iphone-app-20260913`.
+- At chantier creation the worktree was CLEAN at `e44183a`.
 
-## USER VALIDATED — Discovery source rejection + preview controls
+## USER VALIDATED baseline carried into native work
 
-The owner validated the current behavior on `a2cec448319178144b457e98081e572d1c985a29`:
+The owner validated the Discovery source-quality + preview-control behavior before promotion:
 
-- In **More underground**, direct YouTube Dig candidates expose a dedicated bad-source `X` action using the Lucide `x-circle` icon selected through Supericons.
-- The `X` sits on the same action row as Play / Add / Like / Less rather than dropping below the card.
-- Bad-source rejection remains separate from musical `Less`; using `X` must not increment the Less signal.
-- Rejected bad-source candidates disappear immediately from the visible Discovery feed.
-- Switching from Discovery preview A to preview B resets B to `0:00`; the previous preview seek position does not leak into the new source.
-- Clicking the currently active Discovery track toggles Play/Pause.
-- Resuming the same paused Discovery preview continues from the pause position rather than restarting.
-- Discovery Next/Previous and preview-queue track changes reset the newly selected preview to `0:00`.
-- Navidrome saved-position restore remains isolated to local-library playback.
+- YouTube Dig bad-source `X` is aligned with Play/Add/Like/Less and remains separate from musical `Less` feedback;
+- switching Discovery preview A -> B starts B at `0:00`;
+- the active Discovery track toggles Play/Pause;
+- resume continues from the paused position;
+- newly selected preview tracks start at `0:00`;
+- Discovery preview playback remains separate from the persisted Navidrome queue.
 
-Status for this tranche: **USER VALIDATED**.
+These semantics must be preserved by the native iPhone player.
 
-## Permanent Discovery behavior
+## Native iPhone + Apple Watch chantier
 
-- Discovery is outside-library only; artist identity may influence ranking/diversity, but visible recommendations are tracks.
-- Shelves remain `Closest to your collection`, `More underground`, and `Deep cuts`.
-- `More tracks` pages through prepared candidates without forcing an expensive recommendation rebuild.
-- Discovery Like/Less feedback and source-quality rejection are different signals and must stay separate.
-- External previews use the global Waxloom player but must never scrobble or persist into the Navidrome play queue.
-- Preview resolution may use YouTube search/cache/prewarming, but provider credentials/cookies remain server-side and request concurrency must stay bounded.
+The owner wants a real native Waxloom iPhone app plus companion Watch app, not a WKWebView wrapper.
 
-## Icon system
+Architecture/process audit completed against `Rzbck/ios-godot-lab`, including its iPhone Lab V2 build/sideload workflow and the current native `apps/watch-sensor-lab` iPhone/Watch implementation.
 
-Use the coherent Lucide outline vocabulary selected through the connected Supericons plugin. SVG masks inherit `currentColor`. Do not reintroduce arbitrary emoji/font glyphs for new Discovery controls.
+Canonical native design document:
 
-## Runtime / Tailscale
+`docs/IOS_NATIVE_ARCHITECTURE.md`
 
-`scripts/dev.ps1` is the normal Windows launcher. It prepares the API/frontend dependencies, starts Waxloom, binds to the active Tailscale interface when available, and falls back to localhost otherwise. Do not replace this with `npm run dev` from the repository root.
+Key decisions:
 
-## Security / Git invariants
+- pure SwiftUI iPhone + watchOS client; no Godot runtime in Waxloom;
+- reuse Waxloom's existing HTTP API instead of duplicating Navidrome/AudioMuse/ListenBrainz/YouTube provider logic in Swift;
+- iPhone native player is the single live native-playback authority;
+- Watch is a presentation/control companion and communicates with iPhone through WatchConnectivity;
+- Watch player commands use exact UUID tokens + base revision/session checks + explicit acknowledgements; stale/delayed Play/Pause/Next commands must never execute later;
+- state uses `updateApplicationContext`; immediate controls use `sendMessage`; durable/file transports are reserved for semantics that are safe to deliver later;
+- native audio uses AVFoundation/MediaPlayer with background audio, Now Playing and system remote commands;
+- native UI keeps Waxloom's dark/violet visual identity and product information architecture while using native SwiftUI controls;
+- exact-SHA unsigned iPhone+Watch IPA artifacts are built on GitHub Actions macOS using checked-in XcodeGen specs;
+- physical iPhone/Watch validation remains separate from CI build success.
 
-- Public repo: never commit `.env`, credentials, cookies, provider tokens, private DBs, media, or local state.
-- Browser never receives Navidrome/AudioMuse secrets.
-- `scripts/security-gate.ps1` remains mandatory for publication candidates.
-- **1 active chantier = 1 branch = 1 dedicated worktree.**
-- No force-push, destructive reset, blind `git clean`, or shared-history rewrite.
-- Exact candidate runtime claims require exact SHA attribution.
-- Historical `E:\_Project\Waxloom` remains a special checkout; do not clean/reset unknown local state there.
+## Tailscale / native network security
 
-## Next step
+Current Waxloom development runtime binds API/Vite to the active Tailscale interface when available. The API currently has no dedicated native-client authentication layer.
 
-This Discovery tranche has no known blocker from the validated test. Before the next chantier, fetch current GitHub state, inventory worktrees, and branch from the intended validated/stacked base. If the owner wants this tranche promoted to `main`, require a separate explicit promotion instruction and re-run the required final gates/diff review at the promotion candidate.
+Native direction:
 
-## Rollback / checkpoint
+- keep Waxloom private to the tailnet; never use Funnel for the app;
+- prefer stable MagicDNS + HTTPS/Tailscale Serve rather than broad iOS cleartext ATS exceptions;
+- use least-privilege Tailscale Grants for the Waxloom service;
+- do not embed Tailscale auth keys or provider credentials in the app;
+- if Tailscale Serve identity/app-capability headers are used for authorization, the backend path must not remain directly reachable in a way that permits header spoofing;
+- use a non-sensitive Tailscale machine name before enabling public-CA HTTPS because the certificate FQDN is recorded in Certificate Transparency.
 
-- Runtime checkpoint accepted by owner: `a2cec448319178144b457e98081e572d1c985a29`.
-- PR #9 base / rollback point for this tranche: `31cf287ab16f9779eb2a47b364e49f9e60226a50`.
-- Use revert/new commits for published rollback; no destructive history rewrite.
+Any network-launcher refactor must preserve the already USER VALIDATED desktop/mobile-web path and be tested as its own runtime tranche.
+
+## Native security invariants
+
+- public repo: never commit `.env`, credentials, cookies, provider tokens, signing certificates, provisioning profiles, Apple passwords, Team IDs tied to private setup, device UDIDs, pairing files, private DBs, media or user library data;
+- provider credentials remain server-side;
+- request only minimum Apple capabilities; first native music tranche needs background audio, not HealthKit/location/motion/microphone;
+- CI builds unsigned; local sideload/signing remains outside GitHub;
+- exact candidate claims require exact SHA attribution;
+- 1 active chantier = 1 branch = 1 dedicated worktree;
+- no force-push, destructive reset, blind clean or shared-history rewrite.
+
+## Existing API surface to reuse
+
+The current backend already exposes the native client's core product surface:
+
+- health/integration state;
+- albums/artists/song detail/search/random library;
+- Favorites/starred;
+- playlists CRUD;
+- persisted Navidrome queue;
+- Discovery feed/status/feedback;
+- YouTube preview resolution/import;
+- audio stream with HTTP Range forwarding;
+- cover-art proxy.
+
+Native Codable DTOs should mirror these contracts. Avoid a second source of truth.
+
+## NEXT TEST / implementation order
+
+1. Add `apps/apple` native SwiftUI/XcodeGen scaffold and shared DTO/control protocol.
+2. Add pinned exact-SHA macOS CI that builds unsigned iPhone + embedded Watch companion and verifies product invariants.
+3. Add a fail-closed Windows exact-artifact updater modeled on the proven iOS lab workflow.
+4. Implement secure Waxloom endpoint configuration and `/api/health` handshake over Tailscale.
+5. Then implement native navigation/library before the audio engine and Watch controls.
+
+Do not claim native app validation until the exact built IPA is installed and tested on the real iPhone/Watch.
+
+## Rollback / checkpoints
+
+- Published baseline / native branch point: `e44183afe9b82c23f6fe77943faec1a1fb7773b0`.
+- Previously USER VALIDATED Discovery runtime candidate: `a2cec448319178144b457e98081e572d1c985a29`.
+- Published rollback uses revert/new commit only; never rewrite shared history.
