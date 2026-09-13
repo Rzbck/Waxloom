@@ -686,20 +686,59 @@ private struct ProductSearchView: View {
 }
 
 private struct ProductDiscoveryView: View {
+    private enum Lane: String, CaseIterable, Identifiable {
+        case closest = "Close"
+        case underground = "Underground"
+        case deep = "Deep"
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .closest: return "Closest to your collection"
+            case .underground: return "More underground"
+            case .deep: return "Deep cuts"
+            }
+        }
+
+        var eyebrow: String {
+            switch self {
+            case .closest: return "BEST MATCHES"
+            case .underground: return "YOUTUBE DIG · LOW EXPOSURE"
+            case .deep: return "CATALOGUE EXPLORATION"
+            }
+        }
+
+        var emptyDescription: String {
+            switch self {
+            case .closest: return "No close matches in this rotation yet."
+            case .underground: return "No underground picks in this rotation yet."
+            case .deep: return "No deep cuts in this rotation yet."
+            }
+        }
+    }
+
+    private struct Shelves {
+        let closest: [WaxloomDiscoveryCandidate]
+        let underground: [WaxloomDiscoveryCandidate]
+        let deep: [WaxloomDiscoveryCandidate]
+    }
+
     @ObservedObject var connection: ConnectionModel
     @ObservedObject var player: NativePlayerModel
     @State private var candidates: [WaxloomDiscoveryCandidate] = []
     @State private var status = "starting"
     @State private var loading = false
     @State private var error: String?
+    @State private var lane: Lane = .closest
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+        VStack(spacing: 0) {
+            VStack(spacing: 10) {
                 HStack {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("DISCOVERY").font(.caption.bold()).tracking(2).foregroundStyle(.secondary)
-                        Text("Outside your library").font(.largeTitle.bold())
+                        Text("Outside your library").font(.title2.bold())
                     }
                     Spacer()
                     Menu {
@@ -712,74 +751,225 @@ private struct ProductDiscoveryView: View {
 
                 HStack(spacing: 7) {
                     Circle().fill(status == "ready" ? Color.green : Color.orange).frame(width: 8, height: 8)
-                    Text(status == "ready" ? "Feed ready" : status.capitalized).font(.caption.weight(.semibold))
+                    Text(status == "ready" ? "Feed ready" : status.capitalized)
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Text("Swipe between lanes")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
                 .foregroundStyle(.secondary)
 
-                if loading && candidates.isEmpty { ProgressView("Loading Discovery…").frame(maxWidth: .infinity, minHeight: 180) }
-
-                ForEach(candidates) { candidate in
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(candidate.title).font(.headline).lineLimit(2)
-                                Text(candidate.artist).font(.subheadline).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("\(Int(max(0, min(1, candidate.rank)) * 100))%")
-                                .font(.caption.bold())
-                                .foregroundStyle(ProductTheme.accent)
-                        }
-
-                        HStack(spacing: 8) {
-                            ProductCapsuleButton(
-                                symbol: player.currentPreview?.recordingMbid == candidate.recordingMbid && player.isPlaying ? "pause.fill" : "play.fill",
-                                label: "Play"
-                            ) {
-                                guard let base = connection.baseURL else { return }
-                                Task { await player.playPreview(candidate: candidate, queue: candidates, baseURL: base) }
-                            }
-                            ProductCapsuleButton(symbol: candidate.feedback == 1 ? "heart.fill" : "heart", label: "Like") {
-                                Task { await feedback(candidate, value: candidate.feedback == 1 ? 0 : 1) }
-                            }
-                            ProductCapsuleButton(symbol: "hand.thumbsdown", label: "Less") {
-                                Task { await feedback(candidate, value: -1) }
-                            }
-                            NavigationLink {
-                                ProductImportsView(connection: connection, seedArtist: candidate.artist, seedTitle: candidate.title)
-                            } label: {
-                                Image(systemName: "arrow.down.circle")
-                                    .frame(width: 36, height: 36)
-                                    .background(Color.white.opacity(0.07), in: Circle())
-                            }
-                            .buttonStyle(.plain)
-
-                            if candidate.source == "youtube_dig" {
-                                Button { Task { await rejectBadSource(candidate) } } label: {
-                                    Image(systemName: "xmark.circle")
-                                        .foregroundStyle(.orange)
-                                        .frame(width: 36, height: 36)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Bad or non-music source")
-                            }
-                        }
-
-                        if let reason = candidate.reason, !reason.isEmpty {
-                            Text(reason).font(.caption2).foregroundStyle(.tertiary)
-                        }
+                Picker("Discovery lane", selection: $lane) {
+                    ForEach(Lane.allCases) { value in
+                        Text(value.rawValue).tag(value)
                     }
-                    .productCard()
                 }
-                ProductErrorText(error)
+                .pickerStyle(.segmented)
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+
+            TabView(selection: $lane) {
+                ForEach(Lane.allCases) { value in
+                    discoveryPage(value)
+                        .tag(value)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(ProductTheme.background.ignoresSafeArea())
         .navigationTitle("Discovery")
         .navigationBarTitleDisplayMode(.inline)
         .task(id: connection.isConnected) { if connection.isConnected { await load() } }
+    }
+
+    @ViewBuilder
+    private func discoveryPage(_ value: Lane) -> some View {
+        let items = items(for: value)
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(value.eyebrow) · \(items.count) TRACKS")
+                        .font(.caption2.bold())
+                        .tracking(1.4)
+                        .foregroundStyle(.secondary)
+                    Text(value.title)
+                        .font(.title3.bold())
+                }
+
+                if loading && candidates.isEmpty {
+                    ProgressView("Loading Discovery…")
+                        .frame(maxWidth: .infinity, minHeight: 180)
+                } else if items.isEmpty && error == nil {
+                    ContentUnavailableView(
+                        value.title,
+                        systemImage: "sparkles",
+                        description: Text(value.emptyDescription)
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 220)
+                }
+
+                ForEach(items) { candidate in
+                    discoveryCard(candidate, queue: items)
+                }
+
+                ProductErrorText(error)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 18)
+        }
         .refreshable { await load() }
+    }
+
+    private func discoveryCard(_ candidate: WaxloomDiscoveryCandidate, queue: [WaxloomDiscoveryCandidate]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(candidate.title).font(.headline).lineLimit(2)
+                    Text(candidate.artist).font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text("\(Int(max(0, min(1, candidate.rank)) * 100))%")
+                    .font(.caption.bold())
+                    .foregroundStyle(ProductTheme.accent)
+            }
+
+            HStack(spacing: 8) {
+                ProductCapsuleButton(
+                    symbol: player.currentPreview?.recordingMbid == candidate.recordingMbid && player.isPlaying ? "pause.fill" : "play.fill",
+                    label: "Play"
+                ) {
+                    guard let base = connection.baseURL else { return }
+                    Task { await player.playPreview(candidate: candidate, queue: queue, baseURL: base) }
+                }
+
+                ProductCapsuleButton(symbol: candidate.feedback == 1 ? "heart.fill" : "heart", label: "Like") {
+                    Task { await feedback(candidate, value: candidate.feedback == 1 ? 0 : 1) }
+                }
+
+                ProductCapsuleButton(symbol: "hand.thumbsdown", label: "Less") {
+                    Task { await feedback(candidate, value: -1) }
+                }
+
+                NavigationLink {
+                    ProductImportsView(connection: connection, seedArtist: candidate.artist, seedTitle: candidate.title)
+                } label: {
+                    Image(systemName: "arrow.down.circle")
+                        .frame(width: 36, height: 36)
+                        .background(Color.white.opacity(0.07), in: Circle())
+                }
+                .buttonStyle(.plain)
+
+                if candidate.source == "youtube_dig" {
+                    Button { Task { await rejectBadSource(candidate) } } label: {
+                        Image(systemName: "xmark.circle")
+                            .foregroundStyle(.orange)
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Bad or non-music source")
+                } else {
+                    Color.clear
+                        .frame(width: 36, height: 36)
+                        .accessibilityHidden(true)
+                }
+            }
+
+            if let reason = candidate.reason, !reason.isEmpty {
+                Text(reason).font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .productCard()
+    }
+
+    private var shelves: Shelves {
+        let ranked = candidates
+            .filter { ($0.feedback ?? 0) >= 0 }
+            .sorted { $0.rank > $1.rank }
+        var used = Set<String>()
+
+        let closestPool = ranked.filter { $0.source != "youtube_dig" }
+        let closest = fillShelf(primary: closestPool, fallback: closestPool, used: &used, target: 20)
+
+        let youtubeDigPrimary = ranked
+            .filter { $0.source == "youtube_dig" }
+            .sorted {
+                ($0.underground + $0.rank * 0.25) > ($1.underground + $1.rank * 0.25)
+            }
+        let rareMetadataFallback = ranked
+            .filter { $0.source == "listenbrainz" && $0.underground >= 0.82 }
+            .sorted {
+                ($0.underground + $0.rank * 0.15) > ($1.underground + $1.rank * 0.15)
+            }
+        let underground = fillShelf(
+            primary: youtubeDigPrimary,
+            fallback: rareMetadataFallback,
+            used: &used,
+            target: 28
+        )
+
+        let deepPrimary = ranked.filter { $0.source == "musicbrainz_catalog" }
+        let deep = fillShelf(primary: deepPrimary, fallback: closestPool, used: &used, target: 20)
+
+        return Shelves(closest: closest, underground: underground, deep: deep)
+    }
+
+    private func items(for value: Lane) -> [WaxloomDiscoveryCandidate] {
+        let valueSet = shelves
+        switch value {
+        case .closest: return valueSet.closest
+        case .underground: return valueSet.underground
+        case .deep: return valueSet.deep
+        }
+    }
+
+    private func diversify(_ items: [WaxloomDiscoveryCandidate], maxPerArtist: Int = 2) -> [WaxloomDiscoveryCandidate] {
+        var counts: [String: Int] = [:]
+        var output: [WaxloomDiscoveryCandidate] = []
+
+        for candidate in items {
+            let key = candidate.artist.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let artistKey = key.isEmpty ? candidate.recordingMbid : key
+            let count = counts[artistKey, default: 0]
+            if count >= maxPerArtist { continue }
+            counts[artistKey] = count + 1
+            output.append(candidate)
+        }
+        return output
+    }
+
+    private func fillShelf(
+        primary: [WaxloomDiscoveryCandidate],
+        fallback: [WaxloomDiscoveryCandidate],
+        used: inout Set<String>,
+        target: Int
+    ) -> [WaxloomDiscoveryCandidate] {
+        var output: [WaxloomDiscoveryCandidate] = []
+
+        for candidate in diversify(primary) {
+            if used.contains(candidate.recordingMbid) { continue }
+            if output.contains(where: { $0.recordingMbid == candidate.recordingMbid }) { continue }
+            output.append(candidate)
+            if output.count >= target { break }
+        }
+
+        if output.count < target {
+            for candidate in diversify(fallback) {
+                if used.contains(candidate.recordingMbid) { continue }
+                if output.contains(where: { $0.recordingMbid == candidate.recordingMbid }) { continue }
+                output.append(candidate)
+                if output.count >= target { break }
+            }
+        }
+
+        for candidate in output {
+            used.insert(candidate.recordingMbid)
+        }
+        return output
     }
 
     private func load() async {
