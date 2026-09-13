@@ -144,25 +144,27 @@ The server now maintains a bounded rolling cache for the currently visible Disco
 Validation state:
 
 - web cached Discovery playback is `USER VALIDATED` on the Windows host;
-- cache endpoint transport to the iPhone is `USER VALIDATED`: physical iPhone taps produced repeated `GET /api/discovery/previews/<recording>` requests and the server returned byte-range `206` responses in a few milliseconds;
-- native iPhone audio playback remained blocked on the `7e9ae29...` app despite successful `206` media delivery, proving the active blocker is in the native AVPlayer startup path rather than cache/Tailscale/server transport.
+- cache endpoint transport to the iPhone is `USER VALIDATED`: repeated physical iPhone taps produced `GET /api/discovery/previews/<recording>` requests and the server returned byte-range `206` responses in roughly 2–6 ms;
+- the `de8b3ced...` iPhone candidate still produced no audible Discovery playback despite successful fast `206` delivery, so server/cache/Tailscale are not the active blocker.
 
 Native playback diagnosis/fix:
 
-- the previous `startPreview` replaced the remote item and then awaited `player.seek(to: .zero)` before switching to preview state and before calling `play()`;
-- physical logs showed the media Range probes were served while the app could remain in library mode long enough for library queue persistence to continue, consistent with the awaited remote seek blocking preview startup;
-- commit `365d7cc45b0d2997d6c0b4b731926ee08d9287b2` removes that blocking startup order: preview state is published immediately, AVURLAsset playability is loaded explicitly, stale concurrent loads are rejected, a fresh item starts at 0:00 by construction, then `playImmediately(atRate:)` starts audio;
-- invariant commit `a20fad967f4ad565d97f17b1fafe0ea6deaba242` forbids reintroducing the blocking awaited seek and requires the explicit asset-readiness/immediate-play path;
-- this native fix is `IMPLEMENTED / NOT USER VALIDATED` until the exact-SHA IPA is installed and exercised on the physical iPhone.
+- first native fix removed the awaited remote zero-seek before playback, but the implementation still awaited `AVURLAsset.load(.isPlayable)` and then `AVURLAsset.load(.duration)` before calling `playImmediately`;
+- the second physical test again showed several successful Range probes per tap but no audio, strongly localizing the remaining stall to those pre-play metadata loads;
+- commit `a4ee68a86157ce674b2469e60696762f306f6dcf` now constructs `AVPlayerItem(url:)` directly from the Waxloom cached media endpoint, reactivates the audio session, replaces the item, and calls `playImmediately(atRate:)` without any pre-play seek, playability load, or duration load;
+- `automaticallyWaitsToMinimizeStalling` is disabled for this already-local cached source and a short preferred forward buffer is used;
+- the native player now posts non-secret stage traces to the existing `/api/player/trace` logger (`preview_tap`, `preview_item_set`, `preview_play_called`, `preview_progress`, `preview_no_progress`, `preview_item_failed`) so the Windows runtime log can diagnose the exact AVPlayer stage without an Xcode console;
+- invariant commit `fa2426663fd5b76c902ea7761fdde97f60a6f34d` requires this direct cached-item path and forbids reintroducing pre-play `asset.load(.isPlayable)`, `asset.load(.duration)`, or awaited zero-seek;
+- this second native fix is `IMPLEMENTED / NOT USER VALIDATED`; its exact Apple build is running and must succeed before iLoader installation.
 
 Physical next test:
 
 1. install the exact final branch-head IPA after CI succeeds;
-2. tap a ready Discovery track once and confirm audio starts without another tap;
-3. switch A -> B and confirm B starts at 0:00;
-4. tap the active preview and confirm pause/resume preserves position;
-5. verify previous/next starts each newly selected preview at 0:00;
-6. keep `scripts/WATCH_WAXLOOM_LOG.ps1` open if needed and confirm the server continues to return fast `206` preview responses.
+2. run the runtime log viewer and filter for `PLAYER|PREVIEW|/api/discovery/previews/`;
+3. tap one ready Discovery track once;
+4. expected trace is `preview_tap -> preview_item_set -> preview_play_called -> preview_progress`, plus the media `206` responses;
+5. if playback still fails, `preview_no_progress` or `preview_item_failed` will identify the next native stage directly in the Windows log;
+6. once single-tap playback works, validate A -> B starts B at 0:00, same-track pause/resume preserves position, and previous/next start new previews at 0:00.
 
 ## Runtime log / web identity
 
