@@ -25,6 +25,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
     private var libraryIndex = 0
     private var previewQueue: [WaxloomDiscoveryCandidate] = []
     private var previewIndex = 0
+    private var previewLoadGeneration: Int64 = 0
     private var revision: Int64 = 0
     private var periodicObserver: Any?
     private var lastWatchProgressBucket = -1
@@ -84,6 +85,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
 
     func play(song: WaxloomSong, queue: [WaxloomSong], baseURL: URL) {
         self.baseURL = baseURL
+        previewLoadGeneration += 1
         if mode == .library, currentSong?.id == song.id {
             toggle()
             return
@@ -194,6 +196,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         startPosition: Double = 0,
         scrobble: Bool = true
     ) {
+        previewLoadGeneration += 1
         let url = WaxloomAPI.streamURL(baseURL: baseURL, songID: song.id)
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
@@ -234,25 +237,63 @@ final class NativePlayerModel: NSObject, ObservableObject {
     }
 
     private func startPreview(_ candidate: WaxloomDiscoveryCandidate, baseURL: URL) async {
+        previewLoadGeneration += 1
+        let generation = previewLoadGeneration
         let url = discoveryPreviewURL(baseURL: baseURL, recordingMbid: candidate.recordingMbid)
-        let item = AVPlayerItem(url: url)
-        player.replaceCurrentItem(with: item)
-        await player.seek(to: .zero)
+        let asset = AVURLAsset(url: url)
 
+        // A replacement AVPlayerItem starts at 0:00 by construction. Do not
+        // await a remote seek before setting preview state: AVPlayer may probe
+        // the HTTP Range endpoint while that seek is pending, which used to
+        // leave Discovery stuck before play() was ever reached.
         mode = .preview
         currentPreview = candidate
         currentSong = nil
         elapsedSeconds = 0
         durationSeconds = 0
         errorMessage = nil
+        isPlaying = false
         lastWatchProgressBucket = -1
         lastQueuePersistBucket = -1
         revision += 1
-
-        player.play()
-        isPlaying = true
         updateNowPlaying()
         publishSnapshot()
+
+        do {
+            let playable = try await asset.load(.isPlayable)
+            guard generation == previewLoadGeneration,
+                  currentPreview?.recordingMbid == candidate.recordingMbid else { return }
+            guard playable else {
+                errorMessage = "Discovery preview is not playable on this iPhone."
+                revision += 1
+                updateNowPlayingRate()
+                publishSnapshot()
+                return
+            }
+
+            let item = AVPlayerItem(asset: asset)
+            player.replaceCurrentItem(with: item)
+            if let duration = try? await asset.load(.duration), duration.seconds.isFinite, duration.seconds > 0 {
+                durationSeconds = duration.seconds
+            }
+            guard generation == previewLoadGeneration,
+                  currentPreview?.recordingMbid == candidate.recordingMbid else { return }
+
+            player.playImmediately(atRate: 1.0)
+            isPlaying = true
+            revision += 1
+            updateNowPlaying()
+            publishSnapshot()
+        } catch {
+            guard generation == previewLoadGeneration,
+                  currentPreview?.recordingMbid == candidate.recordingMbid else { return }
+            player.replaceCurrentItem(with: nil)
+            isPlaying = false
+            errorMessage = "Discovery preview: \(error.localizedDescription)"
+            revision += 1
+            updateNowPlaying()
+            publishSnapshot()
+        }
     }
 
     private func handleWatchCommand(_ command: PlaybackCommand) -> PlaybackCommandResult {
