@@ -171,7 +171,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
 
             let item = AVPlayerItem(url: url)
             player.replaceCurrentItem(with: item)
-            player.seek(to: .zero)
+            await player.seek(to: .zero)
 
             mode = .preview
             currentPreview = candidate
