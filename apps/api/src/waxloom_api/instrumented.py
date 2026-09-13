@@ -208,6 +208,152 @@ class CoverGate:
         await self.app(scope, receive, send)
 
 
+class PreviewRangeTransport:
+    """Serve cached Discovery M4A files with explicit iOS-safe byte ranges.
+
+    AVPlayer is stricter than browsers about local media range semantics. This
+    transport forces a stable audio/mp4 content type and exact single-range
+    Content-Range/Content-Length headers while leaving the normal FastAPI route
+    as a fallback for cache misses and errors.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    @staticmethod
+    def _headers(scope: dict[str, Any]) -> dict[str, str]:
+        return {
+            key.decode("latin-1").lower(): value.decode("latin-1")
+            for key, value in scope.get("headers", [])
+        }
+
+    @staticmethod
+    def _parse_range(value: str, size: int) -> tuple[int, int] | None:
+        if not value:
+            return None
+        if not value.lower().startswith("bytes="):
+            raise ValueError("unsupported range unit")
+        spec = value.split("=", 1)[1].strip()
+        if not spec or "," in spec or "-" not in spec:
+            raise ValueError("unsupported byte range")
+        first, last = spec.split("-", 1)
+        if first:
+            start = int(first)
+            end = int(last) if last else size - 1
+        else:
+            suffix = int(last)
+            if suffix <= 0:
+                raise ValueError("invalid suffix range")
+            start = max(0, size - suffix)
+            end = size - 1
+        if start < 0 or start >= size or end < start:
+            raise ValueError("range outside file")
+        return start, min(end, size - 1)
+
+    async def _send_file(
+        self,
+        *,
+        path: Path,
+        method: str,
+        range_value: str,
+        recording_mbid: str,
+        send: Any,
+    ) -> None:
+        size = path.stat().st_size
+        try:
+            parsed = self._parse_range(range_value, size)
+        except (TypeError, ValueError):
+            headers = [
+                (b"content-range", f"bytes */{size}".encode("ascii")),
+                (b"accept-ranges", b"bytes"),
+                (b"content-length", b"0"),
+            ]
+            await send({"type": "http.response.start", "status": 416, "headers": headers})
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            return
+
+        if parsed is None:
+            start, end = 0, size - 1
+            status = 200
+        else:
+            start, end = parsed
+            status = 206
+
+        length = end - start + 1
+        response_headers = [
+            (b"content-type", b"audio/mp4"),
+            (b"accept-ranges", b"bytes"),
+            (b"cache-control", b"private, max-age=300"),
+            (b"content-length", str(length).encode("ascii")),
+        ]
+        if status == 206:
+            response_headers.append(
+                (b"content-range", f"bytes {start}-{end}/{size}".encode("ascii"))
+            )
+
+        safe_range = range_value or "full"
+        _log(
+            f"PREVIEW_RANGE recording={recording_mbid} range={safe_range} bytes={start}-{end}/{size}"
+        )
+        await send({"type": "http.response.start", "status": status, "headers": response_headers})
+        if method == "HEAD":
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            return
+
+        remaining = length
+        with path.open("rb") as handle:
+            handle.seek(start)
+            while remaining > 0:
+                chunk = handle.read(min(256 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": chunk,
+                        "more_body": remaining > 0,
+                    }
+                )
+        if remaining > 0:
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = str(scope.get("method", "GET")).upper()
+        path_value = str(scope.get("path", ""))
+        prefix = "/api/discovery/previews/"
+        if method not in {"GET", "HEAD"} or not path_value.startswith(prefix):
+            await self.app(scope, receive, send)
+            return
+
+        recording_mbid = path_value[len(prefix):]
+        if not recording_mbid or recording_mbid == "status" or "/" in recording_mbid:
+            await self.app(scope, receive, send)
+            return
+
+        candidate = main_module.preview_cache().candidate(recording_mbid)
+        if candidate is None:
+            await self.app(scope, receive, send)
+            return
+        entry = await main_module.preview_cache().ensure_candidate(candidate, foreground=True)
+        if entry is None or not entry.playback_path.is_file():
+            await self.app(scope, receive, send)
+            return
+
+        request_headers = self._headers(scope)
+        await self._send_file(
+            path=entry.playback_path,
+            method=method,
+            range_value=request_headers.get("range", ""),
+            recording_mbid=recording_mbid,
+            send=send,
+        )
+
+
 class TimestampAccessLog:
     """Millisecond request timing for the local development runtime.
 
@@ -256,5 +402,6 @@ class TimestampAccessLog:
             raise
 
 
-# The cover gate sits inside the timing logger so queueing time remains visible.
-app = TimestampAccessLog(CoverGate(main_module.app, limit=3))
+# Explicit Discovery range transport and cover gating sit inside the timing
+# logger so iPhone media requests remain fully observable in the runtime log.
+app = TimestampAccessLog(PreviewRangeTransport(CoverGate(main_module.app, limit=3)))
