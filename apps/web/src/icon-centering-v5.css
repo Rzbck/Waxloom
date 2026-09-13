@@ -1,0 +1,186 @@
+/* Final icon centering pass.
+   Icons are positioned independently from font metrics so every control is
+   geometrically centered inside its border box on desktop and mobile. */
+
+:root {
+  --waxloom-play-centered-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M8 5.2v13.6L19 12 8 5.2Z'/%3E%3C/svg%3E");
+  --waxloom-pause-centered-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='6.5' y='5' width='4' height='14' rx='1' fill='black'/%3E%3Crect x='13.5' y='5' width='4' height='14' rx='1' fill='black'/%3E%3C/svg%3E");
+  --waxloom-plus-centered-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7V4Z'/%3E%3C/svg%3E");
+  --waxloom-like-centered-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='black' d='M2 20h4V9H2v11Zm20-9.2c0-1-.8-1.8-1.8-1.8h-5.7l.9-4.1.1-.6c0-.4-.2-.8-.5-1.1L13.9 2 7.3 8.6C7.1 8.8 7 9.2 7 9.5V18c0 1.1.9 2 2 2h8.1c.8 0 1.5-.5 1.8-1.2l2.9-6.8c.1-.4.2-.8.2-1.2Z'/%3E%3C/svg%3E");
+  --waxloom-less-centered-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='rotate(180 12 12)'%3E%3Cpath fill='black' d='M2 20h4V9H2v11Zm20-9.2c0-1-.8-1.8-1.8-1.8h-5.7l.9-4.1.1-.6c0-.4-.2-.8-.5-1.1L13.9 2 7.3 8.6C7.1 8.8 7 9.2 7 9.5V18c0 1.1.9 2 2 2h8.1c.8 0 1.5-.5 1.8-1.2l2.9-6.8c.1-.4.2-.8.2-1.2Z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* The box owns the geometry; text baselines no longer participate. */
+.discovery-song-card > .compact-action,
+.discovery-song-card > .taste-chip,
+.track-play,
+.play-button {
+  position: relative !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 0 !important;
+  text-align: center !important;
+}
+
+/* Album-card play is a true centered overlay, never part of document flow. */
+.cover-play {
+  position: absolute !important;
+  left: 50% !important;
+  top: 50% !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 42px !important;
+  height: 42px !important;
+  box-sizing: border-box !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  line-height: 0 !important;
+  text-align: center !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 3 !important;
+}
+
+.media-card:hover .cover-play {
+  transform: translate(-50%, -50%) !important;
+}
+
+.discovery-song-card > .compact-action > *,
+.track-play > *,
+.cover-play > *,
+.play-button > * {
+  display: none !important;
+}
+
+/* Every visible glyph is absolutely centered in the button's own border box. */
+.discovery-song-card > .compact-action::before,
+.discovery-song-card > .taste-chip::before,
+.track-play::before,
+.cover-play::before,
+.play-button::before {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  margin: auto !important;
+  display: block !important;
+  place-self: auto !important;
+  transform: none !important;
+  background: currentColor !important;
+  -webkit-mask-position: 50% 50% !important;
+  mask-position: 50% 50% !important;
+  -webkit-mask-repeat: no-repeat !important;
+  mask-repeat: no-repeat !important;
+  -webkit-mask-size: 100% 100% !important;
+  mask-size: 100% 100% !important;
+  pointer-events: none !important;
+}
+
+.discovery-song-card > .compact-action-play::before {
+  width: 13px !important;
+  height: 13px !important;
+  -webkit-mask-image: var(--waxloom-play-centered-svg) !important;
+  mask-image: var(--waxloom-play-centered-svg) !important;
+}
+
+.discovery-song-card > .compact-action-play.compact-action-playing::before {
+  width: 13px !important;
+  height: 13px !important;
+  -webkit-mask-image: var(--waxloom-pause-centered-svg) !important;
+  mask-image: var(--waxloom-pause-centered-svg) !important;
+}
+
+.discovery-song-card > .compact-action-add {
+  font-size: 0 !important;
+}
+
+.discovery-song-card > .compact-action-add::before {
+  width: 13px !important;
+  height: 13px !important;
+  -webkit-mask-image: var(--waxloom-plus-centered-svg) !important;
+  mask-image: var(--waxloom-plus-centered-svg) !important;
+}
+
+.discovery-song-card > .taste-chip {
+  font-size: 0 !important;
+}
+
+.discovery-song-card > .taste-chip-like::before {
+  width: 15px !important;
+  height: 15px !important;
+  -webkit-mask-image: var(--waxloom-like-centered-svg) !important;
+  mask-image: var(--waxloom-like-centered-svg) !important;
+}
+
+.discovery-song-card > .taste-chip-less::before {
+  width: 15px !important;
+  height: 15px !important;
+  -webkit-mask-image: var(--waxloom-less-centered-svg) !important;
+  mask-image: var(--waxloom-less-centered-svg) !important;
+}
+
+.track-play::before {
+  width: 13px !important;
+  height: 13px !important;
+  -webkit-mask-image: var(--waxloom-play-centered-svg) !important;
+  mask-image: var(--waxloom-play-centered-svg) !important;
+}
+
+.cover-play::before {
+  width: 17px !important;
+  height: 17px !important;
+  -webkit-mask-image: var(--waxloom-play-centered-svg) !important;
+  mask-image: var(--waxloom-play-centered-svg) !important;
+}
+
+.play-button::before {
+  width: 24px !important;
+  height: 24px !important;
+  -webkit-mask-image: var(--waxloom-play-centered-svg) !important;
+  mask-image: var(--waxloom-play-centered-svg) !important;
+}
+
+.play-button[aria-label="Pause"]::before {
+  -webkit-mask-image: var(--waxloom-pause-centered-svg) !important;
+  mask-image: var(--waxloom-pause-centered-svg) !important;
+}
+
+/* Keep the six Discovery columns on one optical baseline. */
+.discovery-song-card > .discovery-song-score,
+.discovery-song-card > .compact-action,
+.discovery-song-card > .taste-chip {
+  align-self: center !important;
+  justify-self: center !important;
+}
+
+.discovery-song-card > .discovery-song-score {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  line-height: 1 !important;
+}
+
+@media (max-width: 820px) {
+  .discovery-song-card > .compact-action-play::before,
+  .discovery-song-card > .compact-action-add::before,
+  .track-play::before {
+    width: 12px !important;
+    height: 12px !important;
+  }
+
+  .discovery-song-card > .taste-chip-like::before,
+  .discovery-song-card > .taste-chip-less::before {
+    width: 14px !important;
+    height: 14px !important;
+  }
+
+  .play-button::before {
+    width: 21px !important;
+    height: 21px !important;
+  }
+
+  .cover-play {
+    width: 38px !important;
+    height: 38px !important;
+    opacity: .96 !important;
+  }
+}

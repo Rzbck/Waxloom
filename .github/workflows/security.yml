@@ -1,0 +1,21 @@
+name: Public repository security gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  security:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Run fail-closed repository security gate
+        shell: pwsh
+        run: ./scripts/security-gate.ps1

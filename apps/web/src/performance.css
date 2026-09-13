@@ -1,0 +1,27 @@
+.artist-card,
+.media-card,
+.playlist-card,
+.track-row {
+  content-visibility: auto;
+}
+
+.artist-card {
+  contain: layout paint style;
+  contain-intrinsic-size: 190px 235px;
+}
+
+.media-card {
+  contain: layout paint style;
+  contain-intrinsic-size: 180px 240px;
+}
+
+.track-row {
+  contain-intrinsic-size: 900px 52px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .artist-card,
+  .media-card {
+    transform: translateZ(0);
+  }
+}
