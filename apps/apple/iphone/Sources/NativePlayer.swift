@@ -268,6 +268,10 @@ final class NativePlayerModel: NSObject, ObservableObject {
             Task { await next() }
         case .previous:
             Task { await previous() }
+        case .seekBackward15:
+            skip(by: -15)
+        case .seekForward15:
+            skip(by: 15)
         }
         return .accepted
     }
