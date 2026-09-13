@@ -158,7 +158,7 @@ def _resolve_ffmpeg() -> Path | None:
 
 
 def _write_tags(path: Path, artist: str, title: str) -> None:
-    """Best-effort tags without transcoding the audio payload."""
+    """Best-effort tags without intentionally lowering source quality."""
     try:
         audio = MutagenFile(path, easy=True)
         if audio is None:
@@ -170,7 +170,6 @@ def _write_tags(path: Path, artist: str, title: str) -> None:
         audio["album"] = ["Waxloom Imports"]
         audio.save()
     except Exception:
-        # Filename remains "Artist - Title" so Navidrome still has a useful fallback.
         return
 
 
@@ -180,7 +179,6 @@ def _obvious_non_music_title(value: str) -> bool:
 
 
 def _music_confidence(info: dict[str, Any]) -> tuple[bool, float]:
-    """Reject talking/presentation/tutorial videos unless music evidence is strong."""
     raw_title = str(info.get("title") or "")
     title = raw_title.casefold()
     description = str(info.get("description") or "")[:4000].casefold()
@@ -507,7 +505,7 @@ class YouTubeProvider:
                 "outtmpl": str(target_base) + ".%(ext)s",
                 "overwrites": False,
                 "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "best"},
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "best", "preferredquality": "0"},
                     {"key": "FFmpegMetadata"},
                 ],
             }
