@@ -13,7 +13,9 @@ struct WaxloomSong: Codable, Identifiable, Hashable {
     var discNumber: Int?
     var year: Int?
     var genre: String?
+    var suffix: String?
     var starred: String?
+    var musicBrainzId: String?
 }
 
 struct WaxloomAlbum: Codable, Identifiable, Hashable {
@@ -40,6 +42,42 @@ struct WaxloomArtist: Codable, Identifiable, Hashable {
     var coverArt: String?
     var albumCount: Int?
     var starred: String?
+    var album: [WaxloomAlbum]?
+}
+
+struct WaxloomPlaylistSummary: Codable, Identifiable, Hashable {
+    let id: String
+    var name: String
+    var songCount: Int?
+    var duration: Double?
+    var owner: String?
+    var `public`: Bool?
+    var changed: String?
+    var coverArt: String?
+}
+
+struct WaxloomPlaylistDetail: Codable, Identifiable, Hashable {
+    let id: String
+    var name: String
+    var songCount: Int?
+    var duration: Double?
+    var owner: String?
+    var `public`: Bool?
+    var changed: String?
+    var coverArt: String?
+    var entry: [WaxloomSong]?
+}
+
+struct WaxloomSearchResults: Codable {
+    var artists: [WaxloomArtist]
+    var albums: [WaxloomAlbum]
+    var songs: [WaxloomSong]
+}
+
+struct WaxloomPlayQueue: Codable {
+    var current: String?
+    var position: Double?
+    var entry: [WaxloomSong]?
 }
 
 struct WaxloomListResponse<T: Codable>: Codable {
@@ -52,10 +90,12 @@ struct WaxloomDiscoveryCandidate: Codable, Identifiable, Hashable {
     var artist: String
     var title: String
     var release: String?
+    var releaseMbid: String?
     var similarity: Double
     var underground: Double
     var rank: Double
     var tags: [String]
+    var musicbrainzUrl: String?
     var source: String?
     var reason: String?
     var feedback: Int?
@@ -72,10 +112,12 @@ struct WaxloomDiscoveryResponse: Codable {
 struct WaxloomDiscoveryFeedResponse: Codable {
     var status: String
     var generatedAt: String?
+    var nextRefreshAt: String?
+    var rotationId: Int?
     var external: WaxloomDiscoveryResponse
 }
 
-struct WaxloomYouTubeCandidate: Codable, Hashable {
+struct WaxloomYouTubeCandidate: Codable, Identifiable, Hashable {
     var title: String
     var url: String
     var uploader: String?
@@ -84,6 +126,33 @@ struct WaxloomYouTubeCandidate: Codable, Hashable {
     var thumbnail: String?
     var score: Double
     var previewUrl: String?
+    var previewExt: String?
+    var musicConfidence: Double?
+
+    var id: String { url }
+}
+
+struct WaxloomYouTubeRuntime: Codable {
+    struct Status: Codable {
+        var ffmpeg: Bool
+        var node: Bool
+        var ytDlp: Bool
+        var downloadQuality: String?
+    }
+
+    var status: Status
+    var libraryConfigured: Bool
+
+    var ready: Bool { status.ytDlp && libraryConfigured }
+}
+
+struct WaxloomImportResult: Codable {
+    var status: String
+    var relativePath: String?
+    var audioFormat: String?
+    var song: WaxloomSong?
+    var playlistAdded: Bool?
+    var playlistPending: Bool?
 }
 
 enum WaxloomAPIError: LocalizedError {
@@ -109,11 +178,19 @@ enum WaxloomAPIError: LocalizedError {
 enum WaxloomAPI {
     static let sourceRejectTag = "__waxloom_source:not_music__"
 
-    static func albums(baseURL: URL, type: String = "newest", size: Int = 80) async throws -> [WaxloomAlbum] {
+    static func albums(baseURL: URL, type: String = "newest", size: Int = 80, offset: Int = 0) async throws -> [WaxloomAlbum] {
         let response: WaxloomListResponse<WaxloomAlbum> = try await request(
             baseURL: baseURL,
             path: "/api/library/albums",
-            query: ["type": type, "size": String(size), "offset": "0"]
+            query: ["type": type, "size": String(size), "offset": String(offset)]
+        )
+        return response.items
+    }
+
+    static func artists(baseURL: URL) async throws -> [WaxloomArtist] {
+        let response: WaxloomListResponse<WaxloomArtist> = try await request(
+            baseURL: baseURL,
+            path: "/api/library/artists"
         )
         return response.items
     }
@@ -128,40 +205,164 @@ enum WaxloomAPI {
     }
 
     static func album(baseURL: URL, id: String) async throws -> WaxloomAlbum {
-        try await request(baseURL: baseURL, path: "/api/albums/\(id)")
+        try await request(baseURL: baseURL, path: "/api/albums/\(encoded(id))")
+    }
+
+    static func artist(baseURL: URL, id: String) async throws -> WaxloomArtist {
+        try await request(baseURL: baseURL, path: "/api/artists/\(encoded(id))")
+    }
+
+    static func song(baseURL: URL, id: String) async throws -> WaxloomSong {
+        try await request(baseURL: baseURL, path: "/api/songs/\(encoded(id))")
+    }
+
+    static func search(baseURL: URL, query: String, count: Int = 40) async throws -> WaxloomSearchResults {
+        try await request(
+            baseURL: baseURL,
+            path: "/api/search",
+            query: ["q": query, "count": String(count)]
+        )
     }
 
     static func starred(baseURL: URL) async throws -> (artists: [WaxloomArtist], albums: [WaxloomAlbum], songs: [WaxloomSong]) {
-        struct Starred: Codable {
-            var artists: [WaxloomArtist]
-            var albums: [WaxloomAlbum]
-            var songs: [WaxloomSong]
-        }
-        let result: Starred = try await request(baseURL: baseURL, path: "/api/starred")
+        let result: WaxloomSearchResults = try await request(baseURL: baseURL, path: "/api/starred")
         return (result.artists, result.albums, result.songs)
+    }
+
+    static func playlists(baseURL: URL) async throws -> [WaxloomPlaylistSummary] {
+        let response: WaxloomListResponse<WaxloomPlaylistSummary> = try await request(
+            baseURL: baseURL,
+            path: "/api/playlists"
+        )
+        return response.items
+    }
+
+    static func playlist(baseURL: URL, id: String) async throws -> WaxloomPlaylistDetail {
+        try await request(baseURL: baseURL, path: "/api/playlists/\(encoded(id))")
+    }
+
+    static func createPlaylist(baseURL: URL, name: String, songIDs: [String] = []) async throws -> WaxloomPlaylistSummary? {
+        struct Body: Encodable { let name: String; let songIds: [String] }
+        struct Response: Decodable { var ok: Bool; var playlist: WaxloomPlaylistSummary? }
+        let response: Response = try await request(
+            baseURL: baseURL,
+            path: "/api/playlists",
+            method: "POST",
+            body: Body(name: name, songIds: songIDs)
+        )
+        return response.playlist
+    }
+
+    static func updatePlaylist(
+        baseURL: URL,
+        id: String,
+        name: String? = nil,
+        songIDsToAdd: [String] = [],
+        songIndexesToRemove: [Int] = []
+    ) async throws {
+        struct Body: Encodable {
+            let name: String?
+            let songIdsToAdd: [String]
+            let songIndexesToRemove: [Int]
+        }
+        let _: OKResponse = try await request(
+            baseURL: baseURL,
+            path: "/api/playlists/\(encoded(id))",
+            method: "PATCH",
+            body: Body(name: name, songIdsToAdd: songIDsToAdd, songIndexesToRemove: songIndexesToRemove)
+        )
+    }
+
+    static func deletePlaylist(baseURL: URL, id: String) async throws {
+        let _: OKResponse = try await request(
+            baseURL: baseURL,
+            path: "/api/playlists/\(encoded(id))",
+            method: "DELETE"
+        )
+    }
+
+    static func playQueue(baseURL: URL) async throws -> WaxloomPlayQueue {
+        try await request(baseURL: baseURL, path: "/api/player/queue")
+    }
+
+    static func savePlayQueue(baseURL: URL, ids: [String], current: String?, position: Double) async {
+        struct Body: Encodable { let ids: [String]; let current: String?; let position: Double }
+        let _: OKResponse? = try? await request(
+            baseURL: baseURL,
+            path: "/api/player/queue",
+            method: "PUT",
+            body: Body(ids: ids, current: current, position: position)
+        )
     }
 
     static func discoveryFeed(baseURL: URL) async throws -> WaxloomDiscoveryFeedResponse {
         try await request(baseURL: baseURL, path: "/api/discovery/feed")
     }
 
-    static func youtubePreview(baseURL: URL, artist: String, title: String) async throws -> WaxloomYouTubeCandidate {
+    static func refreshDiscoveryFeed(baseURL: URL) async throws {
+        struct RefreshResponse: Decodable { var accepted: Bool? }
+        let _: RefreshResponse = try await request(
+            baseURL: baseURL,
+            path: "/api/discovery/feed/refresh",
+            method: "POST"
+        )
+    }
+
+    static func youtubeRuntime(baseURL: URL) async throws -> WaxloomYouTubeRuntime {
+        try await request(baseURL: baseURL, path: "/api/imports/youtube/runtime")
+    }
+
+    static func youtubeSearch(baseURL: URL, artist: String, title: String, limit: Int = 8) async throws -> [WaxloomYouTubeCandidate] {
         struct Body: Encodable {
             let artist: String
             let title: String
             let isrc: String? = nil
-            let limit: Int = 1
+            let limit: Int
         }
         let response: WaxloomListResponse<WaxloomYouTubeCandidate> = try await request(
             baseURL: baseURL,
             path: "/api/imports/youtube/search",
             method: "POST",
-            body: Body(artist: artist, title: title)
+            body: Body(artist: artist, title: title, limit: max(1, min(8, limit)))
         )
-        guard let best = response.items.first, best.previewUrl != nil else {
+        return response.items
+    }
+
+    static func youtubePreview(baseURL: URL, artist: String, title: String) async throws -> WaxloomYouTubeCandidate {
+        let candidates = try await youtubeSearch(baseURL: baseURL, artist: artist, title: title, limit: 1)
+        guard let best = candidates.first, best.previewUrl != nil else {
             throw WaxloomAPIError.missingPreview
         }
         return best
+    }
+
+    static func youtubeImport(
+        baseURL: URL,
+        artist: String,
+        title: String,
+        sourceURL: String,
+        playlistID: String? = nil,
+        authorized: Bool
+    ) async throws -> WaxloomImportResult {
+        struct Body: Encodable {
+            let artist: String
+            let title: String
+            let sourceUrl: String
+            let playlistId: String?
+            let authorized: Bool
+        }
+        return try await request(
+            baseURL: baseURL,
+            path: "/api/imports/youtube",
+            method: "POST",
+            body: Body(
+                artist: artist,
+                title: title,
+                sourceUrl: sourceURL,
+                playlistId: playlistID,
+                authorized: authorized
+            )
+        )
     }
 
     static func discoveryFeedback(baseURL: URL, candidate: WaxloomDiscoveryCandidate, value: Int, badSource: Bool = false) async throws {
@@ -235,6 +436,10 @@ enum WaxloomAPI {
 
     private struct OKResponse: Codable { var ok: Bool? }
 
+    private static func encoded(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
+    }
+
     private static func request<Response: Decodable>(
         baseURL: URL,
         path: String,
@@ -284,7 +489,7 @@ enum WaxloomAPI {
 
         var request = URLRequest(url: url)
         request.httpMethod = method
-        request.timeoutInterval = 20
+        request.timeoutInterval = 30
         request.cachePolicy = .reloadIgnoringLocalCacheData
         if let bodyData {
             request.httpBody = bodyData
