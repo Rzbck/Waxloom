@@ -19,7 +19,8 @@ _MIN_AUDIO_BYTES = 100 * 1024
 _DEFAULT_MAX_BYTES = 6 * 1024 * 1024 * 1024
 _RETRY_BACKOFF_SECONDS = 10 * 60
 _POLL_SECONDS = 20.0
-_PLAYBACK_NATIVE_SUFFIXES = {".m4a", ".mp4", ".mp3", ".aac"}
+_CACHE_VERSION = 2
+_STALE_GRACE_SECONDS = 15 * 60
 
 
 def _normalize(value: str) -> str:
@@ -117,6 +118,7 @@ class DiscoveryPreviewCache:
         self._semaphore = asyncio.Semaphore(self.concurrency)
         self._warming_now = 0
         self._active: dict[str, dict[str, Any]] = {}
+        self._recent: dict[str, tuple[dict[str, Any], float]] = {}
         self._identity_index: dict[str, str] = {}
         self._warm_tasks: dict[str, asyncio.Task[None]] = {}
         self._source_tasks: dict[str, asyncio.Task[dict[str, Any] | None]] = {}
@@ -185,7 +187,16 @@ class DiscoveryPreviewCache:
 
     def candidate(self, recording_mbid: str) -> dict[str, Any] | None:
         value = self._active.get(recording_mbid)
-        return dict(value) if value else None
+        if value:
+            return dict(value)
+        recent = self._recent.get(recording_mbid)
+        if recent is None:
+            return None
+        candidate, expires = recent
+        if expires <= time.time():
+            self._recent.pop(recording_mbid, None)
+            return None
+        return dict(candidate)
 
     def ready_by_identity(self, artist: str, title: str) -> PreviewCacheEntry | None:
         mbid = self._identity_index.get(_identity_key(artist, title))
@@ -220,11 +231,17 @@ class DiscoveryPreviewCache:
             payload = json.loads(metadata_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
-        if not isinstance(payload, dict) or payload.get("recording_mbid") != recording_mbid:
+        if (
+            not isinstance(payload, dict)
+            or payload.get("recording_mbid") != recording_mbid
+            or int(payload.get("version") or 0) != _CACHE_VERSION
+        ):
             return None
         try:
             source_path = self._safe_stored_path(entry_dir, str(payload["source_path"]))
             playback_path = self._safe_stored_path(entry_dir, str(payload["playback_path"]))
+            if playback_path.suffix.casefold() != ".m4a":
+                return None
             if source_path.stat().st_size < _MIN_AUDIO_BYTES or playback_path.stat().st_size < _MIN_AUDIO_BYTES:
                 return None
         except (KeyError, OSError, ValueError):
@@ -272,7 +289,7 @@ class DiscoveryPreviewCache:
             "thumbnail": source.get("thumbnail"),
             "score": float(source.get("score") or 100.0),
             "preview_url": self.preview_url(recording_mbid),
-            "preview_ext": source.get("preview_ext"),
+            "preview_ext": "m4a",
             "music_confidence": source.get("music_confidence"),
         }
 
@@ -324,7 +341,7 @@ class DiscoveryPreviewCache:
                 playback_path = await asyncio.to_thread(self._playback_compatible, source_path, entry_dir)
 
                 if recording_mbid in self._blocked or (
-                    self._active and recording_mbid not in self._active and not foreground
+                    self._active and recording_mbid not in self._active and recording_mbid not in self._recent and not foreground
                 ):
                     await asyncio.to_thread(shutil.rmtree, entry_dir, True)
                     return None
@@ -342,7 +359,7 @@ class DiscoveryPreviewCache:
                     )
                 }
                 payload = {
-                    "version": 1,
+                    "version": _CACHE_VERSION,
                     "recording_mbid": recording_mbid,
                     "artist": artist,
                     "title": title,
@@ -368,6 +385,7 @@ class DiscoveryPreviewCache:
     async def evict(self, recording_mbid: str) -> None:
         self._blocked.add(recording_mbid)
         self._active.pop(recording_mbid, None)
+        self._recent.pop(recording_mbid, None)
         self._resolved_sources.pop(recording_mbid, None)
         self._rebuild_identity_index()
         self._cancel_candidate_tasks(recording_mbid)
@@ -427,19 +445,35 @@ class DiscoveryPreviewCache:
             if mbid and artist and title:
                 active[mbid] = dict(item)
 
-        previous = set(self._active)
+        previous_active = self._active
+        previous = set(previous_active)
+        now = time.time()
         self._active = active
+        for mbid in active:
+            self._recent.pop(mbid, None)
         self._blocked.difference_update(active)
         self._rebuild_identity_index()
 
         stale = previous - set(active)
         for mbid in stale:
-            self._blocked.add(mbid)
+            candidate = previous_active.get(mbid)
+            if candidate is not None and mbid not in self._blocked:
+                self._recent[mbid] = (dict(candidate), now + _STALE_GRACE_SECONDS)
+            self._cancel_candidate_tasks(mbid)
+
+        expired = [
+            mbid
+            for mbid, (_, expires) in self._recent.items()
+            if expires <= now and mbid not in active
+        ]
+        for mbid in expired:
+            self._recent.pop(mbid, None)
             self._resolved_sources.pop(mbid, None)
             self._cancel_candidate_tasks(mbid)
             await asyncio.to_thread(shutil.rmtree, self._entry_dir(mbid), True)
 
-        await asyncio.to_thread(self._remove_unknown_entries, set(active))
+        retained = set(active) | set(self._recent)
+        await asyncio.to_thread(self._remove_unknown_entries, retained)
 
         for mbid, candidate in active.items():
             if self.ready(mbid) is not None:
@@ -542,14 +576,23 @@ class DiscoveryPreviewCache:
         for entry_dir in self.root.iterdir():
             if not entry_dir.is_dir():
                 continue
-            if not (entry_dir / "metadata.json").is_file():
+            metadata = entry_dir / "metadata.json"
+            if not metadata.is_file():
+                shutil.rmtree(entry_dir, ignore_errors=True)
+                continue
+            try:
+                payload = json.loads(metadata.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                shutil.rmtree(entry_dir, ignore_errors=True)
+                continue
+            if not isinstance(payload, dict) or int(payload.get("version") or 0) != _CACHE_VERSION:
                 shutil.rmtree(entry_dir, ignore_errors=True)
 
-    def _remove_unknown_entries(self, active: set[str]) -> None:
-        active_dirs = {self._entry_dir(mbid).resolve() for mbid in active}
+    def _remove_unknown_entries(self, retained: set[str]) -> None:
+        retained_dirs = {self._entry_dir(mbid).resolve() for mbid in retained}
         self.root.mkdir(parents=True, exist_ok=True)
         for entry_dir in self.root.iterdir():
-            if entry_dir.is_dir() and entry_dir.resolve() not in active_dirs:
+            if entry_dir.is_dir() and entry_dir.resolve() not in retained_dirs:
                 shutil.rmtree(entry_dir, ignore_errors=True)
 
     def _cache_bytes(self) -> int:
@@ -565,11 +608,9 @@ class DiscoveryPreviewCache:
         return total
 
     def _playback_compatible(self, source_path: Path, entry_dir: Path) -> Path:
-        if source_path.suffix.casefold() in _PLAYBACK_NATIVE_SUFFIXES:
-            return source_path
         ffmpeg = _resolve_ffmpeg()
         if ffmpeg is None:
-            raise RuntimeError("ffmpeg is required for this Discovery preview format.")
+            raise RuntimeError("ffmpeg is required for Discovery preview playback.")
         target = entry_dir / "preview.m4a"
         command = [
             str(ffmpeg),
@@ -579,11 +620,15 @@ class DiscoveryPreviewCache:
             "-y",
             "-i",
             str(source_path),
+            "-map",
+            "0:a:0",
             "-vn",
             "-c:a",
             "aac",
             "-b:a",
             "192k",
+            "-movflags",
+            "+faststart",
             str(target),
         ]
         subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
