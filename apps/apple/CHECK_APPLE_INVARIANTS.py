@@ -79,7 +79,11 @@ text_blob = "\n".join(
     for path in root.rglob("*")
     if path.is_file() and path.name != "CHECK_APPLE_INVARIANTS.py" and path.suffix.lower() in {".swift", ".yml", ".yaml", ".py", ".ps1", ".plist", ".md"}
 )
-for marker in ["-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----", "-----BEGIN EC PRIVATE KEY-----"]:
+private_key_markers = [
+    "-----BEGIN " + prefix + "PRIVATE KEY-----"
+    for prefix in ("", "RSA ", "EC ")
+]
+for marker in private_key_markers:
     if marker in text_blob:
         errors.append(f"private key marker found in apps/apple: {marker}")
 
