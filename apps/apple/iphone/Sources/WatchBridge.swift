@@ -21,7 +21,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
         watchInstalled = session.isWatchAppInstalled
     }
 
-    func publish(_ snapshot: PlaybackSnapshot) {
+    func publish(_ snapshot: PlaybackSnapshot, interactive: Bool = true) {
         currentSnapshot = snapshot
         guard
             WCSession.isSupported(),
@@ -32,7 +32,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
 
         let session = WCSession.default
         try? session.updateApplicationContext(payload)
-        if session.activationState == .activated, session.isReachable {
+        if interactive, session.activationState == .activated, session.isReachable {
             session.sendMessage(payload, replyHandler: nil, errorHandler: nil)
         }
     }
