@@ -45,6 +45,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrobbledRef = useRef<string | null>(null);
   const localSongIdRef = useRef<string | null>(null);
+  const previewStartAtZeroRef = useRef(false);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
   const [mode, setMode] = useState<PlayerMode>("navidrome");
@@ -202,6 +203,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.load();
     }
 
+    // A preview selection change owns a fresh timeline. Reset the real media
+    // element as well as React state; onLoadedMetadata repeats this once the new
+    // media timeline exists, which closes the browser race that could carry the
+    // previous preview's seek position into the next one.
+    if (previewStartAtZeroRef.current) {
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // Metadata may not exist yet. onLoadedMetadata performs the hard reset.
+      }
+      setCurrentTime(0);
+    }
+
     if (playing) {
       void audio.play().catch(() => setPlaying(false));
     } else {
@@ -261,14 +275,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const target = tracks[safeIndex];
     if (!target) return;
 
-    const samePreview = mode === "preview" && currentPreview?.recording_mbid === target.recording_mbid;
+    const samePreview = mode === "preview" && currentPreview?.id === target.id;
     const audio = audioRef.current;
 
-    // Clicking the currently selected Discovery track is a real play/pause
-    // toggle. Do not rebuild the preview queue, because that would discard the
-    // already-resolved preview URL and immediately force playback on again.
+    // The card's own play button is a true toggle for the selected preview.
+    // Treat either React's intent or the media element as authoritative enough
+    // to pause, so a transient state mismatch cannot turn a pause click into a
+    // second play request.
     if (samePreview) {
-      if (playing) {
+      const shouldPause = playing || Boolean(audio && !audio.paused && !audio.ended);
+      if (shouldPause) {
         audio?.pause();
         setPlaying(false);
       } else {
@@ -280,15 +296,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    // A different preview is a brand-new track. Reset both the media element
-    // and React progress state before the new URL can load, so the previous
-    // track's seek position can never leak into it.
+    // A different Discovery item always owns a brand-new timeline. Mark the
+    // transition before changing React state so both the immediate media reset
+    // and the later metadata event know that 0:00 is mandatory.
+    previewStartAtZeroRef.current = true;
     if (audio) {
       audio.pause();
       try {
         audio.currentTime = 0;
       } catch {
-        // Some browsers reject seeking while a media source is being replaced.
+        // The new source may not have metadata yet; loadedmetadata resets again.
       }
     }
     setCurrentTime(0);
@@ -298,7 +315,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setPreviewIndex(safeIndex);
     setPlaying(true);
     setPreviewError(null);
-  }, [mode, currentPreview?.recording_mbid, currentPreview?.preview_url, playing]);
+  }, [mode, currentPreview?.id, currentPreview?.preview_url, playing]);
 
   const playNow = useCallback((song: Song) => playSongs([song], 0), [playSongs]);
 
@@ -342,12 +359,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     if (mode === "preview") {
       const audio = audioRef.current;
+      previewStartAtZeroRef.current = true;
       audio?.pause();
       if (audio) {
         try {
           audio.currentTime = 0;
         } catch {
-          // Ignore transient media-source seek failures.
+          // loadedmetadata performs the hard reset for the new preview.
         }
       }
       setCurrentTime(0);
@@ -374,12 +392,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     const previousIndex = activeIndex - 1;
     if (mode === "preview") {
+      previewStartAtZeroRef.current = true;
       audio?.pause();
       if (audio) {
         try {
           audio.currentTime = 0;
         } catch {
-          // Ignore transient media-source seek failures.
+          // loadedmetadata performs the hard reset for the new preview.
         }
       }
       setCurrentTime(0);
@@ -473,8 +492,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
-          // Only a restored Navidrome queue may resume a saved position. Every
-          // Discovery preview is a fresh track and must always start at 0:00.
+          if (mode === "preview" && previewStartAtZeroRef.current) {
+            try {
+              audio.currentTime = 0;
+            } catch {
+              // A newly loaded Discovery preview still starts from its default 0.
+            }
+            setCurrentTime(0);
+            previewStartAtZeroRef.current = false;
+            return;
+          }
+          // Only a restored Navidrome queue may resume a saved position.
           if (mode === "navidrome" && currentTime > 0 && audio.currentTime === 0) {
             audio.currentTime = currentTime;
           }
@@ -521,12 +549,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                             return;
                           }
                           const audio = audioRef.current;
+                          previewStartAtZeroRef.current = true;
                           audio?.pause();
                           if (audio) {
                             try {
                               audio.currentTime = 0;
                             } catch {
-                              // Ignore transient media-source seek failures.
+                              // loadedmetadata performs the hard reset.
                             }
                           }
                           setCurrentTime(0);
