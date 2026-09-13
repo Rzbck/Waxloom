@@ -196,6 +196,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     localSongIdRef.current = null;
     if (audio.getAttribute("src") !== currentPreview.preview_url) {
+      audio.pause();
+      setCurrentTime(0);
       audio.src = currentPreview.preview_url;
       audio.load();
     }
@@ -256,12 +258,47 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playPreviewTracks = useCallback((tracks: PreviewTrack[], startIndex = 0) => {
     if (tracks.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
+    const target = tracks[safeIndex];
+    if (!target) return;
+
+    const samePreview = mode === "preview" && currentPreview?.recording_mbid === target.recording_mbid;
+    const audio = audioRef.current;
+
+    // Clicking the currently selected Discovery track is a real play/pause
+    // toggle. Do not rebuild the preview queue, because that would discard the
+    // already-resolved preview URL and immediately force playback on again.
+    if (samePreview) {
+      if (playing) {
+        audio?.pause();
+        setPlaying(false);
+      } else {
+        setPlaying(true);
+        if (audio && currentPreview?.preview_url) {
+          void audio.play().catch(() => setPlaying(false));
+        }
+      }
+      return;
+    }
+
+    // A different preview is a brand-new track. Reset both the media element
+    // and React progress state before the new URL can load, so the previous
+    // track's seek position can never leak into it.
+    if (audio) {
+      audio.pause();
+      try {
+        audio.currentTime = 0;
+      } catch {
+        // Some browsers reject seeking while a media source is being replaced.
+      }
+    }
+    setCurrentTime(0);
+    setDuration(target.duration ?? 0);
     setMode("preview");
     setPreviewQueue(tracks);
     setPreviewIndex(safeIndex);
     setPlaying(true);
     setPreviewError(null);
-  }, []);
+  }, [mode, currentPreview?.recording_mbid, currentPreview?.preview_url, playing]);
 
   const playNow = useCallback((song: Song) => playSongs([song], 0), [playSongs]);
 
@@ -281,6 +318,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const audio = audioRef.current;
       if (audio) {
         audio.currentTime = 0;
+        setCurrentTime(0);
         void audio.play().catch(() => undefined);
       }
       return;
@@ -303,6 +341,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     if (mode === "preview") {
+      const audio = audioRef.current;
+      audio?.pause();
+      if (audio) {
+        try {
+          audio.currentTime = 0;
+        } catch {
+          // Ignore transient media-source seek failures.
+        }
+      }
+      setCurrentTime(0);
+      setDuration(previewQueue[nextIndex]?.duration ?? 0);
       setPreviewIndex(nextIndex);
       setPlaying(true);
       return;
@@ -312,18 +361,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!song) return;
     startLocalPlayback(song, "next");
     setCurrentIndex(nextIndex);
-  }, [activeLength, activeIndex, repeat, shuffle, mode, queue, startLocalPlayback]);
+  }, [activeLength, activeIndex, repeat, shuffle, mode, queue, previewQueue, startLocalPlayback]);
 
   const previous = useCallback(() => {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 4) {
       audio.currentTime = 0;
+      setCurrentTime(0);
       return;
     }
     if (activeIndex <= 0) return;
 
     const previousIndex = activeIndex - 1;
     if (mode === "preview") {
+      audio?.pause();
+      if (audio) {
+        try {
+          audio.currentTime = 0;
+        } catch {
+          // Ignore transient media-source seek failures.
+        }
+      }
+      setCurrentTime(0);
+      setDuration(previewQueue[previousIndex]?.duration ?? 0);
       setPreviewIndex(previousIndex);
       setPlaying(true);
       return;
@@ -333,7 +393,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!song) return;
     startLocalPlayback(song, "previous");
     setCurrentIndex(previousIndex);
-  }, [activeIndex, mode, queue, startLocalPlayback]);
+  }, [activeIndex, mode, queue, previewQueue, startLocalPlayback]);
 
   const submitScrobble = useCallback(() => {
     if (mode !== "navidrome" || !currentSong || scrobbledRef.current === currentSong.id) return;
@@ -413,7 +473,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
-          if (currentTime > 0 && audio.currentTime === 0) audio.currentTime = currentTime;
+          // Only a restored Navidrome queue may resume a saved position. Every
+          // Discovery preview is a fresh track and must always start at 0:00.
+          if (mode === "navidrome" && currentTime > 0 && audio.currentTime === 0) {
+            audio.currentTime = currentTime;
+          }
         }}
         onTimeUpdate={onTimeUpdate}
         onPlay={() => setPlaying(true)}
@@ -452,6 +516,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       key={`${item.id}-${index}`}
                       onClick={() => {
                         if (mode === "preview") {
+                          if (index === previewIndex) {
+                            togglePlayback();
+                            return;
+                          }
+                          const audio = audioRef.current;
+                          audio?.pause();
+                          if (audio) {
+                            try {
+                              audio.currentTime = 0;
+                            } catch {
+                              // Ignore transient media-source seek failures.
+                            }
+                          }
+                          setCurrentTime(0);
+                          setDuration((item as PreviewTrack).duration ?? 0);
                           setPreviewIndex(index);
                           setPlaying(true);
                           return;
