@@ -6,6 +6,8 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     @Published private(set) var phoneReachable = false
     @Published private(set) var pendingCommand: PlaybackCommand?
     @Published private(set) var lastResult: PlaybackCommandResult?
+    @Published private(set) var catalogBusy = false
+    @Published private(set) var catalogMessage: String?
 
     private var pendingToken: String?
 
@@ -51,6 +53,122 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             self?.pendingCommand = nil
             self?.lastResult = .expired
         }
+    }
+
+    func load(route: WatchCatalogRoute, id: String? = nil, query: String? = nil) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .load,
+                route: route,
+                id: id,
+                query: query
+            )
+        )
+    }
+
+    func play(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
+        await catalog(WatchCatalogRequest(action: .play, item: item))
+    }
+
+    func toggleStar(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
+        await catalog(WatchCatalogRequest(action: .toggleStar, item: item))
+    }
+
+    func discoveryFeedback(_ item: WatchCatalogItem, value: Int) async -> WatchCatalogResponse {
+        await catalog(WatchCatalogRequest(action: .discoveryFeedback, value: value, item: item))
+    }
+
+    func rejectBadSource(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
+        await catalog(WatchCatalogRequest(action: .badSource, item: item))
+    }
+
+    func createPlaylist(name: String) async -> WatchCatalogResponse {
+        await catalog(WatchCatalogRequest(action: .createPlaylist, query: name))
+    }
+
+    func deletePlaylist(id: String) async -> WatchCatalogResponse {
+        await catalog(WatchCatalogRequest(action: .deletePlaylist, id: id))
+    }
+
+    func addToPlaylist(playlistID: String, songID: String) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .addToPlaylist,
+                id: playlistID,
+                secondaryID: songID
+            )
+        )
+    }
+
+    func removeFromPlaylist(playlistID: String, index: Int) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .removeFromPlaylist,
+                id: playlistID,
+                index: index
+            )
+        )
+    }
+
+    func youtubeSearch(artist: String, title: String) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .youtubeSearch,
+                artist: artist,
+                title: title
+            )
+        )
+    }
+
+    func youtubeImport(
+        item: WatchCatalogItem,
+        artist: String,
+        title: String,
+        authorized: Bool
+    ) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .youtubeImport,
+                artist: artist,
+                title: title,
+                authorized: authorized,
+                item: item
+            )
+        )
+    }
+
+    func catalog(_ request: WatchCatalogRequest) async -> WatchCatalogResponse {
+        guard
+            WCSession.isSupported(),
+            WCSession.default.activationState == .activated,
+            WCSession.default.isReachable,
+            let payload = WatchCatalogCodec.payload(request)
+        else {
+            return .failure(token: request.token, message: "iPhone not reachable")
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.catalogBusy = true
+            self?.catalogMessage = nil
+        }
+
+        let response: WatchCatalogResponse = await withCheckedContinuation { continuation in
+            WCSession.default.sendMessage(payload) { reply in
+                let decoded = WatchCatalogCodec.response(from: reply)
+                    ?? .failure(token: request.token, message: "Invalid iPhone response")
+                continuation.resume(returning: decoded)
+            } errorHandler: { error in
+                continuation.resume(
+                    returning: .failure(token: request.token, message: error.localizedDescription)
+                )
+            }
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            self?.catalogBusy = false
+            self?.catalogMessage = response.ok ? response.message : response.message ?? "Request failed"
+        }
+        return response
     }
 
     private func activate() {
@@ -121,6 +239,7 @@ extension WatchRemoteModel: WCSessionDelegate {
             if !session.isReachable {
                 self?.pendingToken = nil
                 self?.pendingCommand = nil
+                self?.catalogBusy = false
             }
         }
     }
