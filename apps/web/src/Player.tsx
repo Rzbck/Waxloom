@@ -203,10 +203,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.load();
     }
 
-    // A preview selection change owns a fresh timeline. Reset the real media
-    // element as well as React state; onLoadedMetadata repeats this once the new
-    // media timeline exists, which closes the browser race that could carry the
-    // previous preview's seek position into the next one.
     if (previewStartAtZeroRef.current) {
       try {
         audio.currentTime = 0;
@@ -259,9 +255,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const song = songs[safeIndex];
     if (!song) return;
 
-    // Start the local HTTP stream synchronously in the user's click handler.
-    // Do not wait for a React effect: that loses the immediate user gesture on
-    // mobile browsers and was responsible for multi-second start delays.
     startLocalPlayback(song);
     setMode("navidrome");
     setQueue(songs);
@@ -271,17 +264,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const playPreviewTracks = useCallback((tracks: PreviewTrack[], startIndex = 0) => {
     if (tracks.length === 0) return;
-    const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
-    const target = tracks[safeIndex];
+
+    const preparedTracks = tracks.map((track) => ({
+      ...track,
+      preview_url: track.preview_url
+        ?? `/api/discovery/previews/${encodeURIComponent(track.recording_mbid)}`,
+    }));
+    const safeIndex = Math.max(0, Math.min(startIndex, preparedTracks.length - 1));
+    const target = preparedTracks[safeIndex];
     if (!target) return;
 
     const samePreview = mode === "preview" && currentPreview?.id === target.id;
     const audio = audioRef.current;
 
-    // The card's own play button is a true toggle for the selected preview.
-    // Treat either React's intent or the media element as authoritative enough
-    // to pause, so a transient state mismatch cannot turn a pause click into a
-    // second play request.
     if (samePreview) {
       const shouldPause = playing || Boolean(audio && !audio.paused && !audio.ended);
       if (shouldPause) {
@@ -289,33 +284,37 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setPlaying(false);
       } else {
         setPlaying(true);
-        if (audio && currentPreview?.preview_url) {
+        if (audio && target.preview_url) {
           void audio.play().catch(() => setPlaying(false));
         }
       }
       return;
     }
 
-    // A different Discovery item always owns a brand-new timeline. Mark the
-    // transition before changing React state so both the immediate media reset
-    // and the later metadata event know that 0:00 is mandatory.
     previewStartAtZeroRef.current = true;
-    if (audio) {
+    if (audio && target.preview_url) {
+      localSongIdRef.current = null;
       audio.pause();
+      if (audio.getAttribute("src") !== target.preview_url) {
+        audio.src = target.preview_url;
+        audio.load();
+      }
       try {
         audio.currentTime = 0;
       } catch {
-        // The new source may not have metadata yet; loadedmetadata resets again.
+        // loadedmetadata performs the hard reset for the new cached preview.
       }
+      void audio.play().catch(() => setPlaying(false));
     }
+
     setCurrentTime(0);
     setDuration(target.duration ?? 0);
     setMode("preview");
-    setPreviewQueue(tracks);
+    setPreviewQueue(preparedTracks);
     setPreviewIndex(safeIndex);
     setPlaying(true);
     setPreviewError(null);
-  }, [mode, currentPreview?.id, currentPreview?.preview_url, playing]);
+  }, [mode, currentPreview?.id, playing]);
 
   const playNow = useCallback((song: Song) => playSongs([song], 0), [playSongs]);
 
@@ -502,7 +501,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             previewStartAtZeroRef.current = false;
             return;
           }
-          // Only a restored Navidrome queue may resume a saved position.
           if (mode === "navidrome" && currentTime > 0 && audio.currentTime === 0) {
             audio.currentTime = currentTime;
           }
@@ -516,7 +514,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onError={() => {
           setPlaying(false);
           if (mode === "preview") {
-            setPreviewError("The preview stream expired or could not be played. Press next or try again.");
+            setPreviewError("The cached Discovery preview could not be played. Press next or try again.");
           }
         }}
       />

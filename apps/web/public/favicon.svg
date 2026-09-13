@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Waxloom">
+  <rect width="64" height="64" rx="15" fill="#0b0b0d"/>
+  <path d="M11 17 21 47 32 24 43 47 53 17" fill="none" stroke="#9b87ff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17 17 25 39" fill="none" stroke="#d5ccff" stroke-width="3" stroke-linecap="round" opacity=".78"/>
+  <path d="M47 17 39 39" fill="none" stroke="#d5ccff" stroke-width="3" stroke-linecap="round" opacity=".78"/>
+</svg>
