@@ -5,7 +5,6 @@ import { usePlayer } from "./Player";
 import type {
   DiscoveryCandidate,
   DiscoveryFeedResponse,
-  PlaylistSummary,
   PreviewTrack,
 } from "./types";
 
@@ -164,6 +163,7 @@ function DiscoveryTrackCard({
   candidate,
   currentPreviewMbid,
   playing,
+  importing,
   taste,
   onPlay,
   onQuickAdd,
@@ -172,6 +172,7 @@ function DiscoveryTrackCard({
   candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
   playing: boolean;
+  importing: boolean;
   taste: TasteState;
   onPlay: (candidate: DiscoveryCandidate) => void;
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
@@ -201,9 +202,10 @@ function DiscoveryTrackCard({
       <button
         className="compact-action compact-action-add"
         type="button"
+        disabled={importing}
         onClick={() => onQuickAdd(candidate)}
-        title="Download + add to playlist"
-        aria-label={`Add ${candidate.title} to playlist`}
+        title={importing ? "Adding to library…" : "Add to library"}
+        aria-label={`Add ${candidate.title} to library`}
       >+</button>
       <button
         className={currentFeedback === 1 ? "taste-chip taste-chip-like taste-chip-active" : "taste-chip taste-chip-like"}
@@ -231,6 +233,7 @@ function DiscoveryShelf({
   onNextPage,
   currentPreviewMbid,
   playing,
+  importingMbid,
   taste,
   onPlayQueue,
   onQuickAdd,
@@ -243,6 +246,7 @@ function DiscoveryShelf({
   onNextPage: () => void;
   currentPreviewMbid: string | null;
   playing: boolean;
+  importingMbid: string | null;
   taste: TasteState;
   onPlayQueue: (items: DiscoveryCandidate[], candidate: DiscoveryCandidate) => void;
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
@@ -274,6 +278,7 @@ function DiscoveryShelf({
             candidate={candidate}
             currentPreviewMbid={currentPreviewMbid}
             playing={playing}
+            importing={importingMbid === candidate.recording_mbid}
             taste={taste}
             onPlay={(track) => onPlayQueue(items, track)}
             onQuickAdd={onQuickAdd}
@@ -288,11 +293,9 @@ function DiscoveryShelf({
 export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candidate: DiscoveryCandidate) => void }) {
   const player = usePlayer();
   const [bundle, setBundle] = useState<DiscoveryFeedResponse | null>(() => readBrowserFeed());
-  const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [feedStatus, setFeedStatus] = useState<string>(bundle?.status ?? "starting");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [quickTarget, setQuickTarget] = useState<DiscoveryCandidate | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
   const [shelfPages, setShelfPages] = useState<Record<ShelfKey, number>>({ closest: 0, underground: 0, deep: 0 });
@@ -313,13 +316,6 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
   useEffect(() => {
     let cancelled = false;
-
-    void api.playlists()
-      .then((payload) => {
-        if (!cancelled) setPlaylists(payload.items);
-      })
-      .catch(() => undefined);
-
     void readFeed();
     const timer = window.setInterval(() => {
       if (!cancelled) void readFeed();
@@ -426,14 +422,14 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       });
   }
 
-  async function addToPlaylist(playlist: PlaylistSummary) {
-    if (!quickTarget) return;
-    const candidate = quickTarget;
+  async function addToLibrary(candidate: DiscoveryCandidate) {
+    if (importing) return;
+
     const authKey = "waxloom.authorizedMediaImports";
     let authorized = window.localStorage.getItem(authKey) === "true";
     if (!authorized) {
       authorized = window.confirm(
-        "Waxloom can automatically search for a matching YouTube source, download it and add it to this playlist. Confirm that you are authorized to save the media you import this way.",
+        "Waxloom can download this music source into your local library. Confirm that you are authorized to save the media you import this way.",
       );
       if (!authorized) return;
       window.localStorage.setItem(authKey, "true");
@@ -441,29 +437,28 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
     setImporting(candidate.recording_mbid);
     setError(null);
-    setNotice(null);
+    setNotice(`Adding ${candidate.artist} — ${candidate.title} to your library…`);
+
     try {
       const search = await api.youtubeSearch(candidate.artist, candidate.title, undefined, 1);
       const best = search.items[0];
       if (!best || best.score < 80) {
-        setQuickTarget(null);
-        setNotice("The automatic source match was ambiguous or did not pass the music-only check. Choose the source manually before importing.");
+        setNotice("The automatic source match was ambiguous. Choose the music source manually before importing.");
         onImportCandidate(candidate);
         return;
       }
-      const result = await api.youtubeImport(candidate.artist, candidate.title, best.url, playlist.id, true);
+
+      const result = await api.youtubeImport(candidate.artist, candidate.title, best.url, null, true);
       setNotice(
         result.status === "already_local"
-          ? `Already local — added the existing track to “${playlist.name}”.`
-          : result.playlist_added
-            ? `Downloaded at source-best audio quality and added to “${playlist.name}”.`
-            : result.playlist_pending
-              ? `Downloaded at source-best audio quality. Waxloom queued the add to “${playlist.name}” and will complete it automatically after Navidrome indexes the track.`
-              : "Downloaded at source-best audio quality. Navidrome is still indexing it.",
+          ? "Already in your local library — no duplicate was downloaded."
+          : result.status === "imported"
+            ? `Added to your library: ${result.relative_path ?? `${candidate.artist} / Singles`}.`
+            : `Downloaded to your library: ${result.relative_path ?? `${candidate.artist} / Singles`}. Navidrome is still indexing it.`,
       );
-      setQuickTarget(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Automatic import failed.");
+      setError(caught instanceof Error ? caught.message : "Library import failed.");
+      setNotice(null);
     } finally {
       setImporting(null);
     }
@@ -523,9 +518,10 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onNextPage={() => nextShelfPage("closest")}
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
+            importingMbid={importing}
             taste={taste}
             onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={setQuickTarget}
+            onQuickAdd={(candidate) => void addToLibrary(candidate)}
             onFeedback={updateFeedback}
           />
           <DiscoveryShelf
@@ -536,9 +532,10 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onNextPage={() => nextShelfPage("underground")}
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
+            importingMbid={importing}
             taste={taste}
             onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={setQuickTarget}
+            onQuickAdd={(candidate) => void addToLibrary(candidate)}
             onFeedback={updateFeedback}
           />
           <DiscoveryShelf
@@ -549,32 +546,13 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onNextPage={() => nextShelfPage("deep")}
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
+            importingMbid={importing}
             taste={taste}
             onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={setQuickTarget}
+            onQuickAdd={(candidate) => void addToLibrary(candidate)}
             onFeedback={updateFeedback}
           />
         </>
-      )}
-
-      {quickTarget && (
-        <div className="modal-backdrop" role="presentation" onMouseDown={() => setQuickTarget(null)}>
-          <section className="modal discovery-playlist-modal" role="dialog" aria-modal="true" aria-label="Download and add to playlist" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="modal-head">
-              <div><p className="eyebrow">Download + add</p><h3>{quickTarget.artist} — {quickTarget.title}</h3></div>
-              <button className="icon-button" type="button" onClick={() => setQuickTarget(null)}>×</button>
-            </div>
-            <p className="muted">Choose the destination playlist. Waxloom uses the highest-confidence music-only source automatically; ambiguous matches fall back to manual source selection.</p>
-            <div className="modal-list">
-              {playlists.map((playlist) => (
-                <button className="modal-list-item" type="button" key={playlist.id} disabled={importing === quickTarget.recording_mbid} onClick={() => void addToPlaylist(playlist)}>
-                  <strong>{playlist.name}</strong><span>{playlist.songCount ?? 0} tracks</span>
-                </button>
-              ))}
-            </div>
-            <button className="secondary-action" type="button" onClick={() => { setQuickTarget(null); onImportCandidate(quickTarget); }}>Choose source manually →</button>
-          </section>
-        </div>
       )}
     </div>
   );
