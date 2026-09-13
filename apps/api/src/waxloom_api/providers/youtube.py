@@ -158,7 +158,7 @@ def _resolve_ffmpeg() -> Path | None:
 
 
 def _write_tags(path: Path, artist: str, title: str) -> None:
-    """Best-effort tags without intentionally lowering source quality."""
+    """Best-effort metadata without transcoding the downloaded audio."""
     try:
         audio = MutagenFile(path, easy=True)
         if audio is None:
@@ -167,9 +167,11 @@ def _write_tags(path: Path, artist: str, title: str) -> None:
             audio.add_tags()
         audio["artist"] = [artist]
         audio["title"] = [title]
-        audio["album"] = ["Waxloom Imports"]
+        audio["album"] = ["Singles"]
         audio.save()
     except Exception:
+        # The Artist/Singles folder and Artist - Title filename remain a useful
+        # Navidrome fallback even when the source container cannot be tagged.
         return
 
 
@@ -287,7 +289,7 @@ class YouTubeProvider:
             "ffmpeg": _resolve_ffmpeg() is not None,
             "node": bool(shutil.which("node")),
             "yt_dlp": True,
-            "download_quality": "source-best",
+            "download_quality": "source-best-no-transcode",
         }
 
     def _score(self, artist: str, title: str, candidate: dict[str, Any]) -> float:
@@ -462,8 +464,6 @@ class YouTubeProvider:
     ) -> Path:
         if not _is_youtube_url(source_url):
             raise ValueError("Only youtube.com / youtu.be source URLs are accepted.")
-        if _resolve_ffmpeg() is None:
-            raise RuntimeError("FFmpeg was not found. Configure FFMPEG_PATH or install FFmpeg in PATH.")
 
         probe_options = self._base_options()
         probe_options.update(
@@ -487,7 +487,7 @@ class YouTubeProvider:
             raise ValueError("The selected YouTube source does not look like a music track.")
 
         output_root = output_root.resolve()
-        artist_dir = output_root / _safe_component(artist, "Unknown Artist")
+        artist_dir = output_root / _safe_component(artist, "Unknown Artist") / "Singles"
         artist_dir.mkdir(parents=True, exist_ok=True)
         base_name = f"{_safe_component(artist, 'Unknown Artist')} - {_safe_component(title, 'Unknown Track')}"
         target_base = (artist_dir / base_name).resolve()
@@ -504,14 +504,16 @@ class YouTubeProvider:
                 "noplaylist": True,
                 "outtmpl": str(target_base) + ".%(ext)s",
                 "overwrites": False,
-                "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "best", "preferredquality": "0"},
-                    {"key": "FFmpegMetadata"},
-                ],
+                # No FFmpegExtractAudio here: keep YouTube's selected best-audio
+                # stream/container intact instead of introducing another lossy
+                # encode just to normalize the extension.
             }
         )
-        with yt_dlp.YoutubeDL(options) as downloader:
-            downloader.download([source_url])
+        try:
+            with yt_dlp.YoutubeDL(options) as downloader:
+                downloader.download([source_url])
+        except (DownloadError, OSError, ValueError) as exc:
+            raise RuntimeError(f"YouTube audio download failed: {exc}") from exc
 
         ignored_suffixes = {".part", ".ytdl", ".json", ".jpg", ".jpeg", ".png", ".webp"}
         candidates = [
