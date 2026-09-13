@@ -27,6 +27,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
     private var previewIndex = 0
     private var revision: Int64 = 0
     private var periodicObserver: Any?
+    private var lastWatchProgressBucket = -1
 
     init(watchBridge: PhoneWatchBridge) {
         self.watchBridge = watchBridge
@@ -149,6 +150,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         elapsedSeconds = 0
         durationSeconds = song.duration ?? 0
         errorMessage = nil
+        lastWatchProgressBucket = -1
         revision += 1
 
         player.play()
@@ -179,6 +181,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
             elapsedSeconds = 0
             durationSeconds = source.duration ?? 0
             errorMessage = nil
+            lastWatchProgressBucket = -1
             revision += 1
 
             player.play()
@@ -256,6 +259,14 @@ final class NativePlayerModel: NSObject, ObservableObject {
                     self.durationSeconds = itemDuration
                 }
                 self.updateNowPlayingElapsed()
+
+                if self.isPlaying {
+                    let bucket = Int(self.elapsedSeconds / 5)
+                    if bucket != self.lastWatchProgressBucket {
+                        self.lastWatchProgressBucket = bucket
+                        self.publishSnapshot(interactive: false)
+                    }
+                }
             }
         }
 
@@ -295,7 +306,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         }
     }
 
-    private func publishSnapshot() {
+    private func publishSnapshot(interactive: Bool = true) {
         watchBridge?.publish(
             PlaybackSnapshot(
                 sessionID: snapshotSessionID,
@@ -306,7 +317,8 @@ final class NativePlayerModel: NSObject, ObservableObject {
                 isPlaying: isPlaying,
                 elapsedSeconds: elapsedSeconds,
                 durationSeconds: durationSeconds
-            )
+            ),
+            interactive: interactive
         )
     }
 
