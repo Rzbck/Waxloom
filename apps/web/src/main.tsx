@@ -19,6 +19,7 @@ import "./icon-centering-v5.css";
 import "./discovery-shelf-stability-v6.css";
 import "./player-clearance-v7.css";
 import "./sidebar-fixed-v8.css";
+import "./discovery-bad-source-v9.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
