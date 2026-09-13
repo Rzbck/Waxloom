@@ -6,100 +6,107 @@ Date: 2026-09-13
 
 - Repository: `Rzbck/Waxloom` (public).
 - Published `main`: `e44183afe9b82c23f6fe77943faec1a1fb7773b0`.
-- PR #9 / validated Discovery stack was promoted to `main` after owner authorization.
-- Post-merge GitHub `Public repository security gate` = PASS.
-- Post-merge GitHub `Windows build gate` = PASS.
 - Current chantier: `feat/iphone-app-20260913`.
 - Branch point: published `main` `e44183afe9b82c23f6fe77943faec1a1fb7773b0`.
-- Dedicated Windows worktree created by owner: `E:\_Project\_WAXLOOM_WORKTREES\iphone-app-20260913`.
-- At chantier creation the worktree was CLEAN at `e44183a`.
+- Dedicated Windows worktree: `E:\_Project\_WAXLOOM_WORKTREES\iphone-app-20260913`.
+- PR #10 remains draft/open. No promotion to `main` is authorized by this handoff.
 
 ## USER VALIDATED baseline carried into native work
 
-The owner validated the Discovery source-quality + preview-control behavior before promotion:
+The owner validated these Discovery semantics on the published web product and they remain mandatory native behavior:
 
-- YouTube Dig bad-source `X` is aligned with Play/Add/Like/Less and remains separate from musical `Less` feedback;
-- switching Discovery preview A -> B starts B at `0:00`;
-- the active Discovery track toggles Play/Pause;
-- resume continues from the paused position;
-- newly selected preview tracks start at `0:00`;
+- direct YouTube Dig bad-source `X` is separate from musical `Less` feedback;
+- bad-source removes the candidate and persists source rejection without incrementing musical dislike;
+- switching preview A -> B starts B at `0:00`;
+- tapping the active preview toggles pause/resume and resumes from its paused position;
+- next/previous/new preview starts at `0:00`;
 - Discovery preview playback remains separate from the persisted Navidrome queue.
 
-These semantics must be preserved by the native iPhone player.
+## Native iPhone + Apple Watch implementation
 
-## Native iPhone + Apple Watch chantier
+Canonical architecture: `docs/IOS_NATIVE_ARCHITECTURE.md`.
 
-The owner wants a real native Waxloom iPhone app plus companion Watch app, not a WKWebView wrapper.
+The native tranche now implements a real SwiftUI product rather than a web wrapper or player-only prototype.
 
-Architecture/process audit completed against `Rzbck/ios-godot-lab`, including its iPhone Lab V2 build/sideload workflow and the current native `apps/watch-sensor-lab` iPhone/Watch implementation.
+### iPhone product surface
 
-Canonical native design document:
+- Home / server and Watch state;
+- Albums + album details + favorites;
+- Artists + artist details + favorites;
+- Playlists list/create/delete/detail/add/remove tracks;
+- Favorites across songs/albums/artists;
+- Search across songs/albums/artists;
+- Discovery feed, preview playback, Like, Less, bad-source rejection, refresh and import entry;
+- authorized YouTube source search/import through the Waxloom server;
+- native AVPlayer library playback and transient Discovery previews;
+- full Now Playing with seek, +/-15 seconds, previous/play-pause/next, current-track favorite and queue;
+- background audio + MPNowPlayingInfoCenter + MPRemoteCommandCenter;
+- server queue restore/persistence and library-only scrobble behavior;
+- private HTTPS endpoint configuration with reconnect on launch.
 
-`docs/IOS_NATIVE_ARCHITECTURE.md`
+### Apple Watch product surface
 
-Key decisions:
+The Watch is no longer only a transport remote. It uses the iPhone as the authenticated/private Waxloom API gateway and provides:
 
-- pure SwiftUI iPhone + watchOS client; no Godot runtime in Waxloom;
-- reuse Waxloom's existing HTTP API instead of duplicating Navidrome/AudioMuse/ListenBrainz/YouTube provider logic in Swift;
-- iPhone native player is the single live native-playback authority;
-- Watch is a presentation/control companion and communicates with iPhone through WatchConnectivity;
-- Watch player commands use exact UUID tokens + base revision/session checks + explicit acknowledgements; stale/delayed Play/Pause/Next commands must never execute later;
-- state uses `updateApplicationContext`; immediate controls use `sendMessage`; durable/file transports are reserved for semantics that are safe to deliver later;
-- native audio uses AVFoundation/MediaPlayer with background audio, Now Playing and system remote commands;
-- native UI keeps Waxloom's dark/violet visual identity and product information architecture while using native SwiftUI controls;
-- exact-SHA unsigned iPhone+Watch IPA artifacts are built on GitHub Actions macOS using checked-in XcodeGen specs;
-- physical iPhone/Watch validation remains separate from CI build success.
+- compact horizontal page navigation inspired by the already-proven sports app UI;
+- Now Playing progress, previous/play-pause/next and +/-15 second controls;
+- Albums / Artists / Favorites / Playlists / Discovery browsing;
+- Search from the Watch;
+- album/artist/playlist drill-down;
+- launch song or Discovery preview on the iPhone player from the Watch;
+- song/album/artist favorite actions;
+- playlist create/delete/add/remove operations;
+- Discovery Like/Less and separate bad-source rejection;
+- authorized YouTube source search/import;
+- connection/status/build page.
+
+Catalog mutations and browse actions use immediate `WatchConnectivity.sendMessage` request/reply. They are not queued for delayed execution. Player controls keep exact token + session + revision + TTL validation and acknowledgements.
 
 ## Tailscale / native network security
 
-Current Waxloom development runtime binds API/Vite to the active Tailscale interface when available. The API currently has no dedicated native-client authentication layer.
+Current physical-test endpoint is configured locally by the owner through Tailscale Serve HTTPS. No private endpoint, `.env`, provider credential, Tailscale auth key, signing secret, Apple certificate/profile or device pairing material is committed.
 
-Native direction:
+Native security direction remains:
 
-- keep Waxloom private to the tailnet; never use Funnel for the app;
-- prefer stable MagicDNS + HTTPS/Tailscale Serve rather than broad iOS cleartext ATS exceptions;
-- use least-privilege Tailscale Grants for the Waxloom service;
-- do not embed Tailscale auth keys or provider credentials in the app;
-- if Tailscale Serve identity/app-capability headers are used for authorization, the backend path must not remain directly reachable in a way that permits header spoofing;
-- use a non-sensitive Tailscale machine name before enabling public-CA HTTPS because the certificate FQDN is recorded in Certificate Transparency.
-
-Any network-launcher refactor must preserve the already USER VALIDATED desktop/mobile-web path and be tested as its own runtime tranche.
-
-## Native security invariants
-
-- public repo: never commit `.env`, credentials, cookies, provider tokens, signing certificates, provisioning profiles, Apple passwords, Team IDs tied to private setup, device UDIDs, pairing files, private DBs, media or user library data;
+- tailnet-only; never Funnel for Waxloom;
+- HTTPS / MagicDNS / Tailscale Serve;
 - provider credentials remain server-side;
-- request only minimum Apple capabilities; first native music tranche needs background audio, not HealthKit/location/motion/microphone;
-- CI builds unsigned; local sideload/signing remains outside GitHub;
-- exact candidate claims require exact SHA attribution;
-- 1 active chantier = 1 branch = 1 dedicated worktree;
-- no force-push, destructive reset, blind clean or shared-history rewrite.
+- Watch uses iPhone as gateway rather than receiving provider credentials;
+- CI remains unsigned; signing/install stays local through iLoader.
 
-## Existing API surface to reuse
+## Build / sideload contract
 
-The current backend already exposes the native client's core product surface:
+- XcodeGen source of truth;
+- GitHub Actions `macos-26` / Xcode native build;
+- iOS 17 + watchOS 10;
+- iPhone bundle `com.rzbck.waxloom`;
+- Watch bundle `com.rzbck.waxloom.watchkitapp`;
+- companion embedded in `Payload/Waxloom.app/Watch/...`;
+- exact commit SHA stamped into the product and artifact metadata;
+- unsigned IPA + SHA-256 artifact;
+- local exact-SHA retrieval via `apps/apple/UPDATE_APPLE_NATIVE.ps1`;
+- local signing/install with the existing iLoader flow;
+- physical hardware validation is separate from CI success.
 
-- health/integration state;
-- albums/artists/song detail/search/random library;
-- Favorites/starred;
-- playlists CRUD;
-- persisted Navidrome queue;
-- Discovery feed/status/feedback;
-- YouTube preview resolution/import;
-- audio stream with HTTP Range forwarding;
-- cover-art proxy.
+## Validation vocabulary / current state
 
-Native Codable DTOs should mirror these contracts. Avoid a second source of truth.
+- Native complete product tranche: `IMPLEMENTED / NOT USER VALIDATED` until the final exact-SHA IPA is installed on the real iPhone + Watch.
+- GitHub compile/package/security results must be recorded only against the final exact branch HEAD after the product-invariant gate update.
+- Earlier successful candidate SHAs are not substitutes for the final exact-head hardware test.
 
-## NEXT TEST / implementation order
+## NEXT TEST
 
-1. Add `apps/apple` native SwiftUI/XcodeGen scaffold and shared DTO/control protocol.
-2. Add pinned exact-SHA macOS CI that builds unsigned iPhone + embedded Watch companion and verifies product invariants.
-3. Add a fail-closed Windows exact-artifact updater modeled on the proven iOS lab workflow.
-4. Implement secure Waxloom endpoint configuration and `/api/health` handshake over Tailscale.
-5. Then implement native navigation/library before the audio engine and Watch controls.
+On the final exact-SHA artifact:
 
-Do not claim native app validation until the exact built IPA is installed and tested on the real iPhone/Watch.
+1. install iPhone + embedded Watch companion through iLoader;
+2. confirm saved private HTTPS endpoint reconnects;
+3. validate Albums, Artists, Favorites, Playlists, Search, Discovery and Imports on iPhone;
+4. validate AVPlayer playback, seek, queue restore/persist, background/system controls and validated Discovery preview semantics;
+5. open Watch and validate compact horizontal navigation;
+6. from Watch validate browse/search, play, favorites, playlist CRUD/add/remove, Discovery feedback/bad-source, imports and transport controls;
+7. confirm stale/offline Watch actions fail instead of executing later.
+
+Only after this physical test can the exact candidate be labeled `USER VALIDATED`.
 
 ## Rollback / checkpoints
 
