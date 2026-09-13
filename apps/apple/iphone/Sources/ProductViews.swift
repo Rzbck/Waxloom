@@ -11,34 +11,36 @@ struct WaxloomProductRootView: View {
             NavigationStack {
                 ProductHomeView(connection: connection, watchBridge: watchBridge, player: player)
             }
+            .productMiniPlayerInset(connection: connection, player: player)
             .tabItem { Label("Home", systemImage: "house.fill") }
 
             NavigationStack {
                 ProductBrowseView(connection: connection, player: player)
             }
+            .productMiniPlayerInset(connection: connection, player: player)
             .tabItem { Label("Browse", systemImage: "square.grid.2x2.fill") }
 
             NavigationStack {
                 ProductDiscoveryView(connection: connection, player: player)
             }
+            .productMiniPlayerInset(connection: connection, player: player)
             .tabItem { Label("Discovery", systemImage: "sparkles") }
 
             NavigationStack {
                 ProductSearchView(connection: connection, player: player)
             }
+            .productMiniPlayerInset(connection: connection, player: player)
             .tabItem { Label("Search", systemImage: "magnifyingglass") }
 
             NavigationStack {
                 ProductMoreView(connection: connection, watchBridge: watchBridge, player: player)
             }
+            .productMiniPlayerInset(connection: connection, player: player)
             .tabItem { Label("More", systemImage: "ellipsis.circle.fill") }
         }
         .tint(ProductTheme.accent)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if player.mode != .idle {
-                ProductMiniPlayer(connection: connection, player: player)
-            }
-        }
+        .toolbarBackground(ProductTheme.background, for: .tabBar)
+        .toolbarBackground(.visible, for: .tabBar)
         .task {
             await connection.connectSavedIfNeeded()
             player.setBaseURL(connection.baseURL)
@@ -1003,32 +1005,40 @@ private struct ProductMiniPlayer: View {
     @State private var showPlayer = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 9) {
             Button { showPlayer = true } label: {
-                HStack(spacing: 10) {
-                    ProductArtwork(url: coverURL, size: 42)
+                HStack(spacing: 9) {
+                    ProductArtwork(url: coverURL, size: 38)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(title).font(.caption.weight(.semibold)).lineLimit(1)
                         Text(artist).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            Spacer()
-            Button { Task { await player.previous() } } label: { Image(systemName: "backward.fill") }
+            Spacer(minLength: 6)
+            Button { Task { await player.previous() } } label: {
+                Image(systemName: "backward.fill").frame(width: 28, height: 32)
+            }
             Button { player.toggle() } label: {
                 Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                    .frame(width: 34, height: 34)
-                    .background(ProductTheme.accent.opacity(0.20), in: Circle())
+                    .frame(width: 32, height: 32)
+                    .background(ProductTheme.accent.opacity(0.22), in: Circle())
             }
-            Button { Task { await player.next() } } label: { Image(systemName: "forward.fill") }
+            Button { Task { await player.next() } } label: {
+                Image(systemName: "forward.fill").frame(width: 28, height: 32)
+            }
         }
         .buttonStyle(.plain)
-        .padding(.horizontal, 12)
-        .frame(height: 62)
-        .background(.ultraThinMaterial)
-        .overlay(alignment: .top) { Divider().opacity(0.25) }
+        .padding(.horizontal, 10)
+        .frame(height: 54)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 1)
+        }
         .sheet(isPresented: $showPlayer) {
             ProductNowPlayingView(connection: connection, player: player)
         }
@@ -1363,6 +1373,16 @@ private enum ProductTheme {
 }
 
 private extension View {
+    func productMiniPlayerInset(connection: ConnectionModel, player: NativePlayerModel) -> some View {
+        safeAreaInset(edge: .bottom, spacing: 0) {
+            if player.mode != .idle {
+                ProductMiniPlayer(connection: connection, player: player)
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 6)
+            }
+        }
+    }
+
     func productCard() -> some View {
         padding(15)
             .frame(maxWidth: .infinity, alignment: .leading)
