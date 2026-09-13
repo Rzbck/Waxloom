@@ -1,0 +1,18 @@
+/* Desktop sidebar must belong to the viewport, not to the document scroll.
+   A sticky grid item eventually gets constrained by its parent and can move
+   upward near the bottom of long Discovery/library pages. */
+
+@media (min-width: 821px) {
+  .sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0 !important;
+    width: 224px !important;
+    height: 100dvh !important;
+    z-index: 90;
+  }
+
+  .content {
+    grid-column: 2 !important;
+    min-width: 0;
+  }
+}
