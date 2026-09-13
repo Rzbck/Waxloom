@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import "./browser-cache-v8";
+import "./preview-request-budget-v10";
 import App from "./App";
 import { PlayerProvider } from "./Player";
 import "./styles.css";
