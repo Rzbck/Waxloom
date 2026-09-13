@@ -46,7 +46,7 @@ The native tranche now implements a real SwiftUI product rather than a web wrapp
 - authorized YouTube source search/import through the Waxloom server;
 - native AVPlayer library playback and transient Discovery previews;
 - full Now Playing with seek, +/-15 seconds, previous/play-pause/next, current-track favorite and queue;
-- background audio + MPNowPlayingInfoCenter + MPRemoteCommandCenter;
+- background audio + MPNowPlayingInfoCenter / MPRemoteCommandCenter;
 - server queue restore/persistence and library-only scrobble behavior;
 - private HTTPS endpoint configuration with reconnect on launch;
 - compact mini-player is inset inside each tab so Home/Browse/Discovery/Search/More remains visible and tappable during playback.
@@ -151,3 +151,17 @@ Physical next test:
 4. verify Less/X removes that item from the active cache;
 5. verify feed rotation removes stale files;
 6. verify adding a cached matching source promotes locally without a second source download.
+
+## Windows service topology / automatic startup
+
+The local Waxloom host now has a defined service layout. Keep this operational topology in mind in future sessions, but do not publish private hostnames, local IPs, credentials, personal paths, or machine-specific secrets in the public repository.
+
+- Docker Desktop is the container runtime for the auxiliary self-hosted services currently used on the machine.
+- AudioMuse runs as Docker containers with persistent PostgreSQL/Redis volumes and `unless-stopped` restart policies.
+- Immich is also Docker-managed and its core containers use automatic restart policies; it is independent from Waxloom but shares the same Docker Desktop runtime.
+- Navidrome is not Docker-managed in the current setup; it runs through a Windows Scheduled Task and remains the library/streaming authority used by Waxloom.
+- Waxloom API + web + private HTTPS bridge are started by the hidden Windows Scheduled Task `Waxloom Native Server` at user logon. The task runs the canonical `apps/apple/START_WAXLOOM_NATIVE.ps1` launcher with no browser and no visible terminal.
+- The scheduled Waxloom task was USER VALIDATED while running: task state `Running`, API/web/bridge listeners active, and private HTTPS `/api/health` returned `status=ok`.
+- A full cold reboot/logon validation is still required before calling the whole automatic-start chain USER VALIDATED across reboot.
+- Tailscale Serve remains private/tailnet-only; never replace it with Funnel for Waxloom.
+- Future service cleanup may relocate old deployment folders, but must preserve Docker volumes/data and avoid changing working service state merely for cosmetic organization.
