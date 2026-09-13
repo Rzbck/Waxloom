@@ -26,6 +26,10 @@ The native app accepts an HTTPS Waxloom server endpoint. The intended deployment
 
 The saved endpoint reconnects automatically on launch. Health validation is single-flight and idempotent for an already validated endpoint, so a manual `Connect securely` tap cannot race the automatic reconnect and overwrite a successful state. Health checks use an ephemeral no-cache URLSession, wait for connectivity, and retry only transient transport/HTTP failures.
 
+## Discovery preview playback
+
+Discovery previews use the Waxloom server's rolling temporary cache rather than resolving a fresh provider stream on every tap. A new remote AVPlayer item starts at 0:00 by construction; native startup must not await a remote seek before preview state and playback are established. The player explicitly checks asset playability, rejects stale concurrent loads, and starts the selected preview immediately once the cached asset is ready.
+
 ## Watch control contract
 
 The iPhone is the playback authority. Watch commands are immediate-only and include a UUID token, playback session ID, authority revision and 8-second expiry. The iPhone returns explicit acknowledgements and rejects stale, expired or mismatched commands.
