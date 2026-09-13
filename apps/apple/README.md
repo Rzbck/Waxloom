@@ -24,6 +24,8 @@ CI assembly is not physical validation. A candidate becomes hardware-validated o
 
 The native app accepts an HTTPS Waxloom server endpoint. The intended deployment is a private Tailscale MagicDNS/Serve HTTPS name. There is no broad ATS cleartext exception, and Navidrome/AudioMuse/YouTube credentials remain on the Waxloom server.
 
+The saved endpoint reconnects automatically on launch. Health validation is single-flight and idempotent for an already validated endpoint, so a manual `Connect securely` tap cannot race the automatic reconnect and overwrite a successful state. Health checks use an ephemeral no-cache URLSession, wait for connectivity, and retry only transient transport/HTTP failures.
+
 ## Watch control contract
 
 The iPhone is the playback authority. Watch commands are immediate-only and include a UUID token, playback session ID, authority revision and 8-second expiry. The iPhone returns explicit acknowledgements and rejects stale, expired or mismatched commands.
