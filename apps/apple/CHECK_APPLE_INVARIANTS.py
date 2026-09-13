@@ -59,6 +59,11 @@ for text, label in [
     forbid(text, "http://", f"{label} cleartext URL")
 
 require(connection, 'components.scheme?.lowercased() == "https"', "HTTPS-only endpoint")
+require(connection, "private var connectionCheckInFlight = false", "Single-flight server connection state")
+require(connection, "if connectionCheckInFlight { return }", "Duplicate connection suppression")
+require(connection, "URLSessionConfiguration.ephemeral", "Private health-check session")
+require(connection, ".reloadIgnoringLocalAndRemoteCacheData", "Health check bypasses stale caches")
+require(connection, "configuration.waitsForConnectivity = true", "Health check waits for Tailscale connectivity")
 
 # Existing exact-token playback authority protocol.
 require(shared_wire, 'static let commandTTL: TimeInterval = 8', "Watch command expiry")
