@@ -11,8 +11,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yt_dlp
-from mutagen.easyid3 import EasyID3
-from mutagen.id3 import ID3NoHeaderError
+from mutagen import File as MutagenFile
 from rapidfuzz import fuzz
 from yt_dlp.utils import DownloadError
 
@@ -24,9 +23,66 @@ LOW_SIGNAL_KEYWORDS = (
     "nightcore",
     "8d",
     "lyrics",
-    "live",
     "reaction",
     "tutorial",
+)
+
+NON_MUSIC_TITLE_KEYWORDS = (
+    "podcast",
+    "reaction",
+    "interview",
+    "tutorial",
+    "presentation",
+    "review",
+    "breakdown",
+    "explained",
+    "explanation",
+    "lecture",
+    "webinar",
+    "how to",
+    "lesson",
+    "documentary",
+    "behind the scenes",
+    "making of",
+    "commentary",
+    "analysis",
+    "walkthrough",
+    "unboxing",
+    "conference",
+    "speech",
+    "discussion",
+    "gear demo",
+    "synth demo",
+    "plugin demo",
+    "product demo",
+)
+
+SOFT_NON_MUSIC_KEYWORDS = (
+    "interview",
+    "podcast",
+    "tutorial",
+    "presentation",
+    "review",
+    "breakdown",
+    "explained",
+    "lecture",
+    "webinar",
+    "documentary",
+    "how to",
+    "lesson",
+    "discussion",
+    "speech",
+    "talk",
+)
+
+POSITIVE_MUSIC_TITLE_KEYWORDS = (
+    "official audio",
+    "official video",
+    "official music video",
+    "visualizer",
+    "visualiser",
+    "lyric video",
+    "audio only",
 )
 
 PREVIEW_SEARCH_CACHE_SECONDS = 15 * 60
@@ -102,14 +158,77 @@ def _resolve_ffmpeg() -> Path | None:
 
 
 def _write_tags(path: Path, artist: str, title: str) -> None:
+    """Best-effort tags without transcoding the audio payload."""
     try:
-        tags = EasyID3(path)
-    except ID3NoHeaderError:
-        tags = EasyID3()
-    tags["artist"] = [artist]
-    tags["title"] = [title]
-    tags["album"] = ["Waxloom Imports"]
-    tags.save(path)
+        audio = MutagenFile(path, easy=True)
+        if audio is None:
+            return
+        if audio.tags is None:
+            audio.add_tags()
+        audio["artist"] = [artist]
+        audio["title"] = [title]
+        audio["album"] = ["Waxloom Imports"]
+        audio.save()
+    except Exception:
+        # Filename remains "Artist - Title" so Navidrome still has a useful fallback.
+        return
+
+
+def _obvious_non_music_title(value: str) -> bool:
+    title = value.casefold()
+    return any(word in title for word in NON_MUSIC_TITLE_KEYWORDS)
+
+
+def _music_confidence(info: dict[str, Any]) -> tuple[bool, float]:
+    """Reject talking/presentation/tutorial videos unless music evidence is strong."""
+    raw_title = str(info.get("title") or "")
+    title = raw_title.casefold()
+    description = str(info.get("description") or "")[:4000].casefold()
+    channel = " ".join(
+        str(info.get(key) or "")
+        for key in ("channel", "uploader", "uploader_id")
+    ).casefold()
+
+    if _obvious_non_music_title(raw_title):
+        return False, 0.0
+
+    duration = info.get("duration")
+    if isinstance(duration, (int, float)) and not 45 <= float(duration) <= 900:
+        return False, 0.0
+
+    score = 0.0
+    categories = [str(value).casefold() for value in info.get("categories") or []]
+    if any(value == "music" or "music" in value for value in categories):
+        score += 4.0
+
+    track_meta = str(info.get("track") or "").strip()
+    artist_meta = str(info.get("artist") or "").strip()
+    album_meta = str(info.get("album") or "").strip()
+    if track_meta and artist_meta:
+        score += 5.0
+    elif track_meta or artist_meta:
+        score += 2.0
+    if album_meta:
+        score += 0.75
+
+    if " - topic" in channel or channel.endswith(" topic"):
+        score += 4.0
+    if any(word in title for word in POSITIVE_MUSIC_TITLE_KEYWORDS):
+        score += 2.0
+    if any(word in channel for word in (" records", " recordings", " label", " music", " official")):
+        score += 1.0
+    if " - " in raw_title or " – " in raw_title or " — " in raw_title:
+        score += 1.0
+    if isinstance(duration, (int, float)) and 60 <= float(duration) <= 720:
+        score += 0.5
+
+    soft_hits = sum(1 for word in SOFT_NON_MUSIC_KEYWORDS if word in description)
+    if soft_hits >= 2:
+        score -= 4.0
+    elif soft_hits == 1:
+        score -= 1.5
+
+    return score >= 4.0, score
 
 
 class YouTubeProvider:
@@ -170,6 +289,7 @@ class YouTubeProvider:
             "ffmpeg": _resolve_ffmpeg() is not None,
             "node": bool(shutil.which("node")),
             "yt_dlp": True,
+            "download_quality": "source-best",
         }
 
     def _score(self, artist: str, title: str, candidate: dict[str, Any]) -> float:
@@ -204,6 +324,8 @@ class YouTubeProvider:
         for keyword in LOW_SIGNAL_KEYWORDS:
             if keyword in candidate_title and keyword not in title_n:
                 score -= 12
+        if _obvious_non_music_title(str(candidate.get("title") or "")):
+            score -= 60
         return max(0.0, round(score, 2))
 
     @staticmethod
@@ -262,7 +384,7 @@ class YouTubeProvider:
                         continue
                     url = self._canonical_url(entry)
                     candidate_title = str(entry.get("title") or "")
-                    if not url or not candidate_title:
+                    if not url or not candidate_title or _obvious_non_music_title(candidate_title):
                         continue
                     candidate = {
                         "title": candidate_title,
@@ -306,6 +428,9 @@ class YouTubeProvider:
                     continue
                 if not isinstance(entry, dict):
                     continue
+                is_music, music_confidence = _music_confidence(entry)
+                if not is_music:
+                    continue
                 preview_url = str(entry.get("url") or "")
                 if not _is_direct_https_url(preview_url):
                     continue
@@ -318,6 +443,7 @@ class YouTubeProvider:
                     "thumbnail": entry.get("thumbnail") or candidate.get("thumbnail"),
                     "preview_url": preview_url,
                     "preview_ext": entry.get("ext"),
+                    "music_confidence": round(music_confidence, 2),
                 }
                 enriched["score"] = self._score(artist, title, enriched)
                 resolved.append(enriched)
@@ -341,25 +467,47 @@ class YouTubeProvider:
         if _resolve_ffmpeg() is None:
             raise RuntimeError("FFmpeg was not found. Configure FFMPEG_PATH or install FFmpeg in PATH.")
 
+        probe_options = self._base_options()
+        probe_options.update(
+            {
+                "skip_download": True,
+                "noplaylist": True,
+                "format": "bestaudio/best",
+                "ignoreerrors": False,
+                "logger": _QuietInteractiveLogger(),
+            }
+        )
+        try:
+            with yt_dlp.YoutubeDL(probe_options) as downloader:
+                probe = downloader.extract_info(source_url, download=False)
+        except (DownloadError, OSError, ValueError) as exc:
+            raise ValueError("The selected YouTube source could not be verified.") from exc
+        if not isinstance(probe, dict):
+            raise ValueError("The selected YouTube source could not be verified.")
+        is_music, _ = _music_confidence(probe)
+        if not is_music:
+            raise ValueError("The selected YouTube source does not look like a music track.")
+
         output_root = output_root.resolve()
         artist_dir = output_root / _safe_component(artist, "Unknown Artist")
         artist_dir.mkdir(parents=True, exist_ok=True)
-        target = artist_dir / f"{_safe_component(artist, 'Unknown Artist')} - {_safe_component(title, 'Unknown Track')}.mp3"
-        resolved_target = target.resolve()
+        base_name = f"{_safe_component(artist, 'Unknown Artist')} - {_safe_component(title, 'Unknown Track')}"
+        target_base = (artist_dir / base_name).resolve()
         try:
-            resolved_target.relative_to(output_root)
+            target_base.relative_to(output_root)
         except ValueError as exc:
             raise ValueError("Import destination escaped the configured music library.") from exc
 
+        before = {path.resolve() for path in artist_dir.glob(f"{base_name}.*") if path.is_file()}
         options = self._base_options()
         options.update(
             {
                 "format": "bestaudio/best",
                 "noplaylist": True,
-                "outtmpl": str(resolved_target.with_suffix(".%(ext)s")),
+                "outtmpl": str(target_base) + ".%(ext)s",
                 "overwrites": False,
                 "postprocessors": [
-                    {"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"},
+                    {"key": "FFmpegExtractAudio", "preferredcodec": "best"},
                     {"key": "FFmpegMetadata"},
                 ],
             }
@@ -367,8 +515,23 @@ class YouTubeProvider:
         with yt_dlp.YoutubeDL(options) as downloader:
             downloader.download([source_url])
 
-        if not resolved_target.exists() or resolved_target.stat().st_size < 100 * 1024:
-            raise RuntimeError("Downloaded audio file is missing or unexpectedly small.")
+        ignored_suffixes = {".part", ".ytdl", ".json", ".jpg", ".jpeg", ".png", ".webp"}
+        candidates = [
+            path.resolve()
+            for path in artist_dir.glob(f"{base_name}.*")
+            if path.is_file() and path.suffix.casefold() not in ignored_suffixes
+        ]
+        new_candidates = [path for path in candidates if path not in before]
+        usable = new_candidates or candidates
+        if not usable:
+            raise RuntimeError("Downloaded audio file is missing.")
+        resolved_target = max(usable, key=lambda path: path.stat().st_mtime)
+        try:
+            resolved_target.relative_to(output_root)
+        except ValueError as exc:
+            raise RuntimeError("Downloaded audio escaped the configured music library.") from exc
+        if resolved_target.stat().st_size < 100 * 1024:
+            raise RuntimeError("Downloaded audio file is unexpectedly small.")
 
         _write_tags(resolved_target, artist, title)
         return resolved_target
