@@ -105,6 +105,10 @@ $localBridgeHealth = "http://127.0.0.1:${bridgePort}/api/health"
 $httpsRoot = "https://${dns}"
 $httpsHealth = "${httpsRoot}/api/health"
 
+# The API uses this same-origin HTTPS base when it returns server-local Discovery
+# preview URLs to native clients. It contains no credential or private token.
+$env:WAXLOOM_PUBLIC_BASE_URL = $httpsRoot
+
 $devProcess = $null
 $bridgeProcess = $null
 $ownsDevProcess = $false

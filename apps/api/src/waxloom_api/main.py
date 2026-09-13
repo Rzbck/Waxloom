@@ -9,13 +9,14 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from waxloom_api import __version__
 from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feed import DiscoveryFeedEngine
 from waxloom_api.imports import ImportService
+from waxloom_api.preview_cache import DiscoveryPreviewCache
 from waxloom_api.providers.audiomuse import AudioMuseClient
 from waxloom_api.providers.listenbrainz import ListenBrainzLabsClient
 from waxloom_api.providers.navidrome import NavidromeClient, NavidromeError
@@ -123,6 +124,22 @@ def discovery_service() -> DiscoveryService:
     )
 
 
+discovery_feed_engine = DiscoveryFeedEngine(
+    service_factory=discovery_service,
+    state_dir=waxloom_state_dir(),
+)
+
+_preview_cache = DiscoveryPreviewCache(
+    youtube=youtube_provider(),
+    feed_factory=discovery_feed_engine.feed,
+    state_dir=waxloom_state_dir(),
+)
+
+
+def preview_cache() -> DiscoveryPreviewCache:
+    return _preview_cache
+
+
 def import_service() -> ImportService:
     global _import_service
     if _import_service is None:
@@ -131,14 +148,9 @@ def import_service() -> ImportService:
             youtube=youtube_provider(),
             library_root=settings.music_library_path,
             state_dir=waxloom_state_dir(),
+            preview_cache=preview_cache(),
         )
     return _import_service
-
-
-discovery_feed_engine = DiscoveryFeedEngine(
-    service_factory=discovery_service,
-    state_dir=waxloom_state_dir(),
-)
 
 
 def require_navidrome() -> None:
@@ -158,15 +170,17 @@ async def call_navidrome(coro: Any) -> Any:
 @app.on_event("startup")
 async def start_background_services() -> None:
     await discovery_feed_engine.start()
+    await preview_cache().start()
     if settings.music_library_path:
         await import_service().start()
 
 
 @app.on_event("shutdown")
 async def stop_background_services() -> None:
-    await discovery_feed_engine.stop()
     if _import_service is not None:
         await _import_service.stop()
+    await preview_cache().stop()
+    await discovery_feed_engine.stop()
 
 
 @app.get("/api/health")
@@ -373,7 +387,9 @@ async def automatic_discovery(
 @app.get("/api/discovery/feed")
 async def discovery_feed() -> dict[str, object]:
     require_navidrome()
-    return discovery_feed_engine.feed()
+    feed = discovery_feed_engine.feed()
+    await preview_cache().sync_feed(feed)
+    return feed
 
 
 @app.get("/api/discovery/feed/status")
@@ -386,17 +402,55 @@ async def discovery_feed_status() -> dict[str, object]:
 async def refresh_discovery_feed() -> dict[str, object]:
     require_navidrome()
     discovery_feed_engine.request_refresh()
+    preview_cache().kick()
     return {"accepted": True, **discovery_feed_engine.status()}
 
 
 @app.post("/api/discovery/feedback")
 async def discovery_feedback(payload: DiscoveryFeedbackRequest) -> dict[str, object]:
-    return discovery_feed_engine.record_feedback(
+    result = discovery_feed_engine.record_feedback(
         recording_mbid=payload.recording_mbid,
         artist=payload.artist,
         title=payload.title,
         tags=payload.tags,
         value=payload.value,
+    )
+    if payload.value < 0:
+        await preview_cache().evict(payload.recording_mbid)
+    else:
+        preview_cache().kick()
+    return result
+
+
+@app.get("/api/discovery/previews/status")
+async def discovery_preview_status() -> dict[str, int]:
+    return preview_cache().status()
+
+
+@app.get("/api/discovery/previews/{recording_mbid}", name="discovery_preview_media")
+async def discovery_preview_media(recording_mbid: str) -> FileResponse:
+    candidate = preview_cache().candidate(recording_mbid)
+    if candidate is None:
+        feed = discovery_feed_engine.feed()
+        external = feed.get("external")
+        items = external.get("items") if isinstance(external, dict) else []
+        candidate = next(
+            (
+                dict(item)
+                for item in items
+                if isinstance(item, dict)
+                and str(item.get("recording_mbid") or "") == recording_mbid
+            ),
+            None,
+        )
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Discovery preview is not in the active rotation.")
+    entry = await preview_cache().ensure_candidate(candidate, foreground=True)
+    if entry is None:
+        raise HTTPException(status_code=502, detail="Discovery preview could not be prepared.")
+    return FileResponse(
+        entry.playback_path,
+        headers={"Cache-Control": "private, max-age=300"},
     )
 
 
@@ -408,6 +462,11 @@ async def youtube_runtime() -> dict[str, object]:
 
 @app.post("/api/imports/youtube/search")
 async def youtube_search(payload: YouTubeSearchRequest) -> dict[str, object]:
+    if payload.limit == 1:
+        prepared = await preview_cache().prepare_by_identity(payload.artist, payload.title)
+        if prepared is not None:
+            return {"items": [prepared], "count": 1}
+
     try:
         items = await asyncio.to_thread(
             youtube_provider().search_candidates,
@@ -437,6 +496,7 @@ async def youtube_import(payload: YouTubeImportRequest) -> dict[str, object]:
             playlist_id=payload.playlist_id,
         )
         discovery_feed_engine.request_refresh()
+        preview_cache().kick()
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

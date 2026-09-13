@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from waxloom_api.preview_cache import DiscoveryPreviewCache
 from waxloom_api.providers.navidrome import NavidromeClient
 from waxloom_api.providers.youtube import YouTubeProvider
 
@@ -40,6 +41,7 @@ class ImportService:
         youtube: YouTubeProvider,
         library_root: str,
         state_dir: Path,
+        preview_cache: DiscoveryPreviewCache | None = None,
     ) -> None:
         if not library_root:
             raise ValueError("MUSIC_LIBRARY_PATH is not configured.")
@@ -47,6 +49,7 @@ class ImportService:
         self.youtube = youtube
         self.navidrome = navidrome
         self.state_dir = state_dir
+        self.preview_cache = preview_cache
 
     async def start(self) -> None:
         return None
@@ -81,13 +84,23 @@ class ImportService:
                 "playlist_pending": False,
             }
 
-        output = await asyncio.to_thread(
-            self.youtube.download_selected,
-            artist=artist,
-            title=title,
-            source_url=source_url,
-            output_root=self._library_root(),
-        )
+        output: Path | None = None
+        if self.preview_cache is not None:
+            output = await self.preview_cache.promote_if_matching(
+                artist=artist,
+                title=title,
+                source_url=source_url,
+                output_root=self._library_root(),
+            )
+
+        if output is None:
+            output = await asyncio.to_thread(
+                self.youtube.download_selected,
+                artist=artist,
+                title=title,
+                source_url=source_url,
+                output_root=self._library_root(),
+            )
 
         await self.navidrome.start_scan(full_scan=False)
         indexed_song: dict[str, Any] | None = None
