@@ -25,7 +25,7 @@ The owner validated these Discovery semantics on the published web product and t
 The owner also USER VALIDATED the native private-network path on real hardware:
 
 - Tailscale Serve HTTPS `/api/health` returned the expected Waxloom JSON from iPhone Safari;
-- the native iPhone app connected successfully to the saved private HTTPS endpoint after relaunch;
+- the native iPhone app has reached `/api/health`, albums, artists, playlists, queue, cover, stream and scrobble endpoints through the private HTTPS path;
 - server/API/Tailscale connectivity is therefore no longer the active blocker.
 
 ## Native iPhone + Apple Watch implementation
@@ -97,9 +97,10 @@ Native security direction remains:
 
 ## Validation vocabulary / current state
 
-- Native HTTPS/Tailscale connection: `USER VALIDATED` on real iPhone.
+- Native HTTPS/Tailscale transport: `USER VALIDATED` on real iPhone.
 - Native complete product tranche: `IMPLEMENTED / NOT USER VALIDATED` until the current exact-SHA IPA is exercised across the full iPhone + Watch surface.
-- Playback navigation regression: previous build exposed a `BUG / LIMIT / BLOCKER` where the mini-player covered the bottom tab bar; the source fix moves the mini-player into each tab's safe-area inset and keeps the tab bar explicitly visible. This fix requires exact-SHA hardware validation.
+- Playback navigation regression: source fix moves the mini-player into each tab's safe-area inset and keeps the tab bar explicitly visible; exact-SHA hardware validation is still required.
+- Connection-state regression: server logs proved that the iPhone successfully reached and used Waxloom while Settings could still show `Waxloom did not return a valid health response`. This was an app-side concurrent health-check/state race, not a Tailscale failure. The connection model is now single-flight/idempotent for the already validated endpoint, uses an ephemeral no-cache URLSession, waits for connectivity, retries transient transport/5xx errors, and reports exact HTTP status for real failures. Exact-SHA hardware validation is still required.
 - GitHub compile/package/security results must be recorded only against the final exact branch HEAD after the product-invariant gate update.
 - Earlier successful candidate SHAs are not substitutes for the final exact-head hardware test.
 
@@ -108,13 +109,14 @@ Native security direction remains:
 On the final exact-SHA artifact:
 
 1. install iPhone + embedded Watch companion through iLoader;
-2. confirm saved private HTTPS endpoint reconnects;
-3. start a library track and verify the compact mini-player appears above — never over — the Home/Browse/Discovery/Search/More tab bar and all five tabs remain tappable while playback continues;
-4. validate Albums, Artists, Favorites, Playlists, Search, Discovery and Imports on iPhone;
-5. validate AVPlayer playback, seek, queue restore/persist, background/system controls and validated Discovery preview semantics;
-6. open Watch and validate compact horizontal navigation;
-7. from Watch validate browse/search, play, favorites, playlist CRUD/add/remove, Discovery feedback/bad-source, imports and transport controls;
-8. confirm stale/offline Watch actions fail instead of executing later.
+2. launch Waxloom with the already-saved private HTTPS endpoint and confirm it reconnects automatically without needing a manual Connect tap;
+3. if `Connect securely` is tapped while auto-connect is running or after success, confirm it cannot overwrite a successful connection state;
+4. start a library track and verify the compact mini-player appears above — never over — the Home/Browse/Discovery/Search/More tab bar and all five tabs remain tappable while playback continues;
+5. validate Albums, Artists, Favorites, Playlists, Search, Discovery and Imports on iPhone;
+6. validate AVPlayer playback, seek, queue restore/persist, background/system controls and validated Discovery preview semantics;
+7. open Watch and validate compact horizontal navigation;
+8. from Watch validate browse/search, play, favorites, playlist CRUD/add/remove, Discovery feedback/bad-source, imports and transport controls;
+9. confirm stale/offline Watch actions fail instead of executing later.
 
 Only after this physical test can the exact candidate be labeled `USER VALIDATED`.
 
