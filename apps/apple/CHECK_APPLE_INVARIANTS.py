@@ -119,6 +119,9 @@ require(player, "MPRemoteCommandCenter", "System remote commands")
 require(player, "changePlaybackPositionCommand", "System seek")
 require(player, "await player.seek(to: .zero)", "Preview switch starts at zero")
 require(player, "currentPreview?.recordingMbid == candidate.recordingMbid", "Same preview pause/resume")
+require(player, '.appendingPathComponent("discovery", isDirectory: true)', "Discovery preview local cache route")
+require(player, '.appendingPathComponent("previews", isDirectory: true)', "Discovery preview cache media endpoint")
+forbid(player, "WaxloomAPI.youtubePreview(", "Discovery preview click-time source resolution")
 
 # Playback UI must never cover the bottom tab navigation.
 mini_player_insets = product_views.count(".productMiniPlayerInset(connection: connection, player: player)")
