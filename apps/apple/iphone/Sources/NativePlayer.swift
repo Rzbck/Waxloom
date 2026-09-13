@@ -225,38 +225,34 @@ final class NativePlayerModel: NSObject, ObservableObject {
         }
     }
 
+    private func discoveryPreviewURL(baseURL: URL, recordingMbid: String) -> URL {
+        baseURL
+            .appendingPathComponent("api", isDirectory: true)
+            .appendingPathComponent("discovery", isDirectory: true)
+            .appendingPathComponent("previews", isDirectory: true)
+            .appendingPathComponent(recordingMbid, isDirectory: false)
+    }
+
     private func startPreview(_ candidate: WaxloomDiscoveryCandidate, baseURL: URL) async {
-        do {
-            let source = try await WaxloomAPI.youtubePreview(
-                baseURL: baseURL,
-                artist: candidate.artist,
-                title: candidate.title
-            )
-            guard let rawURL = source.previewUrl, let url = URL(string: rawURL) else {
-                throw WaxloomAPIError.missingPreview
-            }
+        let url = discoveryPreviewURL(baseURL: baseURL, recordingMbid: candidate.recordingMbid)
+        let item = AVPlayerItem(url: url)
+        player.replaceCurrentItem(with: item)
+        await player.seek(to: .zero)
 
-            let item = AVPlayerItem(url: url)
-            player.replaceCurrentItem(with: item)
-            await player.seek(to: .zero)
+        mode = .preview
+        currentPreview = candidate
+        currentSong = nil
+        elapsedSeconds = 0
+        durationSeconds = 0
+        errorMessage = nil
+        lastWatchProgressBucket = -1
+        lastQueuePersistBucket = -1
+        revision += 1
 
-            mode = .preview
-            currentPreview = candidate
-            currentSong = nil
-            elapsedSeconds = 0
-            durationSeconds = source.duration ?? 0
-            errorMessage = nil
-            lastWatchProgressBucket = -1
-            lastQueuePersistBucket = -1
-            revision += 1
-
-            player.play()
-            isPlaying = true
-            updateNowPlaying()
-            publishSnapshot()
-        } catch {
-            errorMessage = error.localizedDescription
-        }
+        player.play()
+        isPlaying = true
+        updateNowPlaying()
+        publishSnapshot()
     }
 
     private func handleWatchCommand(_ command: PlaybackCommand) -> PlaybackCommandResult {
