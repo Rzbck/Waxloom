@@ -6,6 +6,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
     @Published private(set) var watchInstalled = false
 
     var commandHandler: ((PlaybackCommand) -> PlaybackCommandResult)?
+    var catalogHandler: (@MainActor (WatchCatalogRequest) async -> WatchCatalogResponse)?
 
     private var currentSnapshot = PlaybackSnapshot.idle
     private var recentAcknowledgements: [String: WaxloomWatchMessage] = [:]
@@ -96,6 +97,34 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
         }
         WCSession.default.sendMessage(payload, replyHandler: nil, errorHandler: nil)
     }
+
+    private func handleCatalog(
+        _ request: WatchCatalogRequest,
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        let now = Date().timeIntervalSince1970
+        let age = now - request.timestamp
+        guard age >= -5, age <= WatchCatalogCodec.requestTTL else {
+            if let payload = WatchCatalogCodec.payload(
+                WatchCatalogResponse.failure(token: request.token, message: "Request expired")
+            ) {
+                replyHandler(payload)
+            }
+            return
+        }
+
+        Task { @MainActor [weak self] in
+            let response: WatchCatalogResponse
+            if let handler = self?.catalogHandler {
+                response = await handler(request)
+            } else {
+                response = .failure(token: request.token, message: "Waxloom iPhone service unavailable")
+            }
+            if let payload = WatchCatalogCodec.payload(response) {
+                replyHandler(payload)
+            }
+        }
+    }
 }
 
 extension PhoneWatchBridge: WCSessionDelegate {
@@ -128,6 +157,20 @@ extension PhoneWatchBridge: WCSessionDelegate {
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         receive(message)
+    }
+
+    func session(
+        _ session: WCSession,
+        didReceiveMessage message: [String: Any],
+        replyHandler: @escaping ([String: Any]) -> Void
+    ) {
+        if let request = WatchCatalogCodec.request(from: message) {
+            handleCatalog(request, replyHandler: replyHandler)
+            return
+        }
+
+        receive(message)
+        replyHandler(["ok": true])
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
