@@ -28,6 +28,10 @@ final class NativePlayerModel: NSObject, ObservableObject {
     private var revision: Int64 = 0
     private var periodicObserver: Any?
     private var lastWatchProgressBucket = -1
+    private var lastQueuePersistBucket = -1
+
+    var queue: [WaxloomSong] { libraryQueue }
+    var queueIndex: Int { libraryIndex }
 
     init(watchBridge: PhoneWatchBridge) {
         self.watchBridge = watchBridge
@@ -53,6 +57,31 @@ final class NativePlayerModel: NSObject, ObservableObject {
         baseURL = value
     }
 
+    func restoreQueue(baseURL: URL) async {
+        guard mode == .idle else { return }
+        self.baseURL = baseURL
+        do {
+            let saved = try await WaxloomAPI.playQueue(baseURL: baseURL)
+            guard let entries = saved.entry, !entries.isEmpty else { return }
+            libraryQueue = entries
+            if let current = saved.current,
+               let index = entries.firstIndex(where: { $0.id == current }) {
+                libraryIndex = index
+            } else {
+                libraryIndex = 0
+            }
+            startLibrarySong(
+                libraryQueue[libraryIndex],
+                baseURL: baseURL,
+                autoplay: false,
+                startPosition: max(0, saved.position ?? 0),
+                scrobble: false
+            )
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func play(song: WaxloomSong, queue: [WaxloomSong], baseURL: URL) {
         self.baseURL = baseURL
         if mode == .library, currentSong?.id == song.id {
@@ -60,6 +89,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
             return
         }
 
+        submitCurrentLibraryScrobble()
         libraryQueue = queue.isEmpty ? [song] : queue
         libraryIndex = max(0, libraryQueue.firstIndex(where: { $0.id == song.id }) ?? 0)
         startLibrarySong(song, baseURL: baseURL)
@@ -76,6 +106,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
             return
         }
 
+        submitCurrentLibraryScrobble()
         previewQueue = queue.isEmpty ? [candidate] : queue
         previewIndex = max(0, previewQueue.firstIndex(where: { $0.recordingMbid == candidate.recordingMbid }) ?? 0)
         await startPreview(candidate, baseURL: baseURL)
@@ -95,6 +126,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         revision += 1
         updateNowPlayingRate()
         publishSnapshot()
+        persistQueue()
     }
 
     func resume() {
@@ -106,11 +138,27 @@ final class NativePlayerModel: NSObject, ObservableObject {
         publishSnapshot()
     }
 
+    func seek(to seconds: Double) {
+        guard player.currentItem != nil else { return }
+        let bounded = max(0, durationSeconds > 0 ? min(durationSeconds, seconds) : seconds)
+        player.seek(to: CMTime(seconds: bounded, preferredTimescale: 600))
+        elapsedSeconds = bounded
+        revision += 1
+        updateNowPlayingElapsed()
+        publishSnapshot()
+        persistQueue()
+    }
+
+    func skip(by seconds: Double) {
+        seek(to: elapsedSeconds + seconds)
+    }
+
     func next() async {
         guard let baseURL else { return }
         switch mode {
         case .library:
             guard !libraryQueue.isEmpty else { return }
+            submitCurrentLibraryScrobble()
             libraryIndex = (libraryIndex + 1) % libraryQueue.count
             startLibrarySong(libraryQueue[libraryIndex], baseURL: baseURL)
         case .preview:
@@ -127,6 +175,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         switch mode {
         case .library:
             guard !libraryQueue.isEmpty else { return }
+            submitCurrentLibraryScrobble()
             libraryIndex = (libraryIndex - 1 + libraryQueue.count) % libraryQueue.count
             startLibrarySong(libraryQueue[libraryIndex], baseURL: baseURL)
         case .preview:
@@ -138,26 +187,42 @@ final class NativePlayerModel: NSObject, ObservableObject {
         }
     }
 
-    private func startLibrarySong(_ song: WaxloomSong, baseURL: URL) {
+    private func startLibrarySong(
+        _ song: WaxloomSong,
+        baseURL: URL,
+        autoplay: Bool = true,
+        startPosition: Double = 0,
+        scrobble: Bool = true
+    ) {
         let url = WaxloomAPI.streamURL(baseURL: baseURL, songID: song.id)
         let item = AVPlayerItem(url: url)
         player.replaceCurrentItem(with: item)
-        player.seek(to: .zero)
+        let position = max(0, startPosition)
+        player.seek(to: CMTime(seconds: position, preferredTimescale: 600))
 
         mode = .library
         currentSong = song
         currentPreview = nil
-        elapsedSeconds = 0
+        elapsedSeconds = position
         durationSeconds = song.duration ?? 0
         errorMessage = nil
         lastWatchProgressBucket = -1
+        lastQueuePersistBucket = -1
         revision += 1
 
-        player.play()
-        isPlaying = true
+        if autoplay {
+            player.play()
+            isPlaying = true
+        } else {
+            player.pause()
+            isPlaying = false
+        }
         updateNowPlaying()
         publishSnapshot()
-        Task { await WaxloomAPI.scrobble(baseURL: baseURL, id: song.id, submission: false) }
+        persistQueue()
+        if scrobble {
+            Task { await WaxloomAPI.scrobble(baseURL: baseURL, id: song.id, submission: false) }
+        }
     }
 
     private func startPreview(_ candidate: WaxloomDiscoveryCandidate, baseURL: URL) async {
@@ -182,6 +247,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
             durationSeconds = source.duration ?? 0
             errorMessage = nil
             lastWatchProgressBucket = -1
+            lastQueuePersistBucket = -1
             revision += 1
 
             player.play()
@@ -206,6 +272,26 @@ final class NativePlayerModel: NSObject, ObservableObject {
         return .accepted
     }
 
+    private func submitCurrentLibraryScrobble() {
+        guard mode == .library, let song = currentSong, let baseURL else { return }
+        Task { await WaxloomAPI.scrobble(baseURL: baseURL, id: song.id, submission: true) }
+    }
+
+    private func persistQueue() {
+        guard mode == .library, let baseURL else { return }
+        let ids = libraryQueue.map(\.id)
+        let current = currentSong?.id
+        let position = elapsedSeconds
+        Task {
+            await WaxloomAPI.savePlayQueue(
+                baseURL: baseURL,
+                ids: ids,
+                current: current,
+                position: position
+            )
+        }
+    }
+
     private func configureAudioSession() {
         do {
             let session = AVAudioSession.sharedInstance()
@@ -223,6 +309,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         commands.togglePlayPauseCommand.isEnabled = true
         commands.nextTrackCommand.isEnabled = true
         commands.previousTrackCommand.isEnabled = true
+        commands.changePlaybackPositionCommand.isEnabled = true
 
         commands.playCommand.addTarget { [weak self] _ in
             Task { @MainActor in self?.resume() }
@@ -242,6 +329,11 @@ final class NativePlayerModel: NSObject, ObservableObject {
         }
         commands.previousTrackCommand.addTarget { [weak self] _ in
             Task { @MainActor in await self?.previous() }
+            return .success
+        }
+        commands.changePlaybackPositionCommand.addTarget { [weak self] event in
+            guard let event = event as? MPChangePlaybackPositionCommandEvent else { return .commandFailed }
+            Task { @MainActor in self?.seek(to: event.positionTime) }
             return .success
         }
     }
@@ -265,6 +357,14 @@ final class NativePlayerModel: NSObject, ObservableObject {
                     if bucket != self.lastWatchProgressBucket {
                         self.lastWatchProgressBucket = bucket
                         self.publishSnapshot(interactive: false)
+                    }
+                }
+
+                if self.mode == .library {
+                    let queueBucket = Int(self.elapsedSeconds / 15)
+                    if queueBucket != self.lastQueuePersistBucket {
+                        self.lastQueuePersistBucket = queueBucket
+                        self.persistQueue()
                     }
                 }
             }
@@ -307,13 +407,20 @@ final class NativePlayerModel: NSObject, ObservableObject {
     }
 
     private func publishSnapshot(interactive: Bool = true) {
+        let artworkURL: String?
+        if mode == .library, let baseURL {
+            artworkURL = WaxloomAPI.coverURL(baseURL: baseURL, coverID: currentSong?.coverArt, size: 400)?.absoluteString
+        } else {
+            artworkURL = nil
+        }
+
         watchBridge?.publish(
             PlaybackSnapshot(
                 sessionID: snapshotSessionID,
                 revision: revision,
                 title: snapshotTitle,
                 artist: snapshotArtist,
-                artworkURL: nil,
+                artworkURL: artworkURL,
                 isPlaying: isPlaying,
                 elapsedSeconds: elapsedSeconds,
                 durationSeconds: durationSeconds
