@@ -20,7 +20,7 @@ type TasteEntry = {
 type TasteState = Record<string, TasteEntry>;
 type ShelfKey = "closest" | "underground" | "deep";
 
-const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v2";
+const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
 const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SHELF_PAGE_SIZE = 12;
 const SHELF_TARGET_SIZE = 20;
@@ -188,7 +188,7 @@ function DiscoveryTrackCard({
       </div>
       <b className="discovery-song-score">{scorePercent(candidate.rank)}</b>
       <button
-        className={isPlaying ? "compact-action compact-action-playing" : "compact-action"}
+        className={isPlaying ? "compact-action compact-action-play compact-action-playing" : "compact-action compact-action-play"}
         type="button"
         onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
         onPointerDown={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
@@ -206,14 +206,14 @@ function DiscoveryTrackCard({
         aria-label={`Add ${candidate.title} to playlist`}
       >+</button>
       <button
-        className={currentFeedback === 1 ? "taste-chip taste-chip-active" : "taste-chip"}
+        className={currentFeedback === 1 ? "taste-chip taste-chip-like taste-chip-active" : "taste-chip taste-chip-like"}
         type="button"
         onClick={() => onFeedback(candidate, currentFeedback === 1 ? 0 : 1)}
         title="More like this"
         aria-label={`More like ${candidate.title}`}
       >Like</button>
       <button
-        className={currentFeedback === -1 ? "taste-chip taste-chip-less-active" : "taste-chip"}
+        className={currentFeedback === -1 ? "taste-chip taste-chip-less taste-chip-less-active" : "taste-chip taste-chip-less"}
         type="button"
         onClick={() => onFeedback(candidate, currentFeedback === -1 ? 0 : -1)}
         title="Show less like this"
@@ -341,13 +341,19 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     const ranked = activeCandidates(bundle?.external.items ?? [], taste);
     const used = new Set<string>();
 
-    const closest = fillShelf(ranked, ranked, used);
-    const undergroundPrimary = [...ranked]
-      .filter((candidate) => candidate.source === "listenbrainz")
-      .sort((a, b) => (b.underground + (b.rank + tasteAdjustment(b, taste)) * 0.35) - (a.underground + (a.rank + tasteAdjustment(a, taste)) * 0.35));
-    const underground = fillShelf(undergroundPrimary, ranked, used);
+    const closestPool = ranked.filter((candidate) => candidate.source !== "youtube_dig");
+    const closest = fillShelf(closestPool, closestPool, used);
+
+    const youtubeDigPrimary = [...ranked]
+      .filter((candidate) => candidate.source === "youtube_dig")
+      .sort((a, b) => (b.underground + b.rank * 0.25) - (a.underground + a.rank * 0.25));
+    const rareMetadataFallback = [...ranked]
+      .filter((candidate) => candidate.source === "listenbrainz" && candidate.underground >= 0.82)
+      .sort((a, b) => (b.underground + b.rank * 0.15) - (a.underground + a.rank * 0.15));
+    const underground = fillShelf(youtubeDigPrimary, rareMetadataFallback, used, 28);
+
     const deepPrimary = ranked.filter((candidate) => candidate.source === "musicbrainz_catalog");
-    const deep = fillShelf(deepPrimary, ranked, used);
+    const deep = fillShelf(deepPrimary, closestPool, used);
 
     return { closest, underground, deep, totalTracks: ranked.length };
   }, [bundle, taste]);
@@ -441,7 +447,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       const best = search.items[0];
       if (!best || best.score < 80) {
         setQuickTarget(null);
-        setNotice("The automatic source match was ambiguous. Choose the source manually before importing.");
+        setNotice("The automatic source match was ambiguous or did not pass the music-only check. Choose the source manually before importing.");
         onImportCandidate(candidate);
         return;
       }
@@ -450,8 +456,10 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
         result.status === "already_local"
           ? `Already local — added the existing track to “${playlist.name}”.`
           : result.playlist_added
-            ? `Downloaded and added to “${playlist.name}”.`
-            : "Downloaded. Navidrome is still indexing it; playlist insertion may follow after the scan.",
+            ? `Downloaded at source-best audio quality and added to “${playlist.name}”.`
+            : result.playlist_pending
+              ? `Downloaded at source-best audio quality. Waxloom queued the add to “${playlist.name}” and will complete it automatically after Navidrome indexes the track.`
+              : "Downloaded at source-best audio quality. Navidrome is still indexing it.",
       );
       setQuickTarget(null);
     } catch (caught) {
@@ -521,7 +529,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onFeedback={updateFeedback}
           />
           <DiscoveryShelf
-            eyebrow="Dig deeper"
+            eyebrow="YouTube dig · music-verified · low exposure / high engagement"
             title="More underground"
             items={rails.underground}
             page={shelfPages.underground}
@@ -556,7 +564,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
               <div><p className="eyebrow">Download + add</p><h3>{quickTarget.artist} — {quickTarget.title}</h3></div>
               <button className="icon-button" type="button" onClick={() => setQuickTarget(null)}>×</button>
             </div>
-            <p className="muted">Choose the destination playlist. Waxloom uses the highest-confidence source automatically; ambiguous matches fall back to manual source selection.</p>
+            <p className="muted">Choose the destination playlist. Waxloom uses the highest-confidence music-only source automatically; ambiguous matches fall back to manual source selection.</p>
             <div className="modal-list">
               {playlists.map((playlist) => (
                 <button className="modal-list-item" type="button" key={playlist.id} disabled={importing === quickTarget.recording_mbid} onClick={() => void addToPlaylist(playlist)}>

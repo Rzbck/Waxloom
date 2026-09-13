@@ -1,0 +1,34 @@
+/* Discovery action icon repair.
+   The track-first Discovery cards no longer use the legacy .taste-actions wrapper,
+   so bind the Lucide thumbs directly to the final two action buttons. */
+
+.discovery-song-card > .taste-chip {
+  font-size: 0 !important;
+}
+
+.discovery-song-card > .taste-chip::before {
+  content: "" !important;
+  display: block !important;
+  width: 15px !important;
+  height: 15px !important;
+  flex: 0 0 15px !important;
+  background: currentColor !important;
+  -webkit-mask-size: contain !important;
+  mask-size: contain !important;
+  -webkit-mask-position: center !important;
+  mask-position: center !important;
+  -webkit-mask-repeat: no-repeat !important;
+  mask-repeat: no-repeat !important;
+}
+
+/* lucide:thumbs-up — second-to-last button in every Discovery track row */
+.discovery-song-card > .taste-chip:nth-last-of-type(2)::before {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0xNSA1Ljg4IDE0IDEwaDUuODNhMiAyIDAgMCAxIDEuOTIgMi41NmwtMi4zMyA4QTIgMiAwIDAgMSAxNy41IDIySDRhMiAyIDAgMCAxLTItMnYtOGEyIDIgMCAwIDEgMi0yaDIuNzZhMiAyIDAgMCAwIDEuNzktMS4xMUwxMiAyYTMuMTMgMy4xMyAwIDAgMSAzIDMuODhaIi8+PHBhdGggZD0iTTcgMTB2MTIiLz48L3N2Zz4=") !important;
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik0xNSA1Ljg4IDE0IDEwaDUuODNhMiAyIDAgMCAxIDEuOTIgMi41NmwtMi4zMyA4QTIgMiAwIDAgMSAxNy41IDIySDRhMiAyIDAgMCAxLTItMnYtOGEyIDIgMCAwIDEgMi0yaDIuNzZhMiAyIDAgMCAwIDEuNzktMS4xMUwxMiAyYTMuMTMgMy4xMyAwIDAgMSAzIDMuODhaIi8+PHBhdGggZD0iTTcgMTB2MTIiLz48L3N2Zz4=") !important;
+}
+
+/* lucide:thumbs-down — final button in every Discovery track row */
+.discovery-song-card > .taste-chip:last-of-type::before {
+  -webkit-mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik05IDE4LjEyIDEwIDE0SDQuMTdhMiAyIDAgMCAxLTEuOTItMi41NmwyLjMzLThBMiAyIDAgMCAxIDYuNSAySDIwYTIgMiAwIDAgMSAyIDJ2OGEyIDIgMCAwIDEtMiAyaC0yLjc2YTIgMiAwIDAgMC0xLjc5IDEuMTFMMTIgMjJhMy4xMyAzLjEzIDAgMCAxLTMtMy44OFoiLz48cGF0aCBkPSJNMTcgMTRWMiIvPjwvc3ZnPg==") !important;
+  mask-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJibGFjayIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiPjxwYXRoIGQ9Ik05IDE4LjEyIDEwIDE0SDQuMTdhMiAyIDAgMCAxLTEuOTItMi41NmwyLjMzLThBMiAyIDAgMCAxIDYuNSAySDIwYTIgMiAwIDAgMSAyIDJ2OGEyIDIgMCAwIDEtMiAyaC0yLjc2YTIgMiAwIDAgMC0xLjc5IDEuMTFMMTIgMjJhMy4xMyAzLjEzIDAgMCAxLTMtMy44OFoiLz48cGF0aCBkPSJNMTcgMTRWMiIvPjwvc3ZnPg==") !important;
+}

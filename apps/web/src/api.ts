@@ -45,6 +45,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const LIBRARY_CACHE_MS = 2 * 60 * 1000;
+const ALBUM_DETAIL_CACHE_MS = 10 * 60 * 1000;
 const PREVIEW_CACHE_MS = 15 * 60 * 1000;
 
 const COVER_MEDIA_ORIGIN =
@@ -58,6 +59,7 @@ type CachedPromise<T> = {
 };
 
 const albumCache = new Map<string, CachedPromise<ListResponse<Album>>>();
+const albumDetailCache = new Map<string, CachedPromise<Album>>();
 let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
 const youtubeSearchCache = new Map<string, CachedPromise<ListResponse<YouTubeCandidate>>>();
 
@@ -69,6 +71,31 @@ function mediaCoverUrl(coverId?: string, size = 300): string {
 
 function albumCacheKey(type: string, size: number, offset: number): string {
   return `${type}:${size}:${offset}`;
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function loadAlbumDetailCached(id: string): Promise<Album> {
+  const existing = albumDetailCache.get(id);
+  if (existing && Date.now() - existing.at < ALBUM_DETAIL_CACHE_MS) return existing.promise;
+
+  const encoded = encodeURIComponent(id);
+  const promise = request<Album>(`/api/albums/${encoded}`)
+    .catch(async () => {
+      // Album details are loaded only on demand. One short retry absorbs a
+      // transient Navidrome failure without background request storms.
+      await sleep(140);
+      return request<Album>(`/api/albums/${encoded}`);
+    })
+    .catch((error) => {
+      albumDetailCache.delete(id);
+      throw error;
+    });
+
+  albumDetailCache.set(id, { at: Date.now(), promise });
+  return promise;
 }
 
 function loadAlbumsCached(type = "newest", size = 80, offset = 0): Promise<ListResponse<Album>> {
@@ -144,7 +171,7 @@ async function prewarmYoutubePreviews(
       const candidate = queue[index];
       if (!candidate) return;
       await youtubeSearchCached(candidate.artist, candidate.title, undefined, 1).catch(() => undefined);
-      await new Promise((resolve) => window.setTimeout(resolve, 120));
+      await sleep(120);
     }
   });
 
@@ -152,6 +179,8 @@ async function prewarmYoutubePreviews(
 }
 
 function warmLibraryNavigation(): void {
+  // Warm only cheap library indexes. Never preload album tracks from local
+  // storage: album details are fetched on demand and then cached.
   void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
   void loadArtistsCached().catch(() => undefined);
 }
@@ -168,7 +197,7 @@ export const api = {
   albums: (type = "newest", size = 80, offset = 0) => loadAlbumsCached(type, size, offset),
   artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
-  album: (id: string) => request<Album>(`/api/albums/${encodeURIComponent(id)}`),
+  album: (id: string) => loadAlbumDetailCached(id),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
   song: (id: string) => request<Song>(`/api/songs/${encodeURIComponent(id)}`),
   search: (query: string, count = 40) => request<SearchResults>(`/api/search?q=${encodeURIComponent(query)}&count=${count}`),

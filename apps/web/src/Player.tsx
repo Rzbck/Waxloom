@@ -44,6 +44,7 @@ export function usePlayer(): PlayerContextValue {
 export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrobbledRef = useRef<string | null>(null);
+  const localSongIdRef = useRef<string | null>(null);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
   const [mode, setMode] = useState<PlayerMode>("navidrome");
@@ -69,11 +70,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const activeTitle = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
   const activeArtist = currentPreview?.artist ?? currentSong?.artist ?? "Unknown artist";
   const activeDuration = currentPreview?.duration ?? currentSong?.duration ?? 0;
-  const activeSrc = mode === "preview"
-    ? currentPreview?.preview_url ?? undefined
-    : currentSong
-      ? api.streamUrl(currentSong.id)
-      : undefined;
+
+  const traceLocalPlayer = useCallback((event: string, songId: string, clientEpochMs = Date.now()) => {
+    void fetch("/api/player/trace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ event, song_id: songId, client_epoch_ms: clientEpochMs }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }, []);
+
+  const startLocalPlayback = useCallback((song: Song, event = "play-click") => {
+    const clickedAt = Date.now();
+    traceLocalPlayer(event, song.id, clickedAt);
+
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const source = api.streamUrl(song.id);
+    if (localSongIdRef.current !== song.id || audio.getAttribute("src") !== source) {
+      localSongIdRef.current = song.id;
+      audio.src = source;
+      audio.load();
+    }
+
+    setPlaying(true);
+    void audio.play()
+      .then(() => traceLocalPlayer("audio-playing", song.id, Date.now()))
+      .catch(() => setPlaying(false));
+  }, [traceLocalPlayer]);
 
   useEffect(() => {
     void api
@@ -165,14 +190,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [mode, previewIndex, previewQueue, resolvePreview]);
 
   useEffect(() => {
+    if (mode !== "preview" || !currentPreview?.preview_url) return;
     const audio = audioRef.current;
-    if (!audio || !activeSrc) return;
+    if (!audio) return;
+
+    localSongIdRef.current = null;
+    if (audio.getAttribute("src") !== currentPreview.preview_url) {
+      audio.src = currentPreview.preview_url;
+      audio.load();
+    }
+
     if (playing) {
       void audio.play().catch(() => setPlaying(false));
     } else {
       audio.pause();
     }
-  }, [playing, activeSrc]);
+  }, [mode, currentPreview?.preview_url, playing]);
 
   useEffect(() => {
     if (!restoreDone || mode !== "navidrome") return;
@@ -207,12 +240,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playSongs = useCallback((songs: Song[], startIndex = 0) => {
     if (songs.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, songs.length - 1));
+    const song = songs[safeIndex];
+    if (!song) return;
+
+    // Start the local HTTP stream synchronously in the user's click handler.
+    // Do not wait for a React effect: that loses the immediate user gesture on
+    // mobile browsers and was responsible for multi-second start delays.
+    startLocalPlayback(song);
     setMode("navidrome");
     setQueue(songs);
     setCurrentIndex(safeIndex);
-    setPlaying(true);
     setPreviewError(null);
-  }, []);
+  }, [startLocalPlayback]);
 
   const playPreviewTracks = useCallback((tracks: PreviewTrack[], startIndex = 0) => {
     if (tracks.length === 0) return;
@@ -246,26 +285,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }
       return;
     }
+
+    let nextIndex: number | null = null;
     if (shuffle && activeLength > 1) {
-      let nextIndex = activeIndex;
+      nextIndex = activeIndex;
       while (nextIndex === activeIndex) nextIndex = Math.floor(Math.random() * activeLength);
-      if (mode === "preview") setPreviewIndex(nextIndex);
-      else setCurrentIndex(nextIndex);
+    } else if (activeIndex < activeLength - 1) {
+      nextIndex = activeIndex + 1;
+    } else if (repeat === "all") {
+      nextIndex = 0;
+    }
+
+    if (nextIndex === null) {
+      setPlaying(false);
+      audioRef.current?.pause();
+      return;
+    }
+
+    if (mode === "preview") {
+      setPreviewIndex(nextIndex);
       setPlaying(true);
       return;
     }
-    if (activeIndex < activeLength - 1) {
-      if (mode === "preview") setPreviewIndex((index) => index + 1);
-      else setCurrentIndex((index) => index + 1);
-      setPlaying(true);
-    } else if (repeat === "all") {
-      if (mode === "preview") setPreviewIndex(0);
-      else setCurrentIndex(0);
-      setPlaying(true);
-    } else {
-      setPlaying(false);
-    }
-  }, [activeLength, activeIndex, repeat, shuffle, mode]);
+
+    const song = queue[nextIndex];
+    if (!song) return;
+    startLocalPlayback(song, "next");
+    setCurrentIndex(nextIndex);
+  }, [activeLength, activeIndex, repeat, shuffle, mode, queue, startLocalPlayback]);
 
   const previous = useCallback(() => {
     const audio = audioRef.current;
@@ -273,12 +320,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.currentTime = 0;
       return;
     }
-    if (activeIndex > 0) {
-      if (mode === "preview") setPreviewIndex((index) => index - 1);
-      else setCurrentIndex((index) => index - 1);
+    if (activeIndex <= 0) return;
+
+    const previousIndex = activeIndex - 1;
+    if (mode === "preview") {
+      setPreviewIndex(previousIndex);
       setPlaying(true);
+      return;
     }
-  }, [activeIndex, mode]);
+
+    const song = queue[previousIndex];
+    if (!song) return;
+    startLocalPlayback(song, "previous");
+    setCurrentIndex(previousIndex);
+  }, [activeIndex, mode, queue, startLocalPlayback]);
 
   const submitScrobble = useCallback(() => {
     if (mode !== "navidrome" || !currentSong || scrobbledRef.current === currentSong.id) return;
@@ -313,6 +368,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setRepeat((value) => (value === "off" ? "all" : value === "all" ? "one" : "off"));
   }
 
+  function togglePlayback() {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    if (playing) {
+      audio.pause();
+      setPlaying(false);
+      return;
+    }
+
+    if (mode === "navidrome" && currentSong) {
+      startLocalPlayback(currentSong, "resume");
+      return;
+    }
+
+    setPlaying(true);
+    void audio.play().catch(() => setPlaying(false));
+  }
+
   const contextValue = useMemo<PlayerContextValue>(
     () => ({
       queue,
@@ -335,8 +409,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       {children}
       <audio
         ref={audioRef}
-        src={activeSrc}
-        preload="metadata"
+        preload="none"
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
@@ -344,15 +417,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }}
         onTimeUpdate={onTimeUpdate}
         onPlay={() => setPlaying(true)}
-        onPause={() => setPlaying(false)}
         onEnded={() => {
           submitScrobble();
           next();
         }}
         onError={() => {
+          setPlaying(false);
           if (mode === "preview") {
             setPreviewError("The preview stream expired or could not be played. Press next or try again.");
-            setPlaying(false);
           }
         }}
       />
@@ -379,9 +451,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       type="button"
                       key={`${item.id}-${index}`}
                       onClick={() => {
-                        if (mode === "preview") setPreviewIndex(index);
-                        else setCurrentIndex(index);
-                        setPlaying(true);
+                        if (mode === "preview") {
+                          setPreviewIndex(index);
+                          setPlaying(true);
+                          return;
+                        }
+                        const song = item as Song;
+                        startLocalPlayback(song, "queue");
+                        setCurrentIndex(index);
                       }}
                     >
                       <span>{index + 1}</span>
@@ -410,7 +487,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               <div className="player-buttons">
                 <button className={shuffle ? "icon-button icon-button-active" : "icon-button"} type="button" onClick={() => setShuffle((value) => !value)} aria-label="Shuffle">⤨</button>
                 <button className="icon-button" type="button" onClick={previous} aria-label="Previous">◀◀</button>
-                <button className="play-button" type="button" onClick={() => setPlaying((value) => !value)} aria-label={playing ? "Pause" : "Play"} disabled={mode === "preview" && Boolean(previewResolving)}>
+                <button className="play-button" type="button" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"} disabled={mode === "preview" && Boolean(previewResolving)}>
                   {mode === "preview" && previewResolving ? "…" : playing ? "Ⅱ" : "▶"}
                 </button>
                 <button className="icon-button" type="button" onClick={next} aria-label="Next">▶▶</button>

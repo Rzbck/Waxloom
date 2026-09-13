@@ -218,9 +218,10 @@ try {
     $apiProcess = Start-Process `
         -FilePath $apiPython `
         -ArgumentList @(
-            "-m", "uvicorn", "waxloom_api.main:app",
+            "-m", "uvicorn", "waxloom_api.instrumented:app",
             "--host", $serviceHost,
-            "--port", "8787"
+            "--port", "8787",
+            "--no-access-log"
         ) `
         -WorkingDirectory $root `
         -NoNewWindow `

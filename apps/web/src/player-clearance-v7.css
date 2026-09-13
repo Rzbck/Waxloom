@@ -1,0 +1,18 @@
+/* Keep the last Discovery/library rows fully scrollable above the fixed player.
+   :has() covers both Navidrome tracks and Discovery preview mode without relying
+   on App.tsx knowing which player mode is currently active. */
+
+body:has(.player-dock) .content {
+  padding-bottom: 148px !important;
+}
+
+@media (max-width: 820px) {
+  body:has(.player-dock) .content {
+    padding-bottom: calc(
+      var(--mobile-player-h, 66px)
+      + var(--mobile-nav-h, 58px)
+      + env(safe-area-inset-bottom)
+      + 30px
+    ) !important;
+  }
+}
