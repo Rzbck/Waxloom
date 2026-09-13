@@ -125,3 +125,29 @@ Only after this physical test can the exact candidate be labeled `USER VALIDATED
 - Published baseline / native branch point: `e44183afe9b82c23f6fe77943faec1a1fb7773b0`.
 - Previously USER VALIDATED Discovery runtime candidate: `a2cec448319178144b457e98081e572d1c985a29`.
 - Published rollback uses revert/new commit only; never rewrite shared history.
+
+## Discovery rolling preview cache
+
+Runtime implementation commit: `42a15562d239f88ee719d80fc99b8e6438d550f6`.
+
+The server now maintains a bounded rolling cache for the currently visible Discovery rotation:
+
+- current visible Discovery candidates are warmed in the background, with two concurrent media jobs;
+- cache lives in `%LOCALAPPDATA%\Waxloom\discovery-preview-cache`, outside the repo and music library;
+- source-quality media is retained temporarily and non-native playback formats get an M4A playback derivative;
+- browser and native iPhone previews receive the Waxloom-local private HTTPS preview URL through the existing YouTube preview/search contract;
+- negative Discovery feedback or source rejection evicts that item immediately;
+- rotation changes evict stale entries and only current feed items remain;
+- import authorization remains required; when the selected source matches a cached item, the cached source-quality file is promoted to the library instead of downloaded again;
+- cache hard cap is 6 GiB, and failed sources back off before retry.
+
+Validation state: `IMPLEMENTED / CI GREEN / NOT USER VALIDATED`.
+
+Physical next test:
+
+1. restart the hidden Waxloom scheduled task on the new branch head;
+2. query `/api/discovery/previews/status` and watch `ready` rise toward `active`;
+3. verify cached browser/iPhone preview starts quickly;
+4. verify Less/X removes that item from the active cache;
+5. verify feed rotation removes stale files;
+6. verify adding a cached matching source promotes locally without a second source download.
