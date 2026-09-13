@@ -7,7 +7,7 @@ import json
 import re
 import time
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +17,22 @@ from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
 from waxloom_api.youtube_dig import dig_youtube_gems
 
-_FEED_VERSION = 2
+_FEED_VERSION = 3
+
+_STYLE_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("post-punk", ("post punk", "coldwave", "darkwave", "new wave", "goth", "shoegaze", "dream pop")),
+    ("electronic", ("techno", "house", "electro", "synth", "idm", "breakbeat", "drum and bass", "dnb", "ambient", "downtempo", "trip hop", "industrial")),
+    ("hip-hop", ("hip hop", "hiphop", "rap", "boom bap", "trap")),
+    ("soul-funk", ("soul", "r&b", "rnb", "funk", "disco", "boogie")),
+    ("jazz", ("jazz", "fusion", "bebop", "spiritual jazz", "free jazz")),
+    ("metal", ("metal", "doom", "sludge", "black metal", "death metal", "heavy metal")),
+    ("folk-country", ("folk", "country", "americana", "singer songwriter")),
+    ("reggae-dub", ("reggae", "dub", "dancehall", "ska")),
+    ("classical", ("classical", "orchestral", "contemporary classical", "minimalism")),
+    ("world", ("afrobeat", "latin", "bossa", "samba", "cumbia", "rai", "highlife", "world")),
+    ("pop", ("art pop", "synthpop", "synth pop", "pop")),
+    ("rock", ("garage", "psychedelic", "grunge", "hard rock", "rock")),
+)
 
 
 class DiscoveryFeedEngine:
@@ -60,18 +75,23 @@ class DiscoveryFeedEngine:
 
     @staticmethod
     def _artist_key(value: str) -> str:
-        """Collapse cosmetic/collaboration variants under a stable lead artist.
-
-        Discovery cards are intentionally grouped tightly. Provider data can
-        contain variants such as accents, punctuation or ``Artist feat. Guest``;
-        without canonicalization those variants can occupy several cards in the
-        same shelf and make the UI look repetitive.
-        """
+        """Collapse cosmetic/collaboration variants under a stable lead artist."""
         normalized = unicodedata.normalize("NFKD", value).casefold()
         normalized = "".join(char for char in normalized if not unicodedata.combining(char))
         normalized = re.sub(r"\b(?:feat(?:uring)?|ft|with|vs)\.?\b.*$", "", normalized)
         normalized = re.sub(r"[^\w]+", " ", normalized, flags=re.UNICODE)
         return " ".join(normalized.split()) or "unknown artist"
+
+    @staticmethod
+    def _style_key(item: dict[str, Any]) -> str:
+        tags = [str(tag).casefold() for tag in item.get("tags") or [] if str(tag).strip()]
+        text = " ".join(tags)
+        for family, keywords in _STYLE_FAMILIES:
+            if any(keyword in text for keyword in keywords):
+                return family
+        if tags:
+            return re.sub(r"[^\w]+", " ", tags[0]).strip() or "other"
+        return "other"
 
     def _load_persisted(self) -> None:
         try:
@@ -178,8 +198,8 @@ class DiscoveryFeedEngine:
                     force_refresh=True,
                 )
 
-                # Build a separate low-exposure YouTube pool in the background.
-                # A failure here must never invalidate the normal Discovery feed.
+                # Build a separate low-exposure/high-engagement YouTube pool in
+                # the background. Failure never invalidates the normal feed.
                 try:
                     gems = await dig_youtube_gems(snapshot, service.navidrome, limit=48)
                 except Exception:
@@ -213,6 +233,60 @@ class DiscoveryFeedEngine:
     def _candidate_score(self, item: dict[str, Any]) -> float:
         return float(item.get("rank") or 0.0) + self._feedback.adjustment(item)
 
+    def _style_balanced(
+        self,
+        preferred: list[dict[str, Any]],
+        all_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Keep the visible rotation from collapsing into one musical family."""
+        ordered: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for item in preferred:
+            mbid = str(item.get("recording_mbid") or "")
+            if mbid and mbid not in seen_ids:
+                ordered.append(item)
+                seen_ids.add(mbid)
+        for item in sorted(all_items, key=self._candidate_score, reverse=True):
+            mbid = str(item.get("recording_mbid") or "")
+            if mbid and mbid not in seen_ids:
+                ordered.append(self._feedback.annotate(item))
+                seen_ids.add(mbid)
+
+        output: list[dict[str, Any]] = []
+        selected: set[str] = set()
+        style_counts: Counter[str] = Counter()
+        artist_counts: Counter[str] = Counter()
+        style_cap = max(6, self._visible_size // 8)
+
+        def try_add(item: dict[str, Any], *, enforce_style: bool) -> bool:
+            mbid = str(item.get("recording_mbid") or "")
+            if not mbid or mbid in selected:
+                return False
+            artist = self._artist_key(str(item.get("artist") or "unknown artist"))
+            style = self._style_key(item)
+            if artist_counts[artist] >= 2:
+                return False
+            if enforce_style and style != "other" and style_counts[style] >= style_cap:
+                return False
+            selected.add(mbid)
+            artist_counts[artist] += 1
+            style_counts[style] += 1
+            output.append(item)
+            return True
+
+        for item in ordered:
+            try_add(item, enforce_style=True)
+            if len(output) >= self._visible_size:
+                return output
+
+        # If the providers simply do not offer enough style variety, fill the
+        # remaining slots rather than returning a short feed.
+        for item in ordered:
+            try_add(item, enforce_style=False)
+            if len(output) >= self._visible_size:
+                break
+        return output
+
     def _rotated_items(self, items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
         slot = int(time.time() // self._rotation_seconds)
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -240,9 +314,6 @@ class DiscoveryFeedEngine:
             for _, tracks in ordered_groups:
                 if depth < len(tracks):
                     annotated = self._feedback.annotate(tracks[depth])
-                    # Keep all cosmetic/collaboration variants under the same
-                    # visible artist label so the frontend cannot split them back
-                    # into multiple cards after the feed engine grouped them.
                     lead_artist = str(tracks[0].get("artist") or annotated.get("artist") or "Unknown artist")
                     annotated["artist"] = lead_artist
                     output.append(annotated)
@@ -253,9 +324,10 @@ class DiscoveryFeedEngine:
                 break
             depth += 1
 
+        output = self._style_balanced(output, items)
+
         # Reserve a meaningful slice of every visible rotation for direct
-        # YouTube digs. Without a quota, a successful background dig could still
-        # be hidden behind sixty metadata candidates with slightly higher scores.
+        # YouTube digs. The dig itself is already style-balanced.
         dig_items = [
             item
             for item in items
