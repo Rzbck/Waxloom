@@ -22,6 +22,12 @@ The owner validated these Discovery semantics on the published web product and t
 - next/previous/new preview starts at `0:00`;
 - Discovery preview playback remains separate from the persisted Navidrome queue.
 
+The owner also USER VALIDATED the native private-network path on real hardware:
+
+- Tailscale Serve HTTPS `/api/health` returned the expected Waxloom JSON from iPhone Safari;
+- the native iPhone app connected successfully to the saved private HTTPS endpoint after relaunch;
+- server/API/Tailscale connectivity is therefore no longer the active blocker.
+
 ## Native iPhone + Apple Watch implementation
 
 Canonical architecture: `docs/IOS_NATIVE_ARCHITECTURE.md`.
@@ -42,7 +48,8 @@ The native tranche now implements a real SwiftUI product rather than a web wrapp
 - full Now Playing with seek, +/-15 seconds, previous/play-pause/next, current-track favorite and queue;
 - background audio + MPNowPlayingInfoCenter + MPRemoteCommandCenter;
 - server queue restore/persistence and library-only scrobble behavior;
-- private HTTPS endpoint configuration with reconnect on launch.
+- private HTTPS endpoint configuration with reconnect on launch;
+- compact mini-player is inset inside each tab so Home/Browse/Discovery/Search/More remains visible and tappable during playback.
 
 ### Apple Watch product surface
 
@@ -90,7 +97,9 @@ Native security direction remains:
 
 ## Validation vocabulary / current state
 
-- Native complete product tranche: `IMPLEMENTED / NOT USER VALIDATED` until the final exact-SHA IPA is installed on the real iPhone + Watch.
+- Native HTTPS/Tailscale connection: `USER VALIDATED` on real iPhone.
+- Native complete product tranche: `IMPLEMENTED / NOT USER VALIDATED` until the current exact-SHA IPA is exercised across the full iPhone + Watch surface.
+- Playback navigation regression: previous build exposed a `BUG / LIMIT / BLOCKER` where the mini-player covered the bottom tab bar; the source fix moves the mini-player into each tab's safe-area inset and keeps the tab bar explicitly visible. This fix requires exact-SHA hardware validation.
 - GitHub compile/package/security results must be recorded only against the final exact branch HEAD after the product-invariant gate update.
 - Earlier successful candidate SHAs are not substitutes for the final exact-head hardware test.
 
@@ -100,11 +109,12 @@ On the final exact-SHA artifact:
 
 1. install iPhone + embedded Watch companion through iLoader;
 2. confirm saved private HTTPS endpoint reconnects;
-3. validate Albums, Artists, Favorites, Playlists, Search, Discovery and Imports on iPhone;
-4. validate AVPlayer playback, seek, queue restore/persist, background/system controls and validated Discovery preview semantics;
-5. open Watch and validate compact horizontal navigation;
-6. from Watch validate browse/search, play, favorites, playlist CRUD/add/remove, Discovery feedback/bad-source, imports and transport controls;
-7. confirm stale/offline Watch actions fail instead of executing later.
+3. start a library track and verify the compact mini-player appears above — never over — the Home/Browse/Discovery/Search/More tab bar and all five tabs remain tappable while playback continues;
+4. validate Albums, Artists, Favorites, Playlists, Search, Discovery and Imports on iPhone;
+5. validate AVPlayer playback, seek, queue restore/persist, background/system controls and validated Discovery preview semantics;
+6. open Watch and validate compact horizontal navigation;
+7. from Watch validate browse/search, play, favorites, playlist CRUD/add/remove, Discovery feedback/bad-source, imports and transport controls;
+8. confirm stale/offline Watch actions fail instead of executing later.
 
 Only after this physical test can the exact candidate be labeled `USER VALIDATED`.
 
