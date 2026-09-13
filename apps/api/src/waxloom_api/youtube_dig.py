@@ -62,6 +62,57 @@ _REJECT_TITLE_WORDS = (
     "cover version",
     "live set",
     "concert",
+    "presentation",
+    "review",
+    "breakdown",
+    "explained",
+    "explanation",
+    "lecture",
+    "webinar",
+    "how to",
+    "lesson",
+    "documentary",
+    "behind the scenes",
+    "making of",
+    "commentary",
+    "analysis",
+    "walkthrough",
+    "unboxing",
+    "conference",
+    "speech",
+    "discussion",
+    "gear demo",
+    "synth demo",
+    "plugin demo",
+    "product demo",
+)
+
+_SOFT_REJECT_WORDS = (
+    "interview",
+    "podcast",
+    "tutorial",
+    "presentation",
+    "review",
+    "breakdown",
+    "explained",
+    "lecture",
+    "webinar",
+    "documentary",
+    "how to",
+    "lesson",
+    "discussion",
+    "speech",
+    "talk",
+)
+
+_POSITIVE_TITLE_WORDS = (
+    "official audio",
+    "official video",
+    "official music video",
+    "visualizer",
+    "visualiser",
+    "lyric video",
+    "audio only",
 )
 
 _SEPARATORS = (" - ", " – ", " — ", " | ", " :: ")
@@ -114,7 +165,6 @@ def _video_id(entry: dict[str, Any]) -> str:
 
 
 def _rarity_score(views: int) -> float:
-    # Low exposure matters, but a zero-view upload is not automatically a gem.
     views = max(_MIN_VIEWS, views)
     low = math.log10(_MIN_VIEWS)
     high = math.log10(_MAX_VIEWS)
@@ -123,11 +173,6 @@ def _rarity_score(views: int) -> float:
 
 
 def _engagement_score(likes: int | None, views: int) -> tuple[float, float | None]:
-    """Bayesian-ish like/view signal for small-scene material.
-
-    A high ratio with two likes is not enough. Confidence rises with absolute
-    likes, while a genuinely strong ratio on a small audience gets rewarded.
-    """
     if likes is None or likes < 0 or views <= 0:
         return 0.12, None
     ratio = likes / max(1, views)
@@ -135,6 +180,58 @@ def _engagement_score(likes: int | None, views: int) -> tuple[float, float | Non
     ratio_quality = min(1.0, ratio / 0.08)
     score = ratio_quality * (0.35 + 0.65 * confidence)
     return max(0.0, min(1.0, score)), ratio
+
+
+def _music_confidence(info: dict[str, Any]) -> tuple[bool, float]:
+    """Fail closed unless YouTube metadata looks like an actual music track."""
+    raw_title = str(info.get("title") or "")
+    title = raw_title.casefold()
+    description = str(info.get("description") or "")[:4000].casefold()
+    channel = " ".join(
+        str(info.get(key) or "")
+        for key in ("channel", "uploader", "uploader_id")
+    ).casefold()
+
+    if any(word in title for word in _REJECT_TITLE_WORDS):
+        return False, 0.0
+
+    duration = info.get("duration")
+    if isinstance(duration, (int, float)) and not 45 <= float(duration) <= 900:
+        return False, 0.0
+
+    score = 0.0
+    categories = [str(value).casefold() for value in info.get("categories") or []]
+    if any(value == "music" or "music" in value for value in categories):
+        score += 4.0
+
+    track_meta = str(info.get("track") or "").strip()
+    artist_meta = str(info.get("artist") or "").strip()
+    album_meta = str(info.get("album") or "").strip()
+    if track_meta and artist_meta:
+        score += 5.0
+    elif track_meta or artist_meta:
+        score += 2.0
+    if album_meta:
+        score += 0.75
+
+    if " - topic" in channel or channel.endswith(" topic"):
+        score += 4.0
+    if any(word in title for word in _POSITIVE_TITLE_WORDS):
+        score += 2.0
+    if any(word in channel for word in (" records", " recordings", " label", " music", " official")):
+        score += 1.0
+    if _parse_artist_title(raw_title):
+        score += 1.0
+    if isinstance(duration, (int, float)) and 60 <= float(duration) <= 720:
+        score += 0.5
+
+    soft_hits = sum(1 for word in _SOFT_REJECT_WORDS if word in description)
+    if soft_hits >= 2:
+        score -= 4.0
+    elif soft_hits == 1:
+        score -= 1.5
+
+    return score >= 4.0, score
 
 
 def _query_terms(snapshot: dict[str, Any]) -> list[tuple[str, list[str]]]:
@@ -161,9 +258,6 @@ def _query_terms(snapshot: dict[str, Any]) -> list[tuple[str, list[str]]]:
         if genre and folded not in _GENERIC_TAGS and len(folded) >= 4:
             seed_genres[genre] += 1
 
-    # Interleave library genres and provider tags, with at most two terms from
-    # the same broad style family. This prevents a post-punk-heavy snapshot from
-    # feeding only post-punk searches back into itself for hours.
     ordered_terms: list[str] = []
     family_counts: Counter[str] = Counter()
     sources = [seed_genres.most_common(), external_tags.most_common()]
@@ -290,12 +384,6 @@ def _flat_search(queries: list[tuple[str, list[str]]], per_query: int = 12) -> l
 
 
 def _enrich_engagement(candidates: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
-    """Resolve like counts for a bounded shortlist in the background.
-
-    YouTube search results reliably expose views but not always likes. A second
-    metadata-only pass gives Waxloom the engagement signal when YouTube exposes
-    it. Failures simply keep the flat-search score.
-    """
     options: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
@@ -316,32 +404,39 @@ def _enrich_engagement(candidates: list[dict[str, Any]], limit: int) -> list[dic
                 info = downloader.extract_info(str(current.get("youtube_url") or ""), download=False)
             except (DownloadError, OSError, ValueError):
                 info = None
-            if isinstance(info, dict):
-                views_raw = info.get("view_count")
-                likes_raw = info.get("like_count")
-                views = int(views_raw) if isinstance(views_raw, (int, float)) else int(current.get("youtube_views") or 0)
-                likes = int(likes_raw) if isinstance(likes_raw, (int, float)) else None
-                if _MIN_VIEWS <= views <= _MAX_VIEWS:
-                    rarity = _rarity_score(views)
-                    engagement, ratio = _engagement_score(likes, views)
-                    similarity = float(current.get("similarity") or 0.5)
-                    rank = 0.42 * rarity + 0.42 * engagement + 0.16 * similarity
-                    # Low engagement on a reasonably observed upload is a weak
-                    # gem signal, even if the raw view count is small.
-                    if ratio is not None and views >= 500 and ratio < 0.006:
-                        rank *= 0.68
-                    current["youtube_views"] = views
-                    current["youtube_likes"] = likes
-                    current["youtube_like_ratio"] = round(ratio, 6) if ratio is not None else None
-                    current["engagement"] = round(engagement, 4)
-                    current["underground"] = round(0.52 * rarity + 0.48 * engagement, 4)
-                    current["rank"] = round(rank, 4)
-                    ratio_label = f" · {ratio * 100:.1f}% like/view" if ratio is not None else ""
-                    likes_label = f" · {likes:,} likes" if likes is not None else ""
-                    current["reason"] = (
-                        f"YouTube dig · {views:,} views{likes_label}{ratio_label} · "
-                        f"{', '.join(str(tag) for tag in current.get('tags') or [])}"
-                    )
+            if not isinstance(info, dict):
+                continue
+
+            is_music, music_confidence = _music_confidence(info)
+            if not is_music:
+                continue
+
+            views_raw = info.get("view_count")
+            likes_raw = info.get("like_count")
+            views = int(views_raw) if isinstance(views_raw, (int, float)) else int(current.get("youtube_views") or 0)
+            likes = int(likes_raw) if isinstance(likes_raw, (int, float)) else None
+            if not _MIN_VIEWS <= views <= _MAX_VIEWS:
+                continue
+
+            rarity = _rarity_score(views)
+            engagement, ratio = _engagement_score(likes, views)
+            similarity = float(current.get("similarity") or 0.5)
+            rank = 0.40 * rarity + 0.40 * engagement + 0.15 * similarity + 0.05 * min(1.0, music_confidence / 8.0)
+            if ratio is not None and views >= 500 and ratio < 0.006:
+                rank *= 0.68
+            current["youtube_views"] = views
+            current["youtube_likes"] = likes
+            current["youtube_like_ratio"] = round(ratio, 6) if ratio is not None else None
+            current["engagement"] = round(engagement, 4)
+            current["music_confidence"] = round(music_confidence, 2)
+            current["underground"] = round(0.50 * rarity + 0.45 * engagement + 0.05 * min(1.0, music_confidence / 8.0), 4)
+            current["rank"] = round(rank, 4)
+            ratio_label = f" · {ratio * 100:.1f}% like/view" if ratio is not None else ""
+            likes_label = f" · {likes:,} likes" if likes is not None else ""
+            current["reason"] = (
+                f"YouTube dig · music verified · {views:,} views{likes_label}{ratio_label} · "
+                f"{', '.join(str(tag) for tag in current.get('tags') or [])}"
+            )
             enriched.append(current)
     return enriched
 
@@ -363,11 +458,11 @@ async def dig_youtube_gems(
     *,
     limit: int = 48,
 ) -> list[dict[str, Any]]:
-    """Find low-exposure, high-engagement YouTube tracks around the profile."""
+    """Find low-exposure, high-engagement, music-only YouTube tracks."""
 
     global _cache
     queries = _query_terms(snapshot)
-    cache_key = "\n".join(query for query, _ in queries)
+    cache_key = "music-only-v2\n" + "\n".join(query for query, _ in queries)
     now = time.monotonic()
     if _cache and now - _cache[0] < _DIG_CACHE_SECONDS and _cache[1] == cache_key:
         return [dict(item) for item in _cache[2][:limit]]
@@ -380,7 +475,6 @@ async def dig_youtube_gems(
         raw = await asyncio.to_thread(_flat_search, queries)
         raw.sort(key=lambda item: float(item.get("rank") or 0), reverse=True)
 
-        # Keep a broad style spread before the slower engagement enrichment.
         deduped: list[dict[str, Any]] = []
         seen_tracks: set[tuple[str, str]] = set()
         artist_counts: Counter[str] = Counter()
@@ -403,8 +497,6 @@ async def dig_youtube_gems(
             if len(deduped) >= max(limit + 16, 64):
                 break
 
-        # Likes are resolved only for the bounded shortlist, never for the whole
-        # search result set. This runs in the four-hour background refresh path.
         enriched = await asyncio.to_thread(_enrich_engagement, deduped, min(len(deduped), max(limit, 48)))
         enriched.sort(key=lambda item: float(item.get("rank") or 0), reverse=True)
 
