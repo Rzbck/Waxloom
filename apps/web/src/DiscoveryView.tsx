@@ -21,6 +21,7 @@ type ShelfKey = "closest" | "underground" | "deep";
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
 const TASTE_KEY = "waxloom.discovery.taste.v1";
+const SOURCE_REJECT_TAG = "__waxloom_source:not_music__";
 const SHELF_PAGE_SIZE = 12;
 const SHELF_TARGET_SIZE = 20;
 
@@ -164,22 +165,27 @@ function DiscoveryTrackCard({
   currentPreviewMbid,
   playing,
   importing,
+  rejecting,
   taste,
   onPlay,
   onQuickAdd,
   onFeedback,
+  onBadSource,
 }: {
   candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
   playing: boolean;
   importing: boolean;
+  rejecting: boolean;
   taste: TasteState;
   onPlay: (candidate: DiscoveryCandidate) => void;
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
+  onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
   const currentFeedback = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
   const isPlaying = currentPreviewMbid === candidate.recording_mbid && playing;
+  const canRejectSource = candidate.source === "youtube_dig";
 
   return (
     <article className="discovery-song-card">
@@ -221,6 +227,18 @@ function DiscoveryTrackCard({
         title="Show less like this"
         aria-label={`Less like ${candidate.title}`}
       >Less</button>
+      {canRejectSource ? (
+        <button
+          className="compact-action compact-action-bad-source"
+          type="button"
+          disabled={rejecting}
+          onClick={() => onBadSource(candidate)}
+          title={rejecting ? "Removing bad source…" : "Not music / bad source"}
+          aria-label={`Report ${candidate.title} as not music`}
+        >
+          <span className="css-x-mark" aria-hidden="true" />
+        </button>
+      ) : <span aria-hidden="true" />}
     </article>
   );
 }
@@ -234,10 +252,12 @@ function DiscoveryShelf({
   currentPreviewMbid,
   playing,
   importingMbid,
+  rejectingMbid,
   taste,
   onPlayQueue,
   onQuickAdd,
   onFeedback,
+  onBadSource,
 }: {
   eyebrow: string;
   title: string;
@@ -247,10 +267,12 @@ function DiscoveryShelf({
   currentPreviewMbid: string | null;
   playing: boolean;
   importingMbid: string | null;
+  rejectingMbid: string | null;
   taste: TasteState;
   onPlayQueue: (items: DiscoveryCandidate[], candidate: DiscoveryCandidate) => void;
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
+  onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
   if (items.length === 0) return null;
   const pageCount = Math.max(1, Math.ceil(items.length / SHELF_PAGE_SIZE));
@@ -279,10 +301,12 @@ function DiscoveryShelf({
             currentPreviewMbid={currentPreviewMbid}
             playing={playing}
             importing={importingMbid === candidate.recording_mbid}
+            rejecting={rejectingMbid === candidate.recording_mbid}
             taste={taste}
             onPlay={(track) => onPlayQueue(items, track)}
             onQuickAdd={onQuickAdd}
             onFeedback={onFeedback}
+            onBadSource={onBadSource}
           />
         ))}
       </div>
@@ -297,6 +321,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState<string | null>(null);
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
   const [shelfPages, setShelfPages] = useState<Record<ShelfKey, number>>({ closest: 0, underground: 0, deep: 0 });
 
@@ -422,6 +447,50 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       });
   }
 
+  async function rejectBadSource(candidate: DiscoveryCandidate) {
+    if (rejecting || candidate.source !== "youtube_dig") return;
+
+    setRejecting(candidate.recording_mbid);
+    setError(null);
+    setNotice(null);
+
+    // Remove it immediately from both the rendered state and browser cache.
+    // The backend persists the source rejection separately from musical taste.
+    setBundle((current) => {
+      if (!current) return current;
+      const items = current.external.items.filter((item) => item.recording_mbid !== candidate.recording_mbid);
+      const next: DiscoveryFeedResponse = {
+        ...current,
+        external: {
+          ...current.external,
+          items,
+          count: items.length,
+        },
+      };
+      storeBrowserFeed(next);
+      return next;
+    });
+
+    const sourceFeedback: DiscoveryCandidate = {
+      ...candidate,
+      tags: [
+        SOURCE_REJECT_TAG,
+        ...(candidate.tags ?? []).filter((tag) => tag !== SOURCE_REJECT_TAG).slice(0, 11),
+      ],
+    };
+
+    try {
+      await api.discoveryFeedback(sourceFeedback, -1);
+      setNotice("Bad source removed — this does not change your musical taste, and this video will stay excluded.");
+      await readFeed();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not save the bad-source report.");
+      await readFeed();
+    } finally {
+      setRejecting(null);
+    }
+  }
+
   async function addToLibrary(candidate: DiscoveryCandidate) {
     if (importing) return;
 
@@ -519,10 +588,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
             importingMbid={importing}
+            rejectingMbid={rejecting}
             taste={taste}
             onPlayQueue={playDiscoveryQueue}
             onQuickAdd={(candidate) => void addToLibrary(candidate)}
             onFeedback={updateFeedback}
+            onBadSource={(candidate) => void rejectBadSource(candidate)}
           />
           <DiscoveryShelf
             eyebrow="YouTube dig · music-verified · low exposure / high engagement"
@@ -533,10 +604,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
             importingMbid={importing}
+            rejectingMbid={rejecting}
             taste={taste}
             onPlayQueue={playDiscoveryQueue}
             onQuickAdd={(candidate) => void addToLibrary(candidate)}
             onFeedback={updateFeedback}
+            onBadSource={(candidate) => void rejectBadSource(candidate)}
           />
           <DiscoveryShelf
             eyebrow="Catalogue exploration"
@@ -547,10 +620,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
             importingMbid={importing}
+            rejectingMbid={rejecting}
             taste={taste}
             onPlayQueue={playDiscoveryQueue}
             onQuickAdd={(candidate) => void addToLibrary(candidate)}
             onFeedback={updateFeedback}
+            onBadSource={(candidate) => void rejectBadSource(candidate)}
           />
         </>
       )}

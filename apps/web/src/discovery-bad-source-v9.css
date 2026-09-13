@@ -1,0 +1,81 @@
+/* Dedicated Discovery source-quality feedback.
+   Imported last so the bad-source action can coexist with the established
+   Discovery control geometry without creating a phantom fifth slot. */
+
+:root {
+  /* lucide:x-circle, selected through Supericons. */
+  --waxloom-bad-source-svg: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='m15 9-6 6'/%3E%3Cpath d='m9 9 6 6'/%3E%3C/svg%3E");
+}
+
+/* Non-YouTube cards keep the original four action columns. The placeholder is
+   not a grid item, so it cannot create the stray block/second row seen before. */
+.discovery-song-card > span[aria-hidden="true"]:last-child {
+  display: none !important;
+}
+
+/* Only cards that actually expose source-quality feedback reserve the fifth
+   action slot. Chromium and current Safari support :has(). */
+.discovery-song-card:has(> .compact-action-bad-source) {
+  grid-template-columns: minmax(0, 1fr) 34px repeat(5, 26px);
+}
+
+.compact-action-bad-source {
+  position: relative !important;
+  align-self: center !important;
+  justify-self: center !important;
+  color: #8d8792;
+  border-color: rgba(150, 139, 155, .22);
+  background: rgba(105, 96, 112, .05);
+}
+
+.compact-action-bad-source:hover,
+.compact-action-bad-source:focus-visible {
+  color: #efb4bb;
+  border-color: rgba(235, 115, 122, .48);
+  background: rgba(235, 115, 122, .12);
+}
+
+.compact-action-bad-source:disabled {
+  opacity: .5;
+  cursor: wait;
+}
+
+/* icon-centering-v5 owns Discovery glyph geometry through ::before. Give this
+   action an explicit Lucide mask instead of rendering a child span that the
+   centering layer intentionally hides. */
+.discovery-song-card > .compact-action-bad-source::before {
+  content: "" !important;
+  position: absolute !important;
+  inset: 0 !important;
+  margin: auto !important;
+  display: block !important;
+  width: 15px !important;
+  height: 15px !important;
+  background: currentColor !important;
+  -webkit-mask-image: var(--waxloom-bad-source-svg) !important;
+  mask-image: var(--waxloom-bad-source-svg) !important;
+  -webkit-mask-position: center !important;
+  mask-position: center !important;
+  -webkit-mask-repeat: no-repeat !important;
+  mask-repeat: no-repeat !important;
+  -webkit-mask-size: contain !important;
+  mask-size: contain !important;
+  pointer-events: none !important;
+}
+
+/* The legacy child mark is deliberately suppressed; the verified Lucide icon
+   above is the single visible glyph. */
+.css-x-mark {
+  display: none !important;
+}
+
+@media (max-width: 820px) {
+  .discovery-song-card:has(> .compact-action-bad-source) {
+    grid-template-columns: minmax(0, 1fr) 31px repeat(5, 28px);
+  }
+
+  .discovery-song-card > .compact-action-bad-source::before {
+    width: 14px !important;
+    height: 14px !important;
+  }
+}
