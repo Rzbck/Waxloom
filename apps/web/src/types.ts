@@ -213,6 +213,7 @@ export type YouTubeCandidate = {
   score: number;
   preview_url?: string | null;
   preview_ext?: string | null;
+  music_confidence?: number;
 };
 
 export type YouTubeRuntime = {
@@ -220,6 +221,7 @@ export type YouTubeRuntime = {
     ffmpeg: boolean;
     node: boolean;
     yt_dlp: boolean;
+    download_quality?: string;
   };
   library_configured: boolean;
 };
@@ -227,6 +229,8 @@ export type YouTubeRuntime = {
 export type ImportResult = {
   status: "already_local" | "imported" | "imported_pending_index" | string;
   relative_path?: string;
+  audio_format?: string;
   song?: Song | null;
   playlist_added?: boolean;
+  playlist_pending?: boolean;
 };
