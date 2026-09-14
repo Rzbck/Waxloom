@@ -122,7 +122,7 @@ private struct WatchBrowseDashboard: View {
                     WatchMenuLink(remote: remote, title: "Favorites", symbol: "heart.fill", route: .favorites)
                     WatchMenuLink(remote: remote, title: "Playlists", symbol: "music.note.list", route: .playlists)
                     NavigationLink {
-                        WatchDiscoveryDashboard(remote: remote)
+                        WatchDiscoveryDashboardV2(remote: remote)
                     } label: {
                         WatchMenuTile(title: "Discovery", symbol: "sparkles")
                     }
