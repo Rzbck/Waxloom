@@ -28,6 +28,28 @@ def _stable_key(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8", errors="ignore")).hexdigest()
 
 
+def _clamp_weight(value: float) -> float:
+    return max(0.0, min(1.0, float(value)))
+
+
+def _listenbrainz_underground_share(underground_weight: float) -> float:
+    """Map the public 0..1 knob to a safe rarity share.
+
+    0.75 intentionally maps to 0.4125, exactly preserving the previously
+    hard-coded ListenBrainz blend while finally making the setting functional.
+    The ends still keep some similarity/rarity so the result cannot collapse
+    into either 'popular but close' or 'random but obscure'.
+    """
+
+    return 0.15 + 0.35 * _clamp_weight(underground_weight)
+
+
+def _catalog_underground_share(underground_weight: float) -> float:
+    """Preserve the historical catalogue blend at the default 0.75 setting."""
+
+    return 0.08 + 0.32 * _clamp_weight(underground_weight)
+
+
 def _song_mbid(song: dict[str, Any]) -> str | None:
     for key in ("musicBrainzId", "musicbrainzId", "recordingMbid", "recording_mbid", "mbid"):
         value = song.get(key)
@@ -139,6 +161,8 @@ class DiscoveryService:
         seed_songs: list[dict[str, Any]],
         audio_anchors: list[dict[str, Any]],
         diagnostics: dict[str, Any],
+        *,
+        underground_weight: float,
     ) -> list[dict[str, Any]]:
         resolved = await asyncio.gather(*(self._resolve_song(song) for song in seed_songs))
         resolved_seeds = [item for item in resolved if item]
@@ -206,6 +230,8 @@ class DiscoveryService:
             return []
 
         semaphore = asyncio.Semaphore(8)
+        underground_share = _listenbrainz_underground_share(underground_weight)
+        similarity_share = 1.0 - underground_share
 
         async def enrich(item: dict[str, Any]) -> dict[str, Any]:
             async with semaphore:
@@ -213,8 +239,11 @@ class DiscoveryService:
             popularity = enrichment.get("popularity")
             underground = 1.0 - float(popularity) if isinstance(popularity, (int, float)) else 0.5
             similarity = float(item["similarity_raw"]) / max_score if max_score > 0 else 0.0
-            multi_seed = min(1.0, reference_counts[str(item["recording_mbid"])] / max(1, len(resolved_seeds)))
-            rank = similarity * 0.5875 + underground * 0.4125 + 0.12 * multi_seed
+            multi_seed = min(
+                1.0,
+                reference_counts[str(item["recording_mbid"])] / max(1, len(resolved_seeds)),
+            )
+            rank = similarity * similarity_share + underground * underground_share + 0.12 * multi_seed
             return {
                 **item,
                 "similarity": round(similarity, 4),
@@ -235,6 +264,7 @@ class DiscoveryService:
         audio_anchors: list[dict[str, Any]],
         *,
         limit: int = 40,
+        underground_weight: float,
     ) -> list[dict[str, Any]]:
         anchors: list[tuple[str, float]] = []
         seen_artists: set[str] = set()
@@ -261,6 +291,8 @@ class DiscoveryService:
 
         candidates: list[dict[str, Any]] = []
         seen_mbids: set[str] = set()
+        underground_share = _catalog_underground_share(underground_weight)
+        similarity_share = 1.0 - underground_share
         for artist, sonic_score in anchors:
             try:
                 rows = await self.musicbrainz.recordings_by_artist_name(artist, limit=22)
@@ -273,12 +305,13 @@ class DiscoveryService:
                 seen_mbids.add(mbid)
                 position_score = max(0.0, 1.0 - position / 28.0)
                 similarity = min(0.96, 0.48 + 0.30 * sonic_score + 0.18 * position_score)
+                underground = 0.55
                 candidates.append(
                     {
                         **row,
                         "similarity": round(similarity, 4),
-                        "underground": 0.55,
-                        "rank": round(0.68 * similarity + 0.32 * 0.55, 4),
+                        "underground": underground,
+                        "rank": round(similarity_share * similarity + underground_share * underground, 4),
                         "source": "musicbrainz_catalog",
                         "reason": f"Reached through sonically neighbouring artist {artist}",
                     }
@@ -322,6 +355,7 @@ class DiscoveryService:
         if not seed_ids:
             return {"seeds": [], "items": [], "count": 0}
 
+        weight = _clamp_weight(underground_weight)
         fetched = await asyncio.gather(
             *(self.navidrome.get_song(song_id) for song_id in seed_ids),
             return_exceptions=True,
@@ -336,17 +370,30 @@ class DiscoveryService:
             "unique_external_candidates": 0,
             "catalog_fallback_candidates": 0,
             "local_duplicates_removed": 0,
+            "underground_weight": round(weight, 4),
+            "listenbrainz_underground_share": round(_listenbrainz_underground_share(weight), 4),
+            "catalog_underground_share": round(_catalog_underground_share(weight), 4),
         }
 
         listenbrainz_items: list[dict[str, Any]] = []
         try:
-            listenbrainz_items = await self._listenbrainz_candidates(seed_songs, audio_anchors, diagnostics)
+            listenbrainz_items = await self._listenbrainz_candidates(
+                seed_songs,
+                audio_anchors,
+                diagnostics,
+                underground_weight=weight,
+            )
         except httpx.HTTPError:
             listenbrainz_items = []
 
         catalog_items: list[dict[str, Any]] = []
         if len(listenbrainz_items) < max(16, result_count // 2):
-            catalog_items = await self._catalog_fallback(seed_songs, audio_anchors, limit=max(30, result_count))
+            catalog_items = await self._catalog_fallback(
+                seed_songs,
+                audio_anchors,
+                limit=max(30, result_count),
+                underground_weight=weight,
+            )
             diagnostics["catalog_fallback_candidates"] = len(catalog_items)
 
         merged: list[dict[str, Any]] = []
@@ -374,7 +421,7 @@ class DiscoveryService:
             "seeds": resolved_seeds,
             "items": external,
             "count": len(external),
-            "underground_weight": max(0.0, min(1.0, underground_weight)),
+            "underground_weight": weight,
             "diagnostics": diagnostics,
             "warning": warning,
         }
@@ -447,8 +494,16 @@ class DiscoveryService:
             self.navidrome.get_play_queue(),
         )
         songs = [song for song in snapshot["songs"] if isinstance(song, dict)]
-        starred_ids = {str(song.get("id") or "") for song in starred.get("songs") or [] if isinstance(song, dict)}
-        queue_ids = {str(song.get("id") or "") for song in queue.get("entry") or [] if isinstance(song, dict)}
+        starred_ids = {
+            str(song.get("id") or "")
+            for song in starred.get("songs") or []
+            if isinstance(song, dict)
+        }
+        queue_ids = {
+            str(song.get("id") or "")
+            for song in queue.get("entry") or []
+            if isinstance(song, dict)
+        }
 
         def preference(song: dict[str, Any]) -> int:
             song_id = str(song.get("id") or "")
@@ -490,12 +545,18 @@ class DiscoveryService:
         profile = {
             "library_tracks": len(songs),
             "library_albums": len(snapshot["albums"]),
-            "library_artists": len({_normalize(str(song.get("artist") or "")) for song in songs if song.get("artist")}),
-            "library_genres": len({_normalize(str(song.get("genre") or "")) for song in songs if song.get("genre")}),
+            "library_artists": len(
+                {_normalize(str(song.get("artist") or "")) for song in songs if song.get("artist")}
+            ),
+            "library_genres": len(
+                {_normalize(str(song.get("genre") or "")) for song in songs if song.get("genre")}
+            ),
             "favorites": len(starred_ids),
             "queue_tracks": len(queue_ids),
             "representative_seeds": len(selected),
-            "representative_artists": len({_normalize(str(song.get("artist") or "")) for song in selected if song.get("artist")}),
+            "representative_artists": len(
+                {_normalize(str(song.get("artist") or "")) for song in selected if song.get("artist")}
+            ),
         }
         return selected, profile
 
