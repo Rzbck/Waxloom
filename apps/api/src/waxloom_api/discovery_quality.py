@@ -87,7 +87,7 @@ def normalize_youtube_track(item: dict[str, Any]) -> dict[str, Any]:
     if len(pipe_cleaned) >= 2:
         title = pipe_cleaned
 
-    marker_cleaned = _EDITORIAL_VIDEO_MARKER.sub("", title).strip(" -–—|()[]")
+    marker_cleaned = _EDITORIAL_VIDEO_MARKER.sub("", title).strip(" -–—|")
     if len(marker_cleaned) >= 2:
         title = marker_cleaned
 
