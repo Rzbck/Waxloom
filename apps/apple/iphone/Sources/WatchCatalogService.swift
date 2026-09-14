@@ -57,14 +57,34 @@ enum WatchCatalogService {
 
                 case .discovery:
                     let candidate = discoveryCandidate(from: item)
+
+                    // Rebuild the active Discovery shelf on the iPhone. Next/Previous
+                    // must not depend on WCSession having transported the whole queue.
+                    let feed = try await WaxloomAPI.discoveryFeed(baseURL: baseURL)
+                    let authoritativeDiscoveryItems = discoveryItems(feed.external.items)
+                    let section = item.section ?? "Closest"
+                    let authoritativeShelf = authoritativeDiscoveryItems.filter {
+                        ($0.section ?? "Closest") == section
+                    }
+
                     let requestedQueue = (request.items ?? [])
                         .filter { $0.kind == .discovery }
-                    let queueItems = requestedQueue.contains(where: { $0.id == item.id })
-                        ? requestedQueue
-                        : [item]
+                    let queueItems: [WatchCatalogItem]
+                    if authoritativeShelf.contains(where: { $0.id == item.id }) {
+                        queueItems = authoritativeShelf
+                    } else if requestedQueue.contains(where: { $0.id == item.id }) {
+                        queueItems = requestedQueue
+                    } else {
+                        queueItems = [item]
+                    }
+
                     let queue = queueItems.map(discoveryCandidate)
                     await player.playPreview(candidate: candidate, queue: queue, baseURL: baseURL)
-                    return .success(token: request.token, title: "Preview", message: candidate.title)
+                    return .success(
+                        token: request.token,
+                        title: "Preview",
+                        message: "\(candidate.title) · \(queue.count) in queue"
+                    )
 
                 default:
                     return .failure(token: request.token, message: "Open this item first")
