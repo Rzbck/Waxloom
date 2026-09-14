@@ -105,6 +105,14 @@ def main() -> None:
             "artist": "Devinylhunter-records.de",
             "title": "New Arrivals! Used Vinyl Records | 16.10.25 | ProgRock, Hardrock, Vertigo",
         },
+        {
+            "artist": "free) indie rock + indie pop type beat",
+            "title": "risky",
+        },
+        {
+            "artist": "Cozy Morning Indie Folk",
+            "title": "Relaxing Acoustic Music for Coffee and Quiet Thoughts",
+        },
     ]
     for row in bad_youtube_rows:
         keep, reason = youtube_track_quality(row)
@@ -115,9 +123,13 @@ def main() -> None:
     )
     keep_fresh, _ = youtube_track_quality({"artist": "Bow Anderson", "title": "New Wave"})
     keep_vinyl_word, _ = youtube_track_quality({"artist": "The Vinyls", "title": "Arrival"})
+    keep_legit_music_word, _ = youtube_track_quality(
+        {"artist": "Real Artist", "title": "Music for a Forgotten Future"}
+    )
     require(keep_archive, "quality gate must not reject a real archive track because it is old")
     require(keep_fresh, "quality gate must keep a plausible current single")
     require(keep_vinyl_word, "quality gate must not reject track-like names merely containing vinyl language")
+    require(keep_legit_music_word, "quality gate must not reject arbitrary songs merely containing 'music for'")
 
     music_video = {
         "artist": "POLYVINYL",
