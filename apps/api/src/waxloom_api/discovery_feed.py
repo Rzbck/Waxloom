@@ -17,7 +17,7 @@ from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
 from waxloom_api.youtube_dig import dig_youtube_gems
 
-_FEED_VERSION = 4
+_FEED_VERSION = 5
 
 _STYLE_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("post-punk", ("post punk", "coldwave", "darkwave", "new wave", "goth", "shoegaze", "dream pop")),
@@ -199,7 +199,12 @@ class DiscoveryFeedEngine:
                 )
 
                 try:
-                    gems = await dig_youtube_gems(snapshot, service.navidrome, limit=48)
+                    gems = await dig_youtube_gems(
+                        snapshot,
+                        service.navidrome,
+                        limit=48,
+                        taste_profile=self._feedback.query_profile(),
+                    )
                 except Exception:
                     gems = []
 
@@ -216,6 +221,13 @@ class DiscoveryFeedEngine:
                 diagnostics = external.setdefault("diagnostics", {})
                 if isinstance(diagnostics, dict):
                     diagnostics["youtube_dig_candidates"] = len(gems)
+                    diagnostics["youtube_dig_engine"] = "v3-age-aware-crate"
+                    era_counts = Counter(
+                        str(item.get("discovery_era") or "unknown")
+                        for item in gems
+                        if isinstance(item, dict)
+                    )
+                    diagnostics["youtube_dig_eras"] = dict(era_counts)
 
                 self._snapshot = snapshot
                 self._snapshot_epoch = time.time()
