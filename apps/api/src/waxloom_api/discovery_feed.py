@@ -15,9 +15,10 @@ from typing import Any
 
 from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
+from waxloom_api.discovery_quality import youtube_track_quality
 from waxloom_api.youtube_dig import dig_youtube_gems
 
-_FEED_VERSION = 5
+_FEED_VERSION = 6
 
 _STYLE_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("post-punk", ("post punk", "coldwave", "darkwave", "new wave", "goth", "shoegaze", "dream pop")),
@@ -199,14 +200,23 @@ class DiscoveryFeedEngine:
                 )
 
                 try:
-                    gems = await dig_youtube_gems(
+                    raw_gems = await dig_youtube_gems(
                         snapshot,
                         service.navidrome,
                         limit=48,
                         taste_profile=self._feedback.query_profile(),
                     )
                 except Exception:
-                    gems = []
+                    raw_gems = []
+
+                rejected_quality: Counter[str] = Counter()
+                gems: list[dict[str, Any]] = []
+                for gem in raw_gems:
+                    keep, reason = youtube_track_quality(gem)
+                    if keep:
+                        gems.append(gem)
+                    else:
+                        rejected_quality[reason] += 1
 
                 external = snapshot.setdefault("external", {})
                 existing = [item for item in external.get("items") or [] if isinstance(item, dict)]
@@ -221,7 +231,9 @@ class DiscoveryFeedEngine:
                 diagnostics = external.setdefault("diagnostics", {})
                 if isinstance(diagnostics, dict):
                     diagnostics["youtube_dig_candidates"] = len(gems)
-                    diagnostics["youtube_dig_engine"] = "v3-age-aware-crate"
+                    diagnostics["youtube_dig_candidates_before_quality"] = len(raw_gems)
+                    diagnostics["youtube_dig_quality_rejections"] = dict(rejected_quality)
+                    diagnostics["youtube_dig_engine"] = "v3-age-aware-crate-quality"
                     era_counts = Counter(
                         str(item.get("discovery_era") or "unknown")
                         for item in gems
