@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
 from waxloom_api.preview_cache import DiscoveryPreviewCache
 from waxloom_api.providers.navidrome import NavidromeClient
 from waxloom_api.providers.youtube import YouTubeProvider
@@ -50,6 +51,7 @@ class ImportService:
         self.navidrome = navidrome
         self.state_dir = state_dir
         self.preview_cache = preview_cache
+        self.feedback = DiscoveryFeedbackStore(state_dir / "discovery-feedback.json")
 
     async def start(self) -> None:
         return None
@@ -84,6 +86,12 @@ class ImportService:
                 "playlist_pending": False,
             }
 
+        discovery_candidate = (
+            self.preview_cache.candidate_by_identity(artist, title)
+            if self.preview_cache is not None
+            else None
+        )
+
         output: Path | None = None
         if self.preview_cache is not None:
             output = await self.preview_cache.promote_if_matching(
@@ -100,6 +108,18 @@ class ImportService:
                 title=title,
                 source_url=source_url,
                 output_root=self._library_root(),
+            )
+
+        if discovery_candidate is not None:
+            self.feedback.record_import(
+                recording_mbid=str(discovery_candidate.get("recording_mbid") or ""),
+                artist=str(discovery_candidate.get("artist") or artist),
+                title=str(discovery_candidate.get("title") or title),
+                tags=[
+                    str(tag)
+                    for tag in discovery_candidate.get("tags") or []
+                    if str(tag).strip()
+                ],
             )
 
         await self.navidrome.start_scan(full_scan=False)
