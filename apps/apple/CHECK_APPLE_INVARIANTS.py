@@ -112,6 +112,50 @@ for feature in (
     "ProductSearchView", "ProductDiscoveryView", "ProductImportsView", "ProductNowPlayingView",
 ):
     require(product_views, feature, f"iPhone feature {feature}")
+
+# Discovery import UX: automatic match/import first, manual picker only
+# when the automatic source score is genuinely ambiguous.
+require(
+    product_views,
+    '@AppStorage("waxloom.authorizedMediaImports.v1")',
+    "Persistent authorized-import acknowledgement",
+)
+if product_views.count(
+    '@AppStorage("waxloom.authorizedMediaImports.v1")'
+) < 2:
+    errors.append(
+        "iPhone direct import: authorization must be shared by Discovery and manual Imports"
+    )
+require(
+    product_views,
+    "beginQuickImport(candidate)",
+    "Discovery one-tap import action",
+)
+require(
+    product_views,
+    "limit: 1",
+    "Discovery automatic best-source lookup",
+)
+require(
+    product_views,
+    "if best.score < 80",
+    "Discovery ambiguous-source fallback threshold",
+)
+require(
+    product_views,
+    "manualImportCandidate = candidate",
+    "Discovery manual-source fallback",
+)
+require(
+    product_views,
+    "sourceURL: best.url",
+    "Discovery direct import selected source",
+)
+require(
+    product_views,
+    "candidates.removeAll {",
+    "Imported Discovery candidate immediate removal",
+)
 require(player, "restoreQueue", "Native queue restore")
 require(player, "savePlayQueue", "Native queue persistence")
 require(player, "MPNowPlayingInfoCenter", "System Now Playing")

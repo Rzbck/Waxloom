@@ -4,6 +4,7 @@ import copy
 import os
 import re
 import shutil
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -453,6 +454,95 @@ class YouTubeProvider:
         result = sorted(resolved, key=lambda item: float(item["score"]), reverse=True)
         self._store_search(cache_key, search_results, result)
         return copy.deepcopy(result)
+
+    def prepare_library_audio(
+        self,
+        path: Path,
+        *,
+        artist: str,
+        title: str,
+    ) -> Path:
+        """Normalize a downloaded library file to tagged AAC/M4A.
+
+        Discovery preview caching may retain the original source-quality
+        container. Only the copy placed in the Navidrome music library is
+        normalized so Navidrome can reliably index and serve it.
+        """
+        source = path.expanduser().resolve()
+        if not source.is_file() or source.stat().st_size < 100 * 1024:
+            raise RuntimeError("Library audio source is missing or unexpectedly small.")
+
+        if source.suffix.casefold() == ".m4a":
+            _write_tags(source, artist, title)
+            return source
+
+        ffmpeg = _resolve_ffmpeg()
+        if ffmpeg is None:
+            raise RuntimeError("ffmpeg is required to prepare library audio.")
+
+        target = source.with_suffix(".m4a")
+        temporary = target.with_name(
+            f".{target.stem}.waxloom-part.m4a"
+        )
+        temporary.unlink(missing_ok=True)
+
+        command = [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(source),
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-c:a",
+            "aac",
+            "-b:a",
+            "192k",
+            "-movflags",
+            "+faststart",
+            "-metadata",
+            f"artist={artist}",
+            "-metadata",
+            f"title={title}",
+            "-metadata",
+            "album=Singles",
+            str(temporary),
+        ]
+
+        try:
+            subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            temporary.unlink(missing_ok=True)
+            raise RuntimeError(
+                "Library audio conversion to M4A failed."
+            ) from exc
+
+        if (
+            not temporary.is_file()
+            or temporary.stat().st_size < 100 * 1024
+        ):
+            temporary.unlink(missing_ok=True)
+            raise RuntimeError(
+                "Library M4A conversion produced an unusable file."
+            )
+
+        target.unlink(missing_ok=True)
+        temporary.replace(target)
+
+        _write_tags(target, artist, title)
+
+        if source != target:
+            source.unlink(missing_ok=True)
+
+        return target.resolve()
 
     def download_selected(
         self,

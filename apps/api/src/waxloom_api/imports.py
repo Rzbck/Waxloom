@@ -127,6 +127,13 @@ class ImportService:
                 output_root=self._library_root(),
             )
 
+        output = await asyncio.to_thread(
+            self.youtube.prepare_library_audio,
+            output,
+            artist=artist,
+            title=title,
+        )
+
         if discovery_candidate is not None:
             recording_mbid = str(
                 discovery_candidate.get("recording_mbid") or ""
