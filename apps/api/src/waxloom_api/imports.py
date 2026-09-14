@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from mutagen import File as MutagenFile
+
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
 from waxloom_api.preview_cache import DiscoveryPreviewCache
 from waxloom_api.providers.navidrome import NavidromeClient
@@ -17,22 +19,92 @@ def _normalize(value: str) -> str:
     return " ".join(value.split())
 
 
-def _exact_song(results: dict[str, list[dict[str, Any]]], artist: str, title: str) -> dict[str, Any] | None:
+def _safe_component(value: str, fallback: str) -> str:
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", value).strip().rstrip(".")
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    return (cleaned or fallback)[:120]
+
+
+def _exact_song(
+    results: dict[str, list[dict[str, Any]]], artist: str, title: str
+) -> dict[str, Any] | None:
     artist_n = _normalize(artist)
     title_n = _normalize(title)
     for song in results.get("songs", []):
-        if _normalize(str(song.get("artist") or "")) == artist_n and _normalize(str(song.get("title") or "")) == title_n:
+        if (
+            _normalize(str(song.get("artist") or "")) == artist_n
+            and _normalize(str(song.get("title") or "")) == title_n
+        ):
             return song
     return None
+
+
+def _album_name(discovery_candidate: dict[str, Any] | None) -> str:
+    if discovery_candidate is not None:
+        release = str(discovery_candidate.get("release") or "").strip()
+        if release:
+            return release
+    return "Singles"
+
+
+def _move_to_album(
+    path: Path,
+    *,
+    library_root: Path,
+    artist: str,
+    album: str,
+) -> Path:
+    source = path.resolve()
+    album_dir = (
+        library_root
+        / _safe_component(artist, "Unknown Artist")
+        / _safe_component(album, "Singles")
+    ).resolve()
+    album_dir.relative_to(library_root)
+    album_dir.mkdir(parents=True, exist_ok=True)
+
+    target = (album_dir / source.name).resolve()
+    target.relative_to(library_root)
+    if target == source:
+        return source
+
+    previous_parent = source.parent
+    if target.is_file() and target.stat().st_size >= 100 * 1024:
+        source.unlink(missing_ok=True)
+    else:
+        target.unlink(missing_ok=True)
+        source.replace(target)
+
+    try:
+        previous_parent.rmdir()
+    except OSError:
+        pass
+
+    return target
+
+
+def _retag_album(path: Path, album: str) -> None:
+    """Best-effort album correction after the generic import normalization."""
+    try:
+        audio = MutagenFile(path, easy=True)
+        if audio is None:
+            return
+        if audio.tags is None:
+            audio.add_tags()
+        audio["album"] = [album]
+        audio.save()
+    except Exception:
+        # The album folder still gives Navidrome a useful filesystem fallback.
+        return
 
 
 class ImportService:
     """Import authorized external audio into the normal Navidrome library tree.
 
-    Discovery's + action is library-first: no playlist is required. Imported
-    singles are stored under ``<MusicFolder>/<Artist>/Singles`` so they behave
-    like ordinary local-library tracks instead of living in a separate staging
-    folder.
+    Discovery's + action is library-first: no playlist is required. When the
+    Discovery candidate includes release metadata, imports are stored under
+    ``<MusicFolder>/<Artist>/<Release>`` and tagged with that album name.
+    ``Singles`` remains the fallback when no reliable release is available.
     """
 
     def __init__(
@@ -82,6 +154,7 @@ class ImportService:
             if self.preview_cache is not None
             else None
         )
+        album = _album_name(discovery_candidate)
 
         existing = await self.navidrome.search(f"{artist} {title}", count=20)
         if exact := _exact_song(existing, artist, title):
@@ -133,6 +206,15 @@ class ImportService:
             artist=artist,
             title=title,
         )
+
+        output = await asyncio.to_thread(
+            _move_to_album,
+            output,
+            library_root=self._library_root(),
+            artist=artist,
+            album=album,
+        )
+        await asyncio.to_thread(_retag_album, output, album)
 
         if discovery_candidate is not None:
             recording_mbid = str(
