@@ -200,8 +200,60 @@ for iphone_token, watch_token, label in parity_pairs:
     require(product_views, iphone_token, f"iPhone {label}")
     require(watch_views + "\n" + watch_discovery, watch_token, f"Watch {label}")
 
-# Discovery feedback and source rejection must be reversible on Watch and the
-# transport must support clearing the persisted source-rejection row.
+# Automatic API parity gate. Any new server-backed product behavior wired into
+# the iPhone UI must also be represented in the Watch gateway, unless it is a
+# presentation-only helper explicitly listed here. This turns future iPhone API
+# additions into a CI failure instead of a silent Watch feature gap.
+iphone_product_api_calls = set(re.findall(r"WaxloomAPI\.([A-Za-z0-9_]+)", product_views))
+watch_gateway_api_calls = set(re.findall(r"WaxloomAPI\.([A-Za-z0-9_]+)", catalog_service))
+presentation_only_api_calls = {"coverURL"}
+missing_watch_api_parity = sorted(
+    iphone_product_api_calls
+    - watch_gateway_api_calls
+    - presentation_only_api_calls
+)
+if missing_watch_api_parity:
+    errors.append(
+        "iPhone/Watch API parity missing in WatchCatalogService: "
+        + ", ".join(missing_watch_api_parity)
+    )
+
+# Discovery feedback/source rejection must be reversible on BOTH devices.
+require(
+    product_views,
+    "candidate.feedback == -1 ? 0 : -1",
+    "iPhone Less toggle semantics",
+)
+require(
+    product_views,
+    "@State private var rejectedSourceMbids: Set<String> = []",
+    "iPhone bad-source reversible state",
+)
+require(
+    product_views,
+    "let nextRejected = !rejected",
+    "iPhone bad-source toggle semantics",
+)
+require(
+    product_views,
+    "value: nextRejected ? 1 : 0",
+    "iPhone bad-source reject/undo transport",
+)
+require(
+    product_views,
+    "candidates[index].feedback = value",
+    "iPhone feedback keeps candidate available for undo",
+)
+forbid(
+    product_views,
+    "if value < 0 { candidates.remove(at: index) }",
+    "iPhone Less must remain undoable",
+)
+forbid(
+    product_views,
+    "private func rejectBadSource(",
+    "iPhone bad-source action must be a toggle",
+)
 require(watch_discovery, "let nextValue = currentFeedback == target ? 0 : target", "Watch Like/Less toggle semantics")
 require(watch_discovery, "let next = !sourceRejected", "Watch bad-source undo state")
 require(watch_discovery, "remote.setBadSource(item, rejected: next)", "Watch bad-source reversible action")
@@ -290,6 +342,11 @@ require(
     "Bad-source rejection can be undone",
 )
 require(api_client, "value: persistedValue", "Bad-source encoded feedback value")
+
+# Deliberate platform exception: server endpoint editing/connection setup stays
+# iPhone-only because watchOS is a companion and never owns provider/server
+# credentials. This is architecture, not a product-parity gap.
+require(watch_project, "WKRunsIndependentlyOfCompanionApp: false", "Server-settings parity exception requires companion architecture")
 
 # Full server API adapters stay centralized in the iPhone client.
 for function in (
