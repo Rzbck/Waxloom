@@ -24,7 +24,16 @@ enum WatchCatalogService {
                 switch item.kind {
                 case .song:
                     let song = try await WaxloomAPI.song(baseURL: baseURL, id: item.id)
-                    player.play(song: song, queue: [song], baseURL: baseURL)
+                    let requestedQueue = (request.items ?? [])
+                        .filter { $0.kind == .song }
+                    let queueItems = requestedQueue.contains(where: { $0.id == item.id })
+                        ? requestedQueue
+                        : [item]
+                    var queue = queueItems.map(songFromCatalogItem)
+                    if let currentIndex = queue.firstIndex(where: { $0.id == song.id }) {
+                        queue[currentIndex] = song
+                    }
+                    player.play(song: song, queue: queue, baseURL: baseURL)
                     return .success(token: request.token, title: "Playing", message: song.title ?? "Track")
 
                 case .discovery:
@@ -407,6 +416,26 @@ enum WatchCatalogService {
             coverArt: value.coverArt,
             duration: value.duration,
             starred: !(value.starred ?? "").isEmpty
+        )
+    }
+
+    private static func songFromCatalogItem(_ item: WatchCatalogItem) -> WaxloomSong {
+        WaxloomSong(
+            id: item.id,
+            title: item.title,
+            artist: item.subtitle,
+            artistId: nil,
+            album: item.detail,
+            albumId: nil,
+            coverArt: item.coverArt,
+            duration: item.duration,
+            track: nil,
+            discNumber: nil,
+            year: nil,
+            genre: nil,
+            suffix: nil,
+            starred: item.starred ? "watch" : nil,
+            musicBrainzId: nil
         )
     }
 
