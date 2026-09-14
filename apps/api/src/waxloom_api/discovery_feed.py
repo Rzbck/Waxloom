@@ -15,10 +15,14 @@ from typing import Any
 
 from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
-from waxloom_api.discovery_quality import youtube_track_quality
+from waxloom_api.discovery_quality import (
+    normalize_youtube_track,
+    youtube_track_identity,
+    youtube_track_quality,
+)
 from waxloom_api.youtube_dig import dig_youtube_gems
 
-_FEED_VERSION = 6
+_FEED_VERSION = 7
 
 _STYLE_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("post-punk", ("post punk", "coldwave", "darkwave", "new wave", "goth", "shoegaze", "dream pop")),
@@ -210,13 +214,34 @@ class DiscoveryFeedEngine:
                     raw_gems = []
 
                 rejected_quality: Counter[str] = Counter()
-                gems: list[dict[str, Any]] = []
-                for gem in raw_gems:
+                duplicate_variants = 0
+                by_identity: dict[tuple[str, str], dict[str, Any]] = {}
+                for raw_gem in raw_gems:
+                    gem = normalize_youtube_track(raw_gem)
                     keep, reason = youtube_track_quality(gem)
-                    if keep:
-                        gems.append(gem)
-                    else:
+                    if not keep:
                         rejected_quality[reason] += 1
+                        continue
+
+                    identity = youtube_track_identity(gem)
+                    if not all(identity):
+                        rejected_quality["missing-canonical-identity"] += 1
+                        continue
+
+                    previous = by_identity.get(identity)
+                    if previous is None:
+                        by_identity[identity] = gem
+                        continue
+
+                    duplicate_variants += 1
+                    if float(gem.get("rank") or 0.0) > float(previous.get("rank") or 0.0):
+                        by_identity[identity] = gem
+
+                gems = sorted(
+                    by_identity.values(),
+                    key=lambda item: float(item.get("rank") or 0.0),
+                    reverse=True,
+                )
 
                 external = snapshot.setdefault("external", {})
                 existing = [item for item in external.get("items") or [] if isinstance(item, dict)]
@@ -233,7 +258,8 @@ class DiscoveryFeedEngine:
                     diagnostics["youtube_dig_candidates"] = len(gems)
                     diagnostics["youtube_dig_candidates_before_quality"] = len(raw_gems)
                     diagnostics["youtube_dig_quality_rejections"] = dict(rejected_quality)
-                    diagnostics["youtube_dig_engine"] = "v3-age-aware-crate-quality"
+                    diagnostics["youtube_dig_duplicate_variants"] = duplicate_variants
+                    diagnostics["youtube_dig_engine"] = "v4-age-aware-crate-quality-dedupe"
                     era_counts = Counter(
                         str(item.get("discovery_era") or "unknown")
                         for item in gems
