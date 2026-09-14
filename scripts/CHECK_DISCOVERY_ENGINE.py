@@ -9,6 +9,7 @@ from waxloom_api.discovery import (
     _catalog_underground_share,
     _listenbrainz_underground_share,
 )
+from waxloom_api.discovery_feed import DiscoveryFeedEngine
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
 from waxloom_api.discovery_quality import (
     normalize_youtube_track,
@@ -178,6 +179,65 @@ def main() -> None:
         summary = store.summary()
         require(summary["likes"] == 1, "imports must not masquerade as explicit Likes")
         require(summary["imports"] == 1, "import signal must be tracked separately")
+        require(
+            store.was_imported(
+                "mbid-import",
+                artist="Artist B",
+                title="Song B",
+            ),
+            "exact imported recording must be recognized",
+        )
+        require(
+            store.was_imported(
+                "yt:alternate-video",
+                artist="Artist B",
+                title="Song B",
+            ),
+            "alternate source for imported artist/title must be recognized",
+        )
+
+        engine = DiscoveryFeedEngine(
+            service_factory=lambda: None,  # not started in this invariant
+            state_dir=Path(temp),
+        )
+        require(
+            engine._rotation_seconds == 20 * 60,
+            "Discovery membership rotation must be 20 minutes",
+        )
+
+        engine._feedback.record_import(
+            recording_mbid="yt:already-added",
+            artist="Imported Artist",
+            title="Imported Song",
+            tags=["coldwave"],
+        )
+        pool = engine._rotation_pool(
+            [
+                {
+                    "recording_mbid": "yt:already-added",
+                    "artist": "Imported Artist",
+                    "title": "Imported Song",
+                    "source": "youtube_dig",
+                    "rank": 0.9,
+                },
+                {
+                    "recording_mbid": "yt:new-candidate",
+                    "artist": "New Artist",
+                    "title": "New Song",
+                    "source": "youtube_dig",
+                    "rank": 0.8,
+                },
+            ],
+            slot=123,
+        )
+        require(
+            all(
+                row["recording_mbid"] != "yt:already-added"
+                for row in pool
+            ),
+            "imported tracks must be removed from future rotations",
+        )
+
         profile = store.query_profile()
         require(profile["tag_scores"].get("coldwave", 0) > 0, "explicit Like tag must train query profile")
         require(profile["tag_scores"].get("dub techno", 0) > 0, "import tag must train query profile")

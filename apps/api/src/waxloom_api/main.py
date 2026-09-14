@@ -389,7 +389,7 @@ async def discovery_feed() -> dict[str, object]:
     require_navidrome()
     feed = discovery_feed_engine.feed()
     await preview_cache().sync_feed(feed)
-    return feed
+    return discovery_feed_engine.feed(playable_only=True)
 
 
 @app.get("/api/discovery/feed/status")

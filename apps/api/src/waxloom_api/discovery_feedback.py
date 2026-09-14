@@ -166,6 +166,31 @@ class DiscoveryFeedbackStore:
         self._reload_if_changed()
         return recording_mbid in self._source_rejections
 
+    def was_imported(
+        self,
+        recording_mbid: str,
+        *,
+        artist: str = "",
+        title: str = "",
+    ) -> bool:
+        """Return True for an imported recording or the same artist/title identity."""
+
+        self._reload_if_changed()
+        recording_mbid = recording_mbid.strip()
+        if recording_mbid and recording_mbid in self._imports:
+            return True
+
+        artist_key = _norm(artist)
+        title_key = _norm(title)
+        if not artist_key or not title_key:
+            return False
+
+        return any(
+            _norm(str(row.get("artist") or "")) == artist_key
+            and _norm(str(row.get("title") or "")) == title_key
+            for row in self._imports.values()
+        )
+
     def exact(self, recording_mbid: str) -> int:
         # Rejected sources are hidden by the same feed filtering mechanism as
         # an exact negative, but they are kept out of the musical taste model.

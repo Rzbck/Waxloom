@@ -22,7 +22,7 @@ from waxloom_api.discovery_quality import (
 )
 from waxloom_api.youtube_dig import dig_youtube_gems
 
-_FEED_VERSION = 7
+_FEED_VERSION = 8
 
 _STYLE_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("post-punk", ("post punk", "coldwave", "darkwave", "new wave", "goth", "shoegaze", "dream pop")),
@@ -49,7 +49,7 @@ class DiscoveryFeedEngine:
         service_factory: Callable[[], DiscoveryService],
         state_dir: Path,
         refresh_seconds: int = 4 * 60 * 60,
-        rotation_seconds: int = 60 * 60,
+        rotation_seconds: int = 20 * 60,
         pool_size: int = 120,
         visible_size: int = 60,
     ) -> None:
@@ -97,6 +97,47 @@ class DiscoveryFeedEngine:
         if tags:
             return re.sub(r"[^\w]+", " ", tags[0]).strip() or "other"
         return "other"
+
+    def _preview_ready(self, item: dict[str, Any]) -> bool:
+        """Only expose candidates whose cached M4A is already playable."""
+
+        recording_mbid = str(item.get("recording_mbid") or "").strip()
+        if not recording_mbid:
+            return False
+
+        digest = hashlib.sha256(
+            recording_mbid.encode("utf-8", errors="ignore")
+        ).hexdigest()[:32]
+
+        entry_dir = (
+            self._state_dir
+            / "discovery-preview-cache"
+            / digest
+        )
+        metadata_path = entry_dir / "metadata.json"
+
+        try:
+            payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+
+        if not isinstance(payload, dict) or int(payload.get("version") or 0) != 2:
+            return False
+
+        relative = Path(str(payload.get("playback_path") or ""))
+        if relative.is_absolute():
+            return False
+
+        try:
+            root = entry_dir.resolve()
+            playback = (entry_dir / relative).resolve()
+            playback.relative_to(root)
+            return (
+                playback.suffix.casefold() == ".m4a"
+                and playback.stat().st_size >= 100 * 1024
+            )
+        except (OSError, ValueError):
+            return False
 
     def _load_persisted(self) -> None:
         try:
@@ -333,12 +374,73 @@ class DiscoveryFeedEngine:
                 break
         return output
 
+    def _rotation_pool(
+        self,
+        items: list[dict[str, Any]],
+        slot: int,
+    ) -> list[dict[str, Any]]:
+        """Rotate actual membership, not merely the order of the same tracks."""
+
+        source_limits = {
+            "listenbrainz": 16,
+            "youtube_dig": 12,
+            "musicbrainz_catalog": 16,
+        }
+
+        by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        uncapped: list[dict[str, Any]] = []
+
+        for item in items:
+            mbid = str(item.get("recording_mbid") or "")
+            artist = str(item.get("artist") or "")
+            title = str(item.get("title") or "")
+
+            if self._feedback.exact(mbid) < 0:
+                continue
+            if self._feedback.was_imported(
+                mbid,
+                artist=artist,
+                title=title,
+            ):
+                continue
+
+            source = str(item.get("source") or "")
+            if source in source_limits:
+                by_source[source].append(item)
+            else:
+                uncapped.append(item)
+
+        def rotation_score(item: dict[str, Any]) -> float:
+            mbid = str(item.get("recording_mbid") or "")
+            digest = hashlib.sha1(
+                f"{slot}:membership:{mbid}".encode(
+                    "utf-8",
+                    errors="ignore",
+                )
+            ).hexdigest()
+            jitter = int(digest[:8], 16) / 0xFFFFFFFF
+            return self._candidate_score(item) * 0.72 + jitter * 0.28
+
+        selected: list[dict[str, Any]] = []
+
+        for source, limit in source_limits.items():
+            rows = by_source.get(source, [])
+            rows.sort(key=rotation_score, reverse=True)
+            selected.extend(rows[:limit])
+
+        uncapped.sort(key=rotation_score, reverse=True)
+        selected.extend(
+            uncapped[: max(0, self._visible_size - len(selected))]
+        )
+
+        return selected
+
     def _rotated_items(self, items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
         slot = int(time.time() // self._rotation_seconds)
+        rotation_items = self._rotation_pool(items, slot)
+
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for item in items:
-            if self._feedback.exact(str(item.get("recording_mbid") or "")) < 0:
-                continue
+        for item in rotation_items:
             artist = self._artist_key(str(item.get("artist") or "unknown artist"))
             grouped[artist].append(item)
 
@@ -370,13 +472,12 @@ class DiscoveryFeedEngine:
                 break
             depth += 1
 
-        output = self._style_balanced(output, items)
+        output = self._style_balanced(output, rotation_items)
 
         dig_items = [
             item
-            for item in items
+            for item in rotation_items
             if item.get("source") == "youtube_dig"
-            and self._feedback.exact(str(item.get("recording_mbid") or "")) >= 0
         ]
         if dig_items:
             def dig_score(item: dict[str, Any]) -> float:
@@ -402,7 +503,7 @@ class DiscoveryFeedEngine:
 
         return output[: self._visible_size], slot
 
-    def feed(self) -> dict[str, Any]:
+    def feed(self, *, playable_only: bool = False) -> dict[str, Any]:
         if self._snapshot is None:
             return {
                 "status": self._status,
@@ -420,9 +521,23 @@ class DiscoveryFeedEngine:
         external = snapshot.setdefault("external", {})
         source_items = [item for item in external.get("items") or [] if isinstance(item, dict)]
         visible, rotation_id = self._rotated_items(source_items)
+
+        before_playable_filter = len(visible)
+        if playable_only:
+            visible = [
+                item
+                for item in visible
+                if self._preview_ready(item)
+            ]
+
         external["items"] = visible
         external["count"] = len(visible)
         external["pool_count"] = len(source_items)
+        external["unplayable_hidden"] = (
+            before_playable_filter - len(visible)
+            if playable_only
+            else 0
+        )
 
         next_refresh = None
         if self._snapshot_epoch is not None:

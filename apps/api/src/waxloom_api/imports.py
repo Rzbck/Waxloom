@@ -77,20 +77,37 @@ class ImportService:
         # library-first and never require a playlist destination.
         _ = playlist_id
 
+        discovery_candidate = (
+            self.preview_cache.candidate_by_identity(artist, title)
+            if self.preview_cache is not None
+            else None
+        )
+
         existing = await self.navidrome.search(f"{artist} {title}", count=20)
         if exact := _exact_song(existing, artist, title):
+            if discovery_candidate is not None:
+                recording_mbid = str(
+                    discovery_candidate.get("recording_mbid") or ""
+                )
+                self.feedback.record_import(
+                    recording_mbid=recording_mbid,
+                    artist=str(discovery_candidate.get("artist") or artist),
+                    title=str(discovery_candidate.get("title") or title),
+                    tags=[
+                        str(tag)
+                        for tag in discovery_candidate.get("tags") or []
+                        if str(tag).strip()
+                    ],
+                )
+                if self.preview_cache is not None and recording_mbid:
+                    await self.preview_cache.evict(recording_mbid)
+
             return {
                 "status": "already_local",
                 "song": exact,
                 "playlist_added": False,
                 "playlist_pending": False,
             }
-
-        discovery_candidate = (
-            self.preview_cache.candidate_by_identity(artist, title)
-            if self.preview_cache is not None
-            else None
-        )
 
         output: Path | None = None
         if self.preview_cache is not None:
@@ -111,8 +128,11 @@ class ImportService:
             )
 
         if discovery_candidate is not None:
+            recording_mbid = str(
+                discovery_candidate.get("recording_mbid") or ""
+            )
             self.feedback.record_import(
-                recording_mbid=str(discovery_candidate.get("recording_mbid") or ""),
+                recording_mbid=recording_mbid,
                 artist=str(discovery_candidate.get("artist") or artist),
                 title=str(discovery_candidate.get("title") or title),
                 tags=[
@@ -121,6 +141,8 @@ class ImportService:
                     if str(tag).strip()
                 ],
             )
+            if self.preview_cache is not None and recording_mbid:
+                await self.preview_cache.evict(recording_mbid)
 
         await self.navidrome.start_scan(full_scan=False)
         indexed_song: dict[str, Any] | None = None
