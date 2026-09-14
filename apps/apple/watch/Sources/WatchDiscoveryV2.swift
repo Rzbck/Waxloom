@@ -167,6 +167,7 @@ struct WatchDiscoveryDashboardV2: View {
                         WatchDiscoveryItemActionsV2(
                             remote: remote,
                             item: item,
+                            queue: shelfItems,
                             onUpdate: { updated in
                                 if let index = items.firstIndex(where: { $0.id == updated.id }) {
                                     items[index] = updated
@@ -263,6 +264,7 @@ struct WatchDiscoveryItemActionsV2: View {
     @ObservedObject var remote: WatchRemoteModel
     @State var item: WatchCatalogItem
 
+    let queue: [WatchCatalogItem]
     let onUpdate: (WatchCatalogItem) -> Void
     let onImported: () -> Void
 
@@ -424,7 +426,7 @@ struct WatchDiscoveryItemActionsV2: View {
         }
 
         Task {
-            let result = await remote.play(item)
+            let result = await remote.playDiscovery(item, queue: queue)
             message = result.message ?? result.title
         }
     }
