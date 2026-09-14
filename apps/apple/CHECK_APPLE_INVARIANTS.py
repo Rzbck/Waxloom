@@ -83,7 +83,7 @@ require(watch_remote, "WCSession.default.isReachable", "Immediate-only Watch con
 require(catalog_wire, 'payloadType = "waxloom_catalog_wire_v1"', "Watch catalog protocol")
 require(catalog_wire, "requestTTL: TimeInterval = 20", "Watch catalog request expiry")
 for action in (
-    "load", "play", "toggleStar", "discoveryFeedback", "badSource",
+    "load", "play", "toggleStar", "discoveryFeedback", "badSource", "refreshDiscovery",
     "createPlaylist", "deletePlaylist", "addToPlaylist", "removeFromPlaylist",
     "youtubeSearch", "youtubeImport",
 ):
@@ -165,6 +165,12 @@ require(product_views, "player.playPreview(candidate: candidate, queue: queue, b
 require(watch_discovery, "queue: shelfItems", "Watch Discovery detail receives its shelf queue")
 require(watch_discovery, "remote.playDiscovery(item, queue: queue)", "Watch Discovery Play sends its shelf queue")
 
+# Discovery refresh is a product action, not an iPhone-only convenience.
+require(product_views, "WaxloomAPI.refreshDiscoveryFeed", "iPhone Discovery refresh")
+require(catalog_service, "case .refreshDiscovery:", "Watch gateway Discovery refresh")
+require(watch_remote, "func refreshDiscovery()", "Watch Discovery refresh transport")
+require(watch_discovery, "remote.refreshDiscovery()", "Watch Discovery refresh UI")
+
 # Player controls exposed by iPhone must remain remotely equivalent on Watch.
 for control in ("playPause", "next", "previous", "seekBackward15", "seekForward15"):
     require(shared_wire, control, f"Cross-device player control {control}")
@@ -186,6 +192,7 @@ parity_pairs = (
     ("songIndexesToRemove", "remote.removeFromPlaylist", "playlist remove track"),
     ("WaxloomAPI.search", "route: .search", "library search"),
     ("WaxloomAPI.discoveryFeedback", "remote.discoveryFeedback", "Discovery feedback"),
+    ("WaxloomAPI.refreshDiscoveryFeed", "remote.refreshDiscovery", "Discovery feed refresh"),
     ("WaxloomAPI.youtubeSearch", "remote.youtubeSearch", "authorized source search"),
     ("WaxloomAPI.youtubeImport", "remote.youtubeImport", "authorized media import"),
 )
