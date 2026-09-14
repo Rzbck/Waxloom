@@ -735,6 +735,7 @@ private struct ProductDiscoveryView: View {
     @State private var pendingAuthorizationCandidate: WaxloomDiscoveryCandidate?
     @State private var manualImportCandidate: WaxloomDiscoveryCandidate?
     @State private var importMessage: String?
+    @State private var rejectedSourceMbids: Set<String> = []
     @AppStorage("waxloom.authorizedMediaImports.v1")
     private var importAuthorized = false
 
@@ -902,8 +903,11 @@ private struct ProductDiscoveryView: View {
                     Task { await feedback(candidate, value: candidate.feedback == 1 ? 0 : 1) }
                 }
 
-                ProductCapsuleButton(symbol: "hand.thumbsdown", label: "Less") {
-                    Task { await feedback(candidate, value: -1) }
+                ProductCapsuleButton(
+                    symbol: candidate.feedback == -1 ? "hand.thumbsdown.fill" : "hand.thumbsdown",
+                    label: "Less"
+                ) {
+                    Task { await feedback(candidate, value: candidate.feedback == -1 ? 0 : -1) }
                 }
 
                 Button {
@@ -928,13 +932,14 @@ private struct ProductDiscoveryView: View {
                 )
 
                 if candidate.source == "youtube_dig" {
-                    Button { Task { await rejectBadSource(candidate) } } label: {
-                        Image(systemName: "xmark.circle")
-                            .foregroundStyle(.orange)
+                    let rejected = rejectedSourceMbids.contains(candidate.recordingMbid)
+                    Button { Task { await toggleBadSource(candidate) } } label: {
+                        Image(systemName: rejected ? "arrow.uturn.backward.circle.fill" : "xmark.circle")
+                            .foregroundStyle(rejected ? Color.green : Color.orange)
                             .frame(width: 36, height: 36)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Bad or non-music source")
+                    .accessibilityLabel(rejected ? "Undo bad source" : "Bad or non-music source")
                 } else {
                     Color.clear
                         .frame(width: 36, height: 36)
@@ -1224,6 +1229,7 @@ private struct ProductDiscoveryView: View {
             let feed = try await WaxloomAPI.discoveryFeed(baseURL: base)
             status = feed.status
             candidates = feed.external.items.filter { ($0.feedback ?? 0) >= 0 }.sorted { $0.rank > $1.rank }
+            rejectedSourceMbids = rejectedSourceMbids.intersection(Set(candidates.map(\.recordingMbid)))
             error = nil
         } catch { self.error = error.localizedDescription }
     }
@@ -1239,21 +1245,29 @@ private struct ProductDiscoveryView: View {
         do {
             try await WaxloomAPI.discoveryFeedback(baseURL: base, candidate: candidate, value: value)
             if let index = candidates.firstIndex(where: { $0.recordingMbid == candidate.recordingMbid }) {
-                if value < 0 { candidates.remove(at: index) }
-                else { candidates[index].feedback = value }
+                candidates[index].feedback = value
             }
         } catch { self.error = error.localizedDescription }
     }
 
-    private func rejectBadSource(_ candidate: WaxloomDiscoveryCandidate) async {
+    private func toggleBadSource(_ candidate: WaxloomDiscoveryCandidate) async {
         guard candidate.source == "youtube_dig", let base = connection.baseURL else { return }
-        let old = candidates
-        candidates.removeAll { $0.recordingMbid == candidate.recordingMbid }
+        let rejected = rejectedSourceMbids.contains(candidate.recordingMbid)
+        let nextRejected = !rejected
         do {
-            // Bad source is deliberately separate from musical Less.
-            try await WaxloomAPI.discoveryFeedback(baseURL: base, candidate: candidate, value: 0, badSource: true)
+            try await WaxloomAPI.discoveryFeedback(
+                baseURL: base,
+                candidate: candidate,
+                value: nextRejected ? 1 : 0,
+                badSource: true
+            )
+            if nextRejected {
+                rejectedSourceMbids.insert(candidate.recordingMbid)
+            } else {
+                rejectedSourceMbids.remove(candidate.recordingMbid)
+            }
+            error = nil
         } catch {
-            candidates = old
             self.error = error.localizedDescription
         }
     }
