@@ -25,6 +25,17 @@ enum WatchCatalogService {
                     message: "Generating a new Discovery feed"
                 )
 
+            case .seek:
+                guard let position = request.position else {
+                    return .failure(token: request.token, message: "Missing playback position")
+                }
+                player.seek(to: max(0, position))
+                return .success(
+                    token: request.token,
+                    title: "Seeked",
+                    message: "Playback position updated"
+                )
+
             case .play:
                 guard let item = request.item else {
                     return .failure(token: request.token, message: "Missing media item")
