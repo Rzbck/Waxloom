@@ -1047,9 +1047,7 @@ private struct ProductDiscoveryView: View {
     }
 
     private var shelves: Shelves {
-        let ranked = candidates
-            .filter { ($0.feedback ?? 0) >= 0 }
-            .sorted { $0.rank > $1.rank }
+        let ranked = candidates.sorted { $0.rank > $1.rank }
 
         var used = Set<String>()
 
