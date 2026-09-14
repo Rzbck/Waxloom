@@ -25,6 +25,7 @@ enum WatchCatalogRoute: String, Codable, CaseIterable {
 enum WatchCatalogAction: String, Codable {
     case load
     case play
+    case seek
     case toggleStar
     case discoveryFeedback
     case badSource
@@ -77,6 +78,7 @@ struct WatchCatalogRequest: Codable {
     var title: String?
     var value: Int?
     var index: Int?
+    var position: Double?
     var authorized: Bool?
     var item: WatchCatalogItem?
     var items: [WatchCatalogItem]?
