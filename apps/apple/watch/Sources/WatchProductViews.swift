@@ -121,7 +121,12 @@ private struct WatchBrowseDashboard: View {
                     WatchMenuLink(remote: remote, title: "Artists", symbol: "person.2.fill", route: .artists)
                     WatchMenuLink(remote: remote, title: "Favorites", symbol: "heart.fill", route: .favorites)
                     WatchMenuLink(remote: remote, title: "Playlists", symbol: "music.note.list", route: .playlists)
-                    WatchMenuLink(remote: remote, title: "Discovery", symbol: "sparkles", route: .discovery)
+                    NavigationLink {
+                        WatchDiscoveryDashboard(remote: remote)
+                    } label: {
+                        WatchMenuTile(title: "Discovery", symbol: "sparkles")
+                    }
+                    .buttonStyle(.plain)
 
                     NavigationLink {
                         WatchSearchView(remote: remote)
@@ -133,12 +138,240 @@ private struct WatchBrowseDashboard: View {
                     NavigationLink {
                         WatchImportsView(remote: remote)
                     } label: {
-                        WatchMenuTile(title: "Imports", symbol: "arrow.down.circle.fill")
+                        WatchMenuTile(title: "Manual", symbol: "slider.horizontal.3")
                     }
                     .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 3)
+        }
+    }
+}
+
+private struct WatchDiscoveryDashboard: View {
+    @ObservedObject var remote: WatchRemoteModel
+
+    @AppStorage("waxloom.authorizedMediaImports.v1")
+    private var importAuthorized = false
+
+    @State private var items: [WatchCatalogItem] = []
+    @State private var loading = false
+    @State private var importingID: String?
+    @State private var pendingAuthorizationItem: WatchCatalogItem?
+    @State private var manualImportItem: WatchCatalogItem?
+    @State private var message: String?
+
+    var body: some View {
+        List {
+            if loading {
+                HStack {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                }
+            }
+
+            if let message {
+                Text(message)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(items) { item in
+                HStack(spacing: 6) {
+                    NavigationLink {
+                        WatchItemActionsView(
+                            remote: remote,
+                            item: item,
+                            playlistID: nil,
+                            playlistIndex: nil
+                        )
+                    } label: {
+                        WatchCatalogRow(item: item)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        beginQuickImport(item)
+                    } label: {
+                        Group {
+                            if importingID == item.id {
+                                ProgressView()
+                                    .controlSize(.mini)
+                            } else {
+                                Image(systemName: "plus.circle.fill")
+                                    .font(.system(size: 20, weight: .bold))
+                            }
+                        }
+                        .foregroundStyle(WatchProductStyle.accent)
+                        .frame(width: 34, height: 34)
+                        .background(
+                            WatchProductStyle.accent.opacity(0.12),
+                            in: Circle()
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(importingID != nil)
+                    .accessibilityLabel(
+                        importingID == item.id
+                            ? "Adding to library"
+                            : "Add to library"
+                    )
+                }
+            }
+
+            if items.isEmpty && !loading {
+                Text("Nothing here yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .navigationTitle("Discovery")
+        .task {
+            await load()
+        }
+        .navigationDestination(item: $manualImportItem) { item in
+            WatchImportsView(
+                remote: remote,
+                seedArtist: item.subtitle ?? "",
+                seedTitle: item.title
+            )
+        }
+        .alert(
+            "Authorized media import",
+            isPresented: Binding(
+                get: {
+                    pendingAuthorizationItem != nil
+                },
+                set: { shown in
+                    if !shown {
+                        pendingAuthorizationItem = nil
+                    }
+                }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                pendingAuthorizationItem = nil
+            }
+
+            Button("Confirm & import") {
+                guard let item = pendingAuthorizationItem else {
+                    return
+                }
+
+                pendingAuthorizationItem = nil
+                importAuthorized = true
+
+                Task {
+                    await quickImport(item)
+                }
+            }
+        } message: {
+            Text(
+                "Confirm that you are authorized to save media you import into your local library."
+            )
+        }
+    }
+
+    private func load() async {
+        loading = true
+
+        let result = await remote.load(route: .discovery)
+
+        items = result.items
+        message = result.ok ? nil : result.message
+        loading = false
+    }
+
+    private func beginQuickImport(_ item: WatchCatalogItem) {
+        guard importingID == nil else {
+            return
+        }
+
+        message = nil
+
+        if importAuthorized {
+            Task {
+                await quickImport(item)
+            }
+        } else {
+            pendingAuthorizationItem = item
+        }
+    }
+
+    private func quickImport(_ item: WatchCatalogItem) async {
+        guard importingID == nil else {
+            return
+        }
+
+        let artist = (item.subtitle ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let title = item.title
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !artist.isEmpty, !title.isEmpty else {
+            message = "Artist or track name is missing."
+            return
+        }
+
+        importingID = item.id
+        message = nil
+
+        defer {
+            importingID = nil
+        }
+
+        let sources = await remote.youtubeSearch(
+            artist: artist,
+            title: title
+        )
+
+        guard sources.ok else {
+            message = sources.message ?? "Source search failed."
+            return
+        }
+
+        guard let best = sources.items.max(by: {
+            ($0.score ?? 0) < ($1.score ?? 0)
+        }) else {
+            message = "No automatic source found. Choose one manually."
+            manualImportItem = item
+            return
+        }
+
+        guard (best.score ?? 0) >= 80 else {
+            message = "Automatic match is ambiguous. Choose the source manually."
+            manualImportItem = item
+            return
+        }
+
+        let result = await remote.youtubeImport(
+            item: best,
+            artist: artist,
+            title: title,
+            authorized: true
+        )
+
+        guard result.ok else {
+            message = result.message ?? "Import failed."
+            return
+        }
+
+        items.removeAll {
+            $0.id == item.id
+        }
+
+        switch result.status {
+        case "already_local":
+            message = "Already in your library."
+
+        case "imported":
+            message = "Added to your library."
+
+        default:
+            message = result.message
+                ?? "Saved. Navidrome is indexing it."
         }
     }
 }
@@ -463,7 +696,7 @@ private struct WatchItemActionsView: View {
                     NavigationLink {
                         WatchImportsView(remote: remote, seedArtist: item.subtitle ?? "", seedTitle: item.title)
                     } label: {
-                        Label("Import", systemImage: "arrow.down.circle")
+                        Label("Manual source", systemImage: "slider.horizontal.3")
                     }
                 }
 
@@ -682,7 +915,8 @@ private struct WatchImportCandidateView: View {
     let item: WatchCatalogItem
     let artist: String
     let title: String
-    @State private var authorized = false
+    @AppStorage("waxloom.authorizedMediaImports.v1")
+    private var authorized = false
     @State private var message: String?
     @State private var importing = false
 

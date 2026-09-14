@@ -105,6 +105,41 @@ for feature in (
 require(watch_views, "remote.rejectBadSource", "Watch bad-source action")
 require(watch_views, "remote.discoveryFeedback", "Watch Discovery feedback")
 require(watch_views, "remote.youtubeImport", "Watch authorized import")
+require(
+    watch_views,
+    "WatchDiscoveryDashboard",
+    "Watch dedicated Discovery dashboard",
+)
+require(
+    watch_views,
+    '@AppStorage("waxloom.authorizedMediaImports.v1")',
+    "Watch persistent import authorization",
+)
+require(
+    watch_views,
+    "beginQuickImport(item)",
+    "Watch Discovery one-tap import",
+)
+require(
+    watch_views,
+    "sources.items.max",
+    "Watch automatic best-source selection",
+)
+require(
+    watch_views,
+    "guard (best.score ?? 0) >= 80 else",
+    "Watch ambiguous-source fallback threshold",
+)
+require(
+    watch_views,
+    "manualImportItem = item",
+    "Watch manual-source fallback",
+)
+require(
+    watch_views,
+    "items.removeAll {",
+    "Watch imported Discovery candidate immediate removal",
+)
 
 # iPhone product surface and media semantics.
 for feature in (
