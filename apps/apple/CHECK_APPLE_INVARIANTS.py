@@ -226,7 +226,12 @@ require(product_views, "badSource: true", "iPhone bad-source marker")
 require(catalog_service, "badSource: true", "Watch bad-source marker")
 require(api_client, 'sourceRejectTag = "__waxloom_source:not_music__"', "Bad-source persistence tag")
 require(api_client, "let feedbackValue = badSource ? -1 : value", "Bad-source negative is source-only")
-require(api_client, "value: feedbackValue", "Bad-source encoded feedback value")
+require(
+    api_client,
+    "let persistedValue = badSource && value == 0 ? 0 : feedbackValue",
+    "Bad-source rejection can be undone",
+)
+require(api_client, "value: persistedValue", "Bad-source encoded feedback value")
 
 # Full server API adapters stay centralized in the iPhone client.
 for function in (
