@@ -41,16 +41,16 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
     private func receive(_ payload: [String: Any]) {
         guard let message = WaxloomWatchCodec.message(from: payload) else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.handle(message)
+            guard let self, let acknowledgement = self.acknowledgement(for: message) else { return }
+            self.sendAcknowledgement(acknowledgement)
         }
     }
 
-    private func handle(_ message: WaxloomWatchMessage) {
-        guard message.kind == .command, let token = message.token else { return }
+    private func acknowledgement(for message: WaxloomWatchMessage) -> WaxloomWatchMessage? {
+        guard message.kind == .command, let token = message.token else { return nil }
 
         if let previous = recentAcknowledgements[token] {
-            sendAcknowledgement(previous)
-            return
+            return previous
         }
 
         let now = Date().timeIntervalSince1970
@@ -59,11 +59,11 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
 
         if age < -5 || age > WaxloomWatchCodec.commandTTL {
             result = .expired
-        } else if message.sessionID != currentSnapshot.sessionID {
-            result = .sessionMismatch
-        } else if message.revision != currentSnapshot.revision {
-            result = .staleRevision
         } else if let command = message.command {
+            // The token + TTL already protect against duplicate/delayed commands.
+            // Do not reject Next/Previous simply because the Watch missed a newer
+            // snapshot revision while iOS was suspended. That made a valid button
+            // tap look accepted on the Watch but perform no transport action.
             result = commandHandler?(command) ?? .unavailable
         } else {
             result = .unsupported
@@ -75,7 +75,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
             snapshot: currentSnapshot
         )
         remember(acknowledgement, token: token)
-        sendAcknowledgement(acknowledgement)
+        return acknowledgement
     }
 
     private func remember(_ message: WaxloomWatchMessage, token: String) {
@@ -169,8 +169,25 @@ extension PhoneWatchBridge: WCSessionDelegate {
             return
         }
 
-        receive(message)
-        replyHandler(["ok": true])
+        if let playbackMessage = WaxloomWatchCodec.message(from: message) {
+            DispatchQueue.main.async { [weak self] in
+                guard
+                    let self,
+                    let acknowledgement = self.acknowledgement(for: playbackMessage),
+                    let payload = WaxloomWatchCodec.payload(acknowledgement)
+                else {
+                    replyHandler(["ok": false])
+                    return
+                }
+                // Reply on the same Watch -> iPhone request. This remains reliable
+                // even when the iOS app was just background-woken for the message;
+                // it no longer requires a second iPhone -> Watch live message.
+                replyHandler(payload)
+            }
+            return
+        }
+
+        replyHandler(["ok": false])
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
