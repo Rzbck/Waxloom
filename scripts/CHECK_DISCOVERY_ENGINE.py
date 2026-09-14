@@ -10,7 +10,11 @@ from waxloom_api.discovery import (
     _listenbrainz_underground_share,
 )
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
-from waxloom_api.discovery_quality import youtube_track_quality
+from waxloom_api.discovery_quality import (
+    normalize_youtube_track,
+    youtube_track_identity,
+    youtube_track_quality,
+)
 from waxloom_api.youtube_dig import (
     _freshness_bonus,
     _query_terms,
@@ -114,6 +118,35 @@ def main() -> None:
     require(keep_archive, "quality gate must not reject a real archive track because it is old")
     require(keep_fresh, "quality gate must keep a plausible current single")
     require(keep_vinyl_word, "quality gate must not reject track-like names merely containing vinyl language")
+
+    music_video = {
+        "artist": "POLYVINYL",
+        "title": "UNDERGROUND GIRL (OFFICIAL MUSIC VIDEO) | NORTH EAST INDIE-ALTERNATIVE ROCK",
+    }
+    lyric_video = {
+        "artist": "POLYVINYL",
+        "title": "UNDERGROUND GIRL (OFFICIAL LYRIC VIDEO) | NORTH EAST INDIE-ALTERNATIVE ROCK",
+    }
+    cleaned_music_video = normalize_youtube_track(music_video)
+    require(cleaned_music_video["title"] == "UNDERGROUND GIRL", "editorial video suffix must be removed")
+    require(
+        youtube_track_identity(music_video) == youtube_track_identity(lyric_video),
+        "alternate official video variants must collapse to one musical identity",
+    )
+
+    premiere = normalize_youtube_track(
+        {"artist": "PREMIERE Fank", "title": "Bakhtiari (Schall & Lauch) | exclusive"}
+    )
+    require(premiere["artist"] == "Fank", "editorial PREMIERE prefix must not become the artist")
+    require(premiere["title"] == "Bakhtiari (Schall & Lauch)", "trailing curator context must be removed")
+
+    legitimate_mix = normalize_youtube_track(
+        {"artist": "Hardtrax", "title": "Hands On Love (Original Hardtrax Mix) | House Music Vinyl 1996"}
+    )
+    require(
+        legitimate_mix["title"] == "Hands On Love (Original Hardtrax Mix)",
+        "legitimate track-version Mix text must be preserved",
+    )
 
     with tempfile.TemporaryDirectory() as temp:
         store = DiscoveryFeedbackStore(Path(temp) / "feedback.json")
