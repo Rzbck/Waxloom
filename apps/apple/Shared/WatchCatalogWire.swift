@@ -28,6 +28,7 @@ enum WatchCatalogAction: String, Codable {
     case toggleStar
     case discoveryFeedback
     case badSource
+    case refreshDiscovery
     case createPlaylist
     case deletePlaylist
     case addToPlaylist
