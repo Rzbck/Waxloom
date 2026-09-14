@@ -228,7 +228,7 @@ struct WatchDiscoveryDashboardV2: View {
     private func visibleItems(for shelf: WatchDiscoveryShelfV2) -> [WatchCatalogItem] {
         items.filter { item in
             let section = item.section ?? WatchDiscoveryShelfV2.closest.rawValue
-            return section == shelf.rawValue && (item.feedback ?? 0) >= 0
+            return section == shelf.rawValue
         }
     }
 
