@@ -10,6 +10,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     @Published private(set) var catalogMessage: String?
 
     private var pendingToken: String?
+    private var playbackQueuesByItemID: [String: [WatchCatalogItem]] = [:]
 
     override init() {
         super.init()
@@ -56,7 +57,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func load(route: WatchCatalogRoute, id: String? = nil, query: String? = nil) async -> WatchCatalogResponse {
-        await catalog(
+        let response = await catalog(
             WatchCatalogRequest(
                 action: .load,
                 route: route,
@@ -64,10 +65,21 @@ final class WatchRemoteModel: NSObject, ObservableObject {
                 query: query
             )
         )
+        if response.ok {
+            rememberPlaybackQueues(response.items)
+        }
+        return response
     }
 
     func play(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .play, item: item))
+        let queue = playbackQueuesByItemID[item.id] ?? [item]
+        return await catalog(
+            WatchCatalogRequest(
+                action: .play,
+                item: item,
+                items: queue
+            )
+        )
     }
 
     func playDiscovery(_ item: WatchCatalogItem, queue: [WatchCatalogItem]) async -> WatchCatalogResponse {
@@ -189,6 +201,18 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             self?.catalogMessage = response.ok ? response.message : response.message ?? "Request failed"
         }
         return response
+    }
+
+    private func rememberPlaybackQueues(_ items: [WatchCatalogItem]) {
+        let songs = items.filter { $0.kind == .song }
+        for item in songs {
+            playbackQueuesByItemID[item.id] = songs
+        }
+
+        let discovery = items.filter { $0.kind == .discovery }
+        for item in discovery {
+            playbackQueuesByItemID[item.id] = discovery
+        }
     }
 
     private func activate() {
