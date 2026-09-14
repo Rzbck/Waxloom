@@ -10,6 +10,7 @@ from waxloom_api.discovery import (
     _listenbrainz_underground_share,
 )
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
+from waxloom_api.discovery_quality import youtube_track_quality
 from waxloom_api.youtube_dig import (
     _freshness_bonus,
     _query_terms,
@@ -66,6 +67,39 @@ def main() -> None:
     require("fresh" in modes, "query planner must include current-release digging")
     require("evergreen" in modes, "query planner must retain evergreen digging")
     require(any("dub techno" in str(item.get("query")) for item in queries), "taste tags must influence queries")
+
+    bad_youtube_rows = [
+        {
+            "artist": "Phoebe, Descendents, Me First & More!",
+            "title": "New Releases for August 14, 2026!",
+        },
+        {
+            "artist": "STAY IN THE DARK",
+            "title": "Hypnotic Deep House Mix 2026 | Night Drive Music",
+        },
+        {
+            "artist": "Heavy Metal Will Not Get You Laid",
+            "title": "Vacation Vinyl - Record Shop Dude - Episode 5",
+        },
+        {
+            "artist": "Damon Albarn",
+            "title": "explores John Peel's record collection BBC Sounds",
+        },
+        {
+            "artist": "Breathing Machinery (Official Audio",
+            "title": "Underground Deep House",
+        },
+    ]
+    for row in bad_youtube_rows:
+        keep, reason = youtube_track_quality(row)
+        require(not keep, f"program/mix false positive must be rejected: {row!r} ({reason})")
+
+    keep_archive, _ = youtube_track_quality(
+        {"artist": "THE NEWS", "title": "It's A Long Time, 1969 Rare Private Press U.K Pop"}
+    )
+    keep_fresh, _ = youtube_track_quality({"artist": "Bow Anderson", "title": "New Wave"})
+    require(keep_archive, "quality gate must not reject a real archive track because it is old")
+    require(keep_fresh, "quality gate must keep a plausible current single")
 
     with tempfile.TemporaryDirectory() as temp:
         store = DiscoveryFeedbackStore(Path(temp) / "feedback.json")
