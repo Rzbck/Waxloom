@@ -70,6 +70,16 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         await catalog(WatchCatalogRequest(action: .play, item: item))
     }
 
+    func playDiscovery(_ item: WatchCatalogItem, queue: [WatchCatalogItem]) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .play,
+                item: item,
+                items: queue
+            )
+        )
+    }
+
     func toggleStar(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
         await catalog(WatchCatalogRequest(action: .toggleStar, item: item))
     }
