@@ -705,7 +705,7 @@ private struct ProductDiscoveryView: View {
             switch self {
             case .closest: return "BEST MATCHES"
             case .underground: return "YOUTUBE DIG · LOW EXPOSURE"
-            case .deep: return "CATALOGUE EXPLORATION"
+            case .deep: return "CATALOGUE · FARTHER MATCHES"
             }
         }
 
@@ -890,21 +890,109 @@ private struct ProductDiscoveryView: View {
         let ranked = candidates
             .filter { ($0.feedback ?? 0) >= 0 }
             .sorted { $0.rank > $1.rank }
+
         var used = Set<String>()
 
-        let closestPool = ranked.filter { $0.source != "youtube_dig" }
-        let closest = fillShelf(primary: closestPool, fallback: closestPool, used: &used, target: 20)
+        let listenbrainz = ranked.filter {
+            $0.source == "listenbrainz"
+        }
+
+        let catalogue = ranked.filter {
+            $0.source == "musicbrainz_catalog"
+        }
+
+        let otherMetadata = ranked.filter {
+            $0.source != "youtube_dig"
+                && $0.source != "listenbrainz"
+                && $0.source != "musicbrainz_catalog"
+        }
+
+        // Deep cuts gets catalogue first, then a bounded reserve
+        // of farther / rarer ListenBrainz candidates.
+        let deepListenbrainz = listenbrainz.sorted {
+            let leftDepth =
+                $0.underground * 0.65
+                + max(0.0, 1.0 - $0.rank) * 0.35
+
+            let rightDepth =
+                $1.underground * 0.65
+                + max(0.0, 1.0 - $1.rank) * 0.35
+
+            return leftDepth > rightDepth
+        }
+
+        let proportionalReserve =
+            listenbrainz.count < 2
+                ? 0
+                : max(
+                    1,
+                    Int(
+                        Double(listenbrainz.count) * 0.35
+                    )
+                )
+
+        let catalogueShortfall =
+            max(0, 6 - catalogue.count)
+
+        let deepFallbackQuota =
+            min(
+                6,
+                min(
+                    catalogueShortfall,
+                    proportionalReserve
+                )
+            )
+
+        let deepFallback = Array(
+            deepListenbrainz.prefix(
+                deepFallbackQuota
+            )
+        )
+
+        let deep = fillShelf(
+            primary: catalogue,
+            fallback: deepFallback,
+            used: &used,
+            target: 20
+        )
+
+        let closestPrimary =
+            (listenbrainz + otherMetadata)
+                .filter {
+                    !used.contains(
+                        $0.recordingMbid
+                    )
+                }
+                .sorted {
+                    $0.rank > $1.rank
+                }
+
+        let closest = fillShelf(
+            primary: closestPrimary,
+            fallback: closestPrimary,
+            used: &used,
+            target: 20
+        )
 
         let youtubeDigPrimary = ranked
-            .filter { $0.source == "youtube_dig" }
-            .sorted {
-                ($0.underground + $0.rank * 0.25) > ($1.underground + $1.rank * 0.25)
+            .filter {
+                $0.source == "youtube_dig"
             }
-        let rareMetadataFallback = ranked
-            .filter { $0.source == "listenbrainz" && $0.underground >= 0.82 }
             .sorted {
-                ($0.underground + $0.rank * 0.15) > ($1.underground + $1.rank * 0.15)
+                ($0.underground + $0.rank * 0.25)
+                    > ($1.underground + $1.rank * 0.25)
             }
+
+        let rareMetadataFallback = listenbrainz
+            .filter {
+                !used.contains($0.recordingMbid)
+                    && $0.underground >= 0.82
+            }
+            .sorted {
+                ($0.underground + $0.rank * 0.15)
+                    > ($1.underground + $1.rank * 0.15)
+            }
+
         let underground = fillShelf(
             primary: youtubeDigPrimary,
             fallback: rareMetadataFallback,
@@ -912,10 +1000,11 @@ private struct ProductDiscoveryView: View {
             target: 28
         )
 
-        let deepPrimary = ranked.filter { $0.source == "musicbrainz_catalog" }
-        let deep = fillShelf(primary: deepPrimary, fallback: closestPool, used: &used, target: 20)
-
-        return Shelves(closest: closest, underground: underground, deep: deep)
+        return Shelves(
+            closest: closest,
+            underground: underground,
+            deep: deep
+        )
     }
 
     private func items(for value: Lane) -> [WaxloomDiscoveryCandidate] {
