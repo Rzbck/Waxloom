@@ -71,6 +71,15 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         return response
     }
 
+    func refreshDiscovery() async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .refreshDiscovery,
+                route: .discovery
+            )
+        )
+    }
+
     func play(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
         let queue = playbackQueuesByItemID[item.id] ?? [item]
         return await catalog(
