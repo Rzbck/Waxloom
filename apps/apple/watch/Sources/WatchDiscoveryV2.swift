@@ -149,6 +149,16 @@ struct WatchDiscoveryDashboardV2: View {
                 Text(shelf.rawValue.uppercased())
                     .font(.system(size: 9, weight: .black))
                 Spacer()
+                Button {
+                    Task { await refreshFeed() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(WatchDiscoveryStyleV2.accent)
+                }
+                .buttonStyle(.plain)
+                .disabled(loading)
+                .accessibilityLabel("Generate new Discovery feed")
                 Text("\(shelfItems.count)")
                     .font(.system(size: 8, weight: .bold, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -228,6 +238,19 @@ struct WatchDiscoveryDashboardV2: View {
         items = result.items
         message = result.ok ? nil : result.message
         loading = false
+    }
+
+    private func refreshFeed() async {
+        guard !loading else { return }
+        loading = true
+        message = nil
+        let result = await remote.refreshDiscovery()
+        guard result.ok else {
+            message = result.message ?? "Could not refresh Discovery."
+            loading = false
+            return
+        }
+        await load()
     }
 
     private func beginQuickImport(_ item: WatchCatalogItem) {
