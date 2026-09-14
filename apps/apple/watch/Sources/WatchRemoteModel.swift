@@ -12,6 +12,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
 
     private var pendingToken: String?
     private var playbackQueuesByItemID: [String: [WatchCatalogItem]] = [:]
+    private let discoveryCacheKey = "waxloom.watch.discovery.cache.v1"
 
     override init() {
         super.init()
@@ -22,7 +23,6 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         guard
             WCSession.isSupported(),
             WCSession.default.activationState == .activated,
-            WCSession.default.isReachable,
             pendingToken == nil
         else {
             lastResult = .unavailable
@@ -40,12 +40,33 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         pendingCommand = command
         lastResult = nil
 
-        WCSession.default.sendMessage(payload, replyHandler: nil) { [weak self] _ in
+        // Do not preflight isReachable here. A live message originating from the
+        // active Watch can wake the companion iOS app in the background. Gating
+        // on isReachable prevented exactly that wake-up and made controls depend
+        // on the iPhone app already being open.
+        WCSession.default.sendMessage(payload) { [weak self] reply in
+            DispatchQueue.main.async {
+                guard let self, self.pendingToken == token else { return }
+                guard
+                    let acknowledgement = WaxloomWatchCodec.message(from: reply),
+                    acknowledgement.kind == .acknowledgement,
+                    acknowledgement.token == token
+                else {
+                    self.pendingToken = nil
+                    self.pendingCommand = nil
+                    self.lastResult = .unsupported
+                    return
+                }
+                self.phoneReachable = true
+                self.apply(acknowledgement)
+            }
+        } errorHandler: { [weak self] _ in
             DispatchQueue.main.async {
                 guard self?.pendingToken == token else { return }
                 self?.pendingToken = nil
                 self?.pendingCommand = nil
                 self?.lastResult = .unavailable
+                self?.phoneReachable = false
             }
         }
 
@@ -58,17 +79,27 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func load(route: WatchCatalogRoute, id: String? = nil, query: String? = nil) async -> WatchCatalogResponse {
-        let response = await catalog(
-            WatchCatalogRequest(
-                action: .load,
-                route: route,
-                id: id,
-                query: query
-            )
+        let request = WatchCatalogRequest(
+            action: .load,
+            route: route,
+            id: id,
+            query: query
         )
+        let response = await catalog(request)
+
         if response.ok {
             rememberPlaybackQueues(response.items)
+            if route == .discovery {
+                cacheDiscovery(response)
+            }
+            return response
         }
+
+        if route == .discovery, let cached = cachedDiscovery(token: request.token) {
+            rememberPlaybackQueues(cached.items)
+            return cached
+        }
+
         return response
     }
 
@@ -210,10 +241,9 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         guard
             WCSession.isSupported(),
             WCSession.default.activationState == .activated,
-            WCSession.default.isReachable,
             let payload = WatchCatalogCodec.payload(request)
         else {
-            return .failure(token: request.token, message: "iPhone not reachable")
+            return .failure(token: request.token, message: "iPhone bridge unavailable")
         }
 
         DispatchQueue.main.async { [weak self] in
@@ -221,12 +251,20 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             self?.catalogMessage = nil
         }
 
+        // Same rule as playback commands: attempt the live message even if the
+        // last isReachable sample is false, so watchOS can wake iOS in background.
         let response: WatchCatalogResponse = await withCheckedContinuation { continuation in
-            WCSession.default.sendMessage(payload) { reply in
+            WCSession.default.sendMessage(payload) { [weak self] reply in
                 let decoded = WatchCatalogCodec.response(from: reply)
                     ?? .failure(token: request.token, message: "Invalid iPhone response")
+                DispatchQueue.main.async {
+                    self?.phoneReachable = decoded.ok || self?.phoneReachable == true
+                }
                 continuation.resume(returning: decoded)
-            } errorHandler: { error in
+            } errorHandler: { [weak self] error in
+                DispatchQueue.main.async {
+                    self?.phoneReachable = false
+                }
                 continuation.resume(
                     returning: .failure(token: request.token, message: error.localizedDescription)
                 )
@@ -260,17 +298,39 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         }
     }
 
+    private func cacheDiscovery(_ response: WatchCatalogResponse) {
+        guard let data = try? JSONEncoder().encode(response) else { return }
+        UserDefaults.standard.set(data, forKey: discoveryCacheKey)
+    }
+
+    private func cachedDiscovery(token: String) -> WatchCatalogResponse? {
+        guard
+            let data = UserDefaults.standard.data(forKey: discoveryCacheKey),
+            var response = try? JSONDecoder().decode(WatchCatalogResponse.self, from: data),
+            !response.items.isEmpty
+        else {
+            return nil
+        }
+        response.token = token
+        response.ok = true
+        response.title = "Discovery"
+        response.status = "cached"
+        response.message = "Cached Discovery — iPhone currently unavailable"
+        return response
+    }
+
     private func activate() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         session.delegate = self
         session.activate()
-        phoneReachable = session.isReachable
+        phoneReachable = session.activationState == .activated
     }
 
     private func receive(_ payload: [String: Any]) {
         guard let message = WaxloomWatchCodec.message(from: payload) else { return }
         DispatchQueue.main.async { [weak self] in
+            self?.phoneReachable = true
             self?.apply(message)
         }
     }
@@ -314,7 +374,9 @@ extension WatchRemoteModel: WCSessionDelegate {
         error: Error?
     ) {
         DispatchQueue.main.async { [weak self] in
-            self?.phoneReachable = session.isReachable
+            // Activated means the Watch is allowed to attempt a live message.
+            // The first send will decide whether the iPhone is actually available.
+            self?.phoneReachable = activationState == .activated
         }
 
         if activationState == .activated {
@@ -324,11 +386,11 @@ extension WatchRemoteModel: WCSessionDelegate {
 
     func sessionReachabilityDidChange(_ session: WCSession) {
         DispatchQueue.main.async { [weak self] in
-            self?.phoneReachable = session.isReachable
-            if !session.isReachable {
-                self?.pendingToken = nil
-                self?.pendingCommand = nil
-                self?.catalogBusy = false
+            // A false sample can simply mean that iOS is suspended. Do not use it
+            // to disable controls, because a Watch-originated sendMessage can wake
+            // the companion app. A true sample is still useful positive evidence.
+            if session.isReachable {
+                self?.phoneReachable = true
             }
         }
     }
