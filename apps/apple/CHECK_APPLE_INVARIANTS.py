@@ -83,7 +83,7 @@ require(watch_remote, "WCSession.default.isReachable", "Immediate-only Watch con
 require(catalog_wire, 'payloadType = "waxloom_catalog_wire_v1"', "Watch catalog protocol")
 require(catalog_wire, "requestTTL: TimeInterval = 20", "Watch catalog request expiry")
 for action in (
-    "load", "play", "toggleStar", "discoveryFeedback", "badSource", "refreshDiscovery",
+    "load", "play", "seek", "toggleStar", "discoveryFeedback", "badSource", "refreshDiscovery",
     "createPlaylist", "deletePlaylist", "addToPlaylist", "removeFromPlaylist",
     "youtubeSearch", "youtubeImport",
 ):
@@ -165,6 +165,17 @@ require(product_views, "player.playPreview(candidate: candidate, queue: queue, b
 require(watch_discovery, "queue: shelfItems", "Watch Discovery detail receives its shelf queue")
 require(watch_discovery, "remote.playDiscovery(item, queue: queue)", "Watch Discovery Play sends its shelf queue")
 
+# Precise seek parity: the iPhone slider and Watch slider must both reach the
+# native player's arbitrary seek(to:) path, while +/-15 remains available.
+require(catalog_wire, "var position: Double?", "Watch precise seek payload")
+require(watch_remote, "func seek(to position: Double)", "Watch precise seek transport")
+require(watch_views, "Slider(", "Watch precise seek UI")
+require(watch_views, "remote.seek(to: target)", "Watch precise seek action")
+require(catalog_service, "case .seek:", "Watch gateway precise seek")
+require(catalog_service, "player.seek(to: max(0, position))", "Watch precise seek reaches native player")
+require(product_views, "Slider(", "iPhone precise seek UI")
+require(product_views, "player.seek(to: $0)", "iPhone precise seek action")
+
 # Discovery refresh is a product action, not an iPhone-only convenience.
 require(product_views, "WaxloomAPI.refreshDiscoveryFeed", "iPhone Discovery refresh")
 require(catalog_service, "case .refreshDiscovery:", "Watch gateway Discovery refresh")
@@ -199,6 +210,17 @@ parity_pairs = (
 for iphone_token, watch_token, label in parity_pairs:
     require(product_views, iphone_token, f"iPhone {label}")
     require(watch_views + "\n" + watch_discovery, watch_token, f"Watch {label}")
+
+# Watch mutation refresh contract. List/detail views must reload after writes,
+# and album/artist favorite UI must use the updated local state rather than the
+# immutable navigation seed.
+require(watch_remote, "@Published private(set) var catalogRevision", "Watch catalog mutation revision")
+require(watch_remote, "registerMutation(", "Watch successful mutations bump revision")
+if watch_views.count(".task(id: remote.catalogRevision)") < 4:
+    errors.append("Watch mutation refresh: expected catalogRevision-driven reloads for catalog, playlist, picker and search")
+require(watch_views, "@State private var containerStarred: Bool", "Watch album/artist favorite local state")
+require(watch_views, "requestItem.starred = containerStarred", "Watch album/artist toggle uses current state")
+require(watch_views, "containerStarred = updated.starred", "Watch album/artist favorite state refresh")
 
 # Automatic API parity gate. Any new server-backed product behavior wired into
 # the iPhone UI must also be represented in the Watch gateway, unless it is a
