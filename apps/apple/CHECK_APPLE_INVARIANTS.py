@@ -165,6 +165,31 @@ require(product_views, "player.playPreview(candidate: candidate, queue: queue, b
 require(watch_discovery, "queue: shelfItems", "Watch Discovery detail receives its shelf queue")
 require(watch_discovery, "remote.playDiscovery(item, queue: queue)", "Watch Discovery Play sends its shelf queue")
 
+# Physical Watch Discovery Next/Previous must not rely solely on the queue sent
+# over WCSession. The iPhone rebuilds the active shelf from the authoritative
+# current feed, so a truncated/single-item transport cannot make Next loop the
+# same preview forever.
+require(
+    catalog_service,
+    "let authoritativeDiscoveryItems = discoveryItems(feed.external.items)",
+    "Watch Discovery authoritative queue rebuild",
+)
+require(
+    catalog_service,
+    "let authoritativeShelf = authoritativeDiscoveryItems.filter",
+    "Watch Discovery authoritative shelf selection",
+)
+require(
+    catalog_service,
+    "if authoritativeShelf.contains(where: { $0.id == item.id })",
+    "Watch Discovery authoritative shelf preferred over transported queue",
+)
+require(
+    catalog_service,
+    "queueItems = authoritativeShelf",
+    "Watch Discovery Next/Previous uses rebuilt shelf queue",
+)
+
 # Precise seek parity: the iPhone slider and Watch slider must both reach the
 # native player's arbitrary seek(to:) path, while +/-15 remains available.
 require(catalog_wire, "var position: Double?", "Watch precise seek payload")
