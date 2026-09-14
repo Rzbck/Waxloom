@@ -29,7 +29,13 @@ enum WatchCatalogService {
 
                 case .discovery:
                     let candidate = discoveryCandidate(from: item)
-                    await player.playPreview(candidate: candidate, queue: [candidate], baseURL: baseURL)
+                    let requestedQueue = (request.items ?? [])
+                        .filter { $0.kind == .discovery }
+                    let queueItems = requestedQueue.contains(where: { $0.id == item.id })
+                        ? requestedQueue
+                        : [item]
+                    let queue = queueItems.map(discoveryCandidate)
+                    await player.playPreview(candidate: candidate, queue: queue, baseURL: baseURL)
                     return .success(token: request.token, title: "Preview", message: candidate.title)
 
                 default:
