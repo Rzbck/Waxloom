@@ -78,6 +78,7 @@ struct WatchCatalogRequest: Codable {
     var index: Int?
     var authorized: Bool?
     var item: WatchCatalogItem?
+    var items: [WatchCatalogItem]?
 }
 
 struct WatchCatalogResponse: Codable {
