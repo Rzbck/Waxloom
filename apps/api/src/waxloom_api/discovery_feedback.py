@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from collections import Counter
@@ -21,19 +22,20 @@ class DiscoveryFeedbackStore:
         self._items: dict[str, dict[str, Any]] = {}
         self._source_rejections: dict[str, dict[str, Any]] = {}
         self._imports: dict[str, dict[str, Any]] = {}
-        self._loaded_mtime_ns: int | None = None
+        self._loaded_digest: str | None = None
         self._load(force=True)
 
     def _load(self, *, force: bool = False) -> None:
         try:
-            stat = self._path.stat()
+            raw = self._path.read_bytes()
         except OSError:
             return
-        if not force and self._loaded_mtime_ns == stat.st_mtime_ns:
+        digest = hashlib.sha256(raw).hexdigest()
+        if not force and self._loaded_digest == digest:
             return
         try:
-            payload = json.loads(self._path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
             return
         if not isinstance(payload, dict):
             return
@@ -64,7 +66,7 @@ class DiscoveryFeedbackStore:
                 for key, value in imports.items()
                 if isinstance(value, dict)
             }
-        self._loaded_mtime_ns = stat.st_mtime_ns
+        self._loaded_digest = digest
 
     def _reload_if_changed(self) -> None:
         self._load(force=False)
@@ -77,13 +79,11 @@ class DiscoveryFeedbackStore:
             "source_rejections": self._source_rejections,
             "imports": self._imports,
         }
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         temporary = self._path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        temporary.write_bytes(raw)
         temporary.replace(self._path)
-        try:
-            self._loaded_mtime_ns = self._path.stat().st_mtime_ns
-        except OSError:
-            self._loaded_mtime_ns = None
+        self._loaded_digest = hashlib.sha256(raw).hexdigest()
 
     @staticmethod
     def _clean_tags(tags: list[str]) -> list[str]:
