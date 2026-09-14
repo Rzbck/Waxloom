@@ -66,20 +66,26 @@ require(connection, "URLSessionConfiguration.ephemeral", "Private health-check s
 require(connection, ".reloadIgnoringLocalAndRemoteCacheData", "Health check bypasses stale caches")
 require(connection, "configuration.waitsForConnectivity = true", "Health check waits for Tailscale connectivity")
 
-# Existing exact-token playback authority protocol.
+# Playback authority / Watch -> iPhone background-wake protocol.
 require(shared_wire, 'static let commandTTL: TimeInterval = 8', "Watch command expiry")
 require(shared_wire, "sessionID: String", "Watch session identity")
 require(shared_wire, "revision: Int64", "Watch authority revision")
 require(shared_wire, "seekBackward15", "Watch seek backward")
 require(shared_wire, "seekForward15", "Watch seek forward")
-require(phone_bridge, "message.sessionID != currentSnapshot.sessionID", "Phone session stale rejection")
-require(phone_bridge, "message.revision != currentSnapshot.revision", "Phone revision stale rejection")
 require(phone_bridge, "recentAcknowledgements", "Exact command acknowledgement replay")
+require(phone_bridge, "acknowledgement(for playbackMessage)", "Inline playback acknowledgement")
+require(phone_bridge, "replyHandler(payload)", "Playback acknowledgement uses original request reply")
+forbid(phone_bridge, "message.sessionID != currentSnapshot.sessionID", "Watch controls must not be dropped on session snapshot lag")
+forbid(phone_bridge, "message.revision != currentSnapshot.revision", "Watch controls must not be dropped on revision lag")
 require(watch_remote, "UUID().uuidString", "Unique Watch control token")
 require(watch_remote, "pendingToken == nil", "No queued overlapping Watch commands")
-require(watch_remote, "WCSession.default.isReachable", "Immediate-only Watch controls")
+require(watch_remote, "WCSession.default.sendMessage(payload) { [weak self] reply in", "Watch command direct request/reply")
+forbid(watch_remote, "WCSession.default.isReachable", "Watch must not preflight isReachable before background wake")
+require(watch_remote, 'discoveryCacheKey = "waxloom.watch.discovery.cache.v1"', "Watch Discovery offline cache")
+require(watch_remote, "cachedDiscovery(token:", "Watch Discovery cache fallback")
 
-# Full Watch product requests must remain immediate request/reply, never delayed mutation transport.
+# Full Watch product requests remain request/reply. A Watch-originated live
+# message is allowed to wake the iOS companion; do not gate it on isReachable.
 require(catalog_wire, 'payloadType = "waxloom_catalog_wire_v1"', "Watch catalog protocol")
 require(catalog_wire, "requestTTL: TimeInterval = 20", "Watch catalog request expiry")
 for action in (
