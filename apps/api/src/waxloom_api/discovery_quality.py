@@ -17,6 +17,21 @@ _PROGRAM_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("playlist", re.compile(r"\bplaylist\b", re.I)),
     ("vinyl-finds", re.compile(r"\bvinyl finds?\b", re.I)),
     ("lp-arrivals", re.compile(r"\b(?:new\s+)?(?:used\s+)?lp arrivals?\b", re.I)),
+    ("type-beat", re.compile(r"\btype\s+beat\b", re.I)),
+    (
+        "functional-mood-music",
+        re.compile(
+            r"\b(?:relaxing|calming|sleep|study|focus|meditation|background)\b.{0,60}\b(?:music|beats?|sounds?)\b",
+            re.I,
+        ),
+    ),
+    (
+        "functional-music-for",
+        re.compile(
+            r"\b(?:music|beats?|sounds?)\s+for\s+(?:coffee|study(?:ing)?|focus|sleep|relax(?:ation|ing)?|work|reading|quiet|meditation)\b",
+            re.I,
+        ),
+    ),
     (
         "record-store-arrivals",
         re.compile(
@@ -112,7 +127,7 @@ def youtube_track_quality(item: dict[str, Any]) -> tuple[bool, str]:
     This gate is intentionally age-neutral: archive tracks and current releases
     are evaluated by the same title/artist rules. It only removes candidates
     that look like programs, record-store roundups, collection browsing, or
-    long-form mix content rather than a single song.
+    long-form/functional content rather than a single song.
     """
 
     artist = str(item.get("artist") or "").strip()
