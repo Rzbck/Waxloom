@@ -362,21 +362,110 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     const ranked = activeCandidates(bundle?.external.items ?? [], taste);
     const used = new Set<string>();
 
-    const closestPool = ranked.filter((candidate) => candidate.source !== "youtube_dig");
-    const closest = fillShelf(closestPool, closestPool, used);
+    const listenbrainz = ranked.filter(
+      (candidate) => candidate.source === "listenbrainz",
+    );
+    const catalogue = ranked.filter(
+      (candidate) => candidate.source === "musicbrainz_catalog",
+    );
+    const otherMetadata = ranked.filter(
+      (candidate) =>
+        candidate.source !== "youtube_dig"
+        && candidate.source !== "listenbrainz"
+        && candidate.source !== "musicbrainz_catalog",
+    );
+
+    // Deep cuts gets catalogue first, then a bounded reserve of
+    // farther / rarer ListenBrainz candidates.
+    const deepListenbrainz = [...listenbrainz].sort((a, b) => {
+      const aDepth =
+        a.underground * 0.65
+        + Math.max(0, 1 - a.rank) * 0.35;
+
+      const bDepth =
+        b.underground * 0.65
+        + Math.max(0, 1 - b.rank) * 0.35;
+
+      return bDepth - aDepth;
+    });
+
+    const proportionalReserve =
+      listenbrainz.length < 2
+        ? 0
+        : Math.max(
+            1,
+            Math.floor(listenbrainz.length * 0.35),
+          );
+
+    const catalogueShortfall =
+      Math.max(0, 6 - catalogue.length);
+
+    const deepFallbackQuota =
+      Math.min(
+        6,
+        catalogueShortfall,
+        proportionalReserve,
+      );
+
+    const deepFallback =
+      deepListenbrainz.slice(0, deepFallbackQuota);
+
+    const deep = fillShelf(
+      catalogue,
+      deepFallback,
+      used,
+    );
+
+    const closestPrimary =
+      [...listenbrainz, ...otherMetadata]
+        .filter(
+          (candidate) =>
+            !used.has(candidate.recording_mbid),
+        )
+        .sort((a, b) => b.rank - a.rank);
+
+    const closest = fillShelf(
+      closestPrimary,
+      closestPrimary,
+      used,
+    );
 
     const youtubeDigPrimary = [...ranked]
-      .filter((candidate) => candidate.source === "youtube_dig")
-      .sort((a, b) => (b.underground + b.rank * 0.25) - (a.underground + a.rank * 0.25));
-    const rareMetadataFallback = [...ranked]
-      .filter((candidate) => candidate.source === "listenbrainz" && candidate.underground >= 0.82)
-      .sort((a, b) => (b.underground + b.rank * 0.15) - (a.underground + a.rank * 0.15));
-    const underground = fillShelf(youtubeDigPrimary, rareMetadataFallback, used, 28);
+      .filter(
+        (candidate) =>
+          candidate.source === "youtube_dig",
+      )
+      .sort(
+        (a, b) =>
+          (b.underground + b.rank * 0.25)
+          - (a.underground + a.rank * 0.25),
+      );
 
-    const deepPrimary = ranked.filter((candidate) => candidate.source === "musicbrainz_catalog");
-    const deep = fillShelf(deepPrimary, closestPool, used);
+    const rareMetadataFallback = [...listenbrainz]
+      .filter(
+        (candidate) =>
+          !used.has(candidate.recording_mbid)
+          && candidate.underground >= 0.82,
+      )
+      .sort(
+        (a, b) =>
+          (b.underground + b.rank * 0.15)
+          - (a.underground + a.rank * 0.15),
+      );
 
-    return { closest, underground, deep, totalTracks: ranked.length };
+    const underground = fillShelf(
+      youtubeDigPrimary,
+      rareMetadataFallback,
+      used,
+      28,
+    );
+
+    return {
+      closest,
+      underground,
+      deep,
+      totalTracks: ranked.length,
+    };
   }, [bundle, taste]);
 
   useEffect(() => {
@@ -612,7 +701,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             onBadSource={(candidate) => void rejectBadSource(candidate)}
           />
           <DiscoveryShelf
-            eyebrow="Catalogue exploration"
+            eyebrow="Catalogue · farther matches"
             title="Deep cuts"
             items={rails.deep}
             page={shelfPages.deep}
