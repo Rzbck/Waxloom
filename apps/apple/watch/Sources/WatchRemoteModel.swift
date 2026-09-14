@@ -8,6 +8,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     @Published private(set) var lastResult: PlaybackCommandResult?
     @Published private(set) var catalogBusy = false
     @Published private(set) var catalogMessage: String?
+    @Published private(set) var catalogRevision = 0
 
     private var pendingToken: String?
     private var playbackQueuesByItemID: [String: [WatchCatalogItem]] = [:]
@@ -72,10 +73,12 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func refreshDiscovery() async -> WatchCatalogResponse {
-        await catalog(
-            WatchCatalogRequest(
-                action: .refreshDiscovery,
-                route: .discovery
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .refreshDiscovery,
+                    route: .discovery
+                )
             )
         )
     }
@@ -101,20 +104,35 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         )
     }
 
+    func seek(to position: Double) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .seek,
+                position: max(0, position)
+            )
+        )
+    }
+
     func toggleStar(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .toggleStar, item: item))
+        registerMutation(
+            await catalog(WatchCatalogRequest(action: .toggleStar, item: item))
+        )
     }
 
     func discoveryFeedback(_ item: WatchCatalogItem, value: Int) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .discoveryFeedback, value: value, item: item))
+        registerMutation(
+            await catalog(WatchCatalogRequest(action: .discoveryFeedback, value: value, item: item))
+        )
     }
 
     func setBadSource(_ item: WatchCatalogItem, rejected: Bool) async -> WatchCatalogResponse {
-        await catalog(
-            WatchCatalogRequest(
-                action: .badSource,
-                value: rejected ? 1 : 0,
-                item: item
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .badSource,
+                    value: rejected ? 1 : 0,
+                    item: item
+                )
             )
         )
     }
@@ -124,29 +142,37 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func createPlaylist(name: String) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .createPlaylist, query: name))
+        registerMutation(
+            await catalog(WatchCatalogRequest(action: .createPlaylist, query: name))
+        )
     }
 
     func deletePlaylist(id: String) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .deletePlaylist, id: id))
+        registerMutation(
+            await catalog(WatchCatalogRequest(action: .deletePlaylist, id: id))
+        )
     }
 
     func addToPlaylist(playlistID: String, songID: String) async -> WatchCatalogResponse {
-        await catalog(
-            WatchCatalogRequest(
-                action: .addToPlaylist,
-                id: playlistID,
-                secondaryID: songID
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .addToPlaylist,
+                    id: playlistID,
+                    secondaryID: songID
+                )
             )
         )
     }
 
     func removeFromPlaylist(playlistID: String, index: Int) async -> WatchCatalogResponse {
-        await catalog(
-            WatchCatalogRequest(
-                action: .removeFromPlaylist,
-                id: playlistID,
-                index: index
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .removeFromPlaylist,
+                    id: playlistID,
+                    index: index
+                )
             )
         )
     }
@@ -167,13 +193,15 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         title: String,
         authorized: Bool
     ) async -> WatchCatalogResponse {
-        await catalog(
-            WatchCatalogRequest(
-                action: .youtubeImport,
-                artist: artist,
-                title: title,
-                authorized: authorized,
-                item: item
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .youtubeImport,
+                    artist: artist,
+                    title: title,
+                    authorized: authorized,
+                    item: item
+                )
             )
         )
     }
@@ -208,6 +236,14 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         DispatchQueue.main.async { [weak self] in
             self?.catalogBusy = false
             self?.catalogMessage = response.ok ? response.message : response.message ?? "Request failed"
+        }
+        return response
+    }
+
+    private func registerMutation(_ response: WatchCatalogResponse) -> WatchCatalogResponse {
+        guard response.ok else { return response }
+        DispatchQueue.main.async { [weak self] in
+            self?.catalogRevision &+= 1
         }
         return response
     }
