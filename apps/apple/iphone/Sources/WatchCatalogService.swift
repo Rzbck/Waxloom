@@ -17,6 +17,14 @@ enum WatchCatalogService {
             case .load:
                 return try await load(request, baseURL: baseURL)
 
+            case .refreshDiscovery:
+                try await WaxloomAPI.refreshDiscoveryFeed(baseURL: baseURL)
+                return .success(
+                    token: request.token,
+                    title: "Discovery refreshed",
+                    message: "Generating a new Discovery feed"
+                )
+
             case .play:
                 guard let item = request.item else {
                     return .failure(token: request.token, message: "Missing media item")
