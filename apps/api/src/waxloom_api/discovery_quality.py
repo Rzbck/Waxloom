@@ -6,7 +6,7 @@ from typing import Any
 _PROGRAM_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("new-releases-program", re.compile(r"\bnew releases?\b", re.I)),
     ("vinyl-drop", re.compile(r"\bvinyl drop\b", re.I)),
-    ("record-shop", re.compile(r"\brecord shop\b", re.I)),
+    ("record-shop", re.compile(r"\brecord (?:shop|store)\b", re.I)),
     ("record-collection", re.compile(r"\brecord collection\b", re.I)),
     ("episode", re.compile(r"\bepisode\s*\d*\b", re.I)),
     ("bbc-sounds", re.compile(r"\bbbc sounds\b", re.I)),
@@ -14,6 +14,19 @@ _PROGRAM_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("full-ep", re.compile(r"\bfull ep\b", re.I)),
     ("compilation", re.compile(r"\bcompilation\b", re.I)),
     ("playlist", re.compile(r"\bplaylist\b", re.I)),
+    ("vinyl-finds", re.compile(r"\bvinyl finds?\b", re.I)),
+    ("lp-arrivals", re.compile(r"\b(?:new\s+)?(?:used\s+)?lp arrivals?\b", re.I)),
+    (
+        "record-store-arrivals",
+        re.compile(
+            r"\bnew arrivals?!?\b.{0,80}\b(?:used\s+)?(?:vinyl|records?|lps?)\b",
+            re.I,
+        ),
+    ),
+    (
+        "used-records-roundup",
+        re.compile(r"\bused\s+(?:vinyl\s+)?records?\b.{0,80}\b(?:arrivals?|finds?|haul)\b", re.I),
+    ),
 )
 
 _MIX_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -31,6 +44,10 @@ _MIX_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 _BAD_ARTIST_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("artist-is-official-label", re.compile(r"\bofficial\s+(?:audio|video|music video)\b", re.I)),
     ("artist-is-release-roundup", re.compile(r"\b&\s*more!?\b", re.I)),
+    (
+        "artist-is-website",
+        re.compile(r"(?:^|\s)[a-z0-9][a-z0-9-]*\.(?:com|net|org|de|fr|co\.uk)(?:\s|$)", re.I),
+    ),
 )
 
 
