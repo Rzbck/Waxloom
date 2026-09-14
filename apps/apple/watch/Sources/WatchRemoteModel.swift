@@ -78,8 +78,18 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         await catalog(WatchCatalogRequest(action: .discoveryFeedback, value: value, item: item))
     }
 
+    func setBadSource(_ item: WatchCatalogItem, rejected: Bool) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .badSource,
+                value: rejected ? 1 : 0,
+                item: item
+            )
+        )
+    }
+
     func rejectBadSource(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .badSource, item: item))
+        await setBadSource(item, rejected: true)
     }
 
     func createPlaylist(name: String) async -> WatchCatalogResponse {
