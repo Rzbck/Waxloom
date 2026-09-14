@@ -731,6 +731,12 @@ private struct ProductDiscoveryView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var lane: Lane = .closest
+    @State private var importingMbid: String?
+    @State private var pendingAuthorizationCandidate: WaxloomDiscoveryCandidate?
+    @State private var manualImportCandidate: WaxloomDiscoveryCandidate?
+    @State private var importMessage: String?
+    @AppStorage("waxloom.authorizedMediaImports.v1")
+    private var importAuthorized = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -782,6 +788,45 @@ private struct ProductDiscoveryView: View {
         .background(ProductTheme.background.ignoresSafeArea())
         .navigationTitle("Discovery")
         .navigationBarTitleDisplayMode(.inline)
+        .navigationDestination(item: $manualImportCandidate) { candidate in
+            ProductImportsView(
+                connection: connection,
+                seedArtist: candidate.artist,
+                seedTitle: candidate.title
+            )
+        }
+        .alert(
+            "Authorized media import",
+            isPresented: Binding(
+                get: { pendingAuthorizationCandidate != nil },
+                set: { shown in
+                    if !shown {
+                        pendingAuthorizationCandidate = nil
+                    }
+                }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                pendingAuthorizationCandidate = nil
+            }
+
+            Button("Confirm & import") {
+                guard let candidate = pendingAuthorizationCandidate else {
+                    return
+                }
+
+                pendingAuthorizationCandidate = nil
+                importAuthorized = true
+
+                Task {
+                    await quickImport(candidate)
+                }
+            }
+        } message: {
+            Text(
+                "Waxloom can download this music source into your local library. Confirm that you are authorized to save media you import this way."
+            )
+        }
         .task(id: connection.isConnected) { if connection.isConnected { await load() } }
     }
 
@@ -814,6 +859,12 @@ private struct ProductDiscoveryView: View {
 
                 ForEach(items) { candidate in
                     discoveryCard(candidate, queue: items)
+                }
+
+                if let importMessage {
+                    Text(importMessage)
+                        .font(.caption)
+                        .foregroundStyle(.green)
                 }
 
                 ProductErrorText(error)
@@ -855,14 +906,26 @@ private struct ProductDiscoveryView: View {
                     Task { await feedback(candidate, value: -1) }
                 }
 
-                NavigationLink {
-                    ProductImportsView(connection: connection, seedArtist: candidate.artist, seedTitle: candidate.title)
+                Button {
+                    beginQuickImport(candidate)
                 } label: {
-                    Image(systemName: "arrow.down.circle")
-                        .frame(width: 36, height: 36)
-                        .background(Color.white.opacity(0.07), in: Circle())
+                    Group {
+                        if importingMbid == candidate.recordingMbid {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "plus.circle")
+                        }
+                    }
+                    .frame(width: 36, height: 36)
+                    .background(Color.white.opacity(0.07), in: Circle())
                 }
                 .buttonStyle(.plain)
+                .disabled(importingMbid != nil)
+                .accessibilityLabel(
+                    importingMbid == candidate.recordingMbid
+                        ? "Adding to library"
+                        : "Add to library"
+                )
 
                 if candidate.source == "youtube_dig" {
                     Button { Task { await rejectBadSource(candidate) } } label: {
@@ -884,6 +947,98 @@ private struct ProductDiscoveryView: View {
             }
         }
         .productCard()
+    }
+
+    private func beginQuickImport(
+        _ candidate: WaxloomDiscoveryCandidate
+    ) {
+        guard importingMbid == nil else {
+            return
+        }
+
+        error = nil
+        importMessage = nil
+
+        if importAuthorized {
+            Task {
+                await quickImport(candidate)
+            }
+        } else {
+            pendingAuthorizationCandidate = candidate
+        }
+    }
+
+    private func quickImport(
+        _ candidate: WaxloomDiscoveryCandidate
+    ) async {
+        guard importingMbid == nil,
+              let base = connection.baseURL else {
+            return
+        }
+
+        importingMbid = candidate.recordingMbid
+        error = nil
+        importMessage = nil
+
+        defer {
+            importingMbid = nil
+        }
+
+        do {
+            let matches = try await WaxloomAPI.youtubeSearch(
+                baseURL: base,
+                artist: candidate.artist,
+                title: candidate.title,
+                limit: 1
+            )
+
+            guard let best = matches.first else {
+                importMessage =
+                    "No automatic source was found. Choose the source manually."
+                manualImportCandidate = candidate
+                return
+            }
+
+            if best.score < 80 {
+                importMessage =
+                    "The automatic source match is ambiguous. Choose the source manually."
+                manualImportCandidate = candidate
+                return
+            }
+
+            let result = try await WaxloomAPI.youtubeImport(
+                baseURL: base,
+                artist: candidate.artist,
+                title: candidate.title,
+                sourceURL: best.url,
+                authorized: true
+            )
+
+            // Remove it immediately. The backend also persists the import
+            // exclusion so the candidate stays out of later rotations.
+            candidates.removeAll {
+                $0.recordingMbid == candidate.recordingMbid
+            }
+
+            switch result.status {
+            case "already_local":
+                importMessage =
+                    "Already in your library — removed from Discovery."
+
+            case "imported":
+                importMessage =
+                    "Added to your library."
+
+            default:
+                importMessage =
+                    "Downloaded to your library. Navidrome is indexing it."
+            }
+
+            error = nil
+        } catch {
+            importMessage = nil
+            self.error = error.localizedDescription
+        }
     }
 
     private var shelves: Shelves {
@@ -1142,7 +1297,8 @@ private struct ProductImportsView: View {
     @State private var runtime: WaxloomYouTubeRuntime?
     @State private var candidates: [WaxloomYouTubeCandidate] = []
     @State private var selectedURL: String?
-    @State private var authorized = false
+    @AppStorage("waxloom.authorizedMediaImports.v1")
+    private var authorized = false
     @State private var searching = false
     @State private var importing = false
     @State private var message: String?
