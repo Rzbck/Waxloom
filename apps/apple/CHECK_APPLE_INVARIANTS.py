@@ -22,6 +22,7 @@ catalog_wire = read("Shared/WatchCatalogWire.swift")
 phone_bridge = read("iphone/Sources/WatchBridge.swift")
 watch_remote = read("watch/Sources/WatchRemoteModel.swift")
 watch_views = read("watch/Sources/WatchProductViews.swift")
+watch_discovery = read("watch/Sources/WatchDiscoveryV2.swift")
 connection = read("iphone/Sources/ConnectionModel.swift")
 api_client = read("iphone/Sources/WaxloomAPI.swift")
 player = read("iphone/Sources/NativePlayer.swift")
@@ -147,6 +148,56 @@ for feature in (
     "ProductSearchView", "ProductDiscoveryView", "ProductImportsView", "ProductNowPlayingView",
 ):
     require(product_views, feature, f"iPhone feature {feature}")
+
+# Cross-device behavioral parity. These checks deliberately compare semantics,
+# not pixel layout: starting the same content from iPhone or Watch must create
+# the same kind of queue and expose the same mutation/control capabilities.
+require(catalog_wire, "var items: [WatchCatalogItem]?", "Watch playback queue transport")
+require(watch_remote, "private var playbackQueuesByItemID", "Watch remembers loaded playback queues")
+require(watch_remote, "rememberPlaybackQueues(response.items)", "Watch records list queues after load")
+require(watch_remote, "items: queue", "Watch sends playback queue with Play")
+if catalog_service.count("let requestedQueue = (request.items ?? [])") < 2:
+    errors.append("iPhone/Watch playback parity: song and Discovery gateway paths must both consume Watch queues")
+require(catalog_service, "player.play(song: song, queue: queue, baseURL: baseURL)", "Watch library playback preserves iPhone queue semantics")
+require(catalog_service, "player.playPreview(candidate: candidate, queue: queue, baseURL: baseURL)", "Watch Discovery playback preserves iPhone queue semantics")
+require(product_views, "ProductSongRow(connection: connection, player: player, song: song, queue: songs)", "iPhone list playback carries the visible song queue")
+require(product_views, "player.playPreview(candidate: candidate, queue: queue, baseURL: base)", "iPhone Discovery playback carries its lane queue")
+require(watch_discovery, "queue: shelfItems", "Watch Discovery detail receives its shelf queue")
+require(watch_discovery, "remote.playDiscovery(item, queue: queue)", "Watch Discovery Play sends its shelf queue")
+
+# Player controls exposed by iPhone must remain remotely equivalent on Watch.
+for control in ("playPause", "next", "previous", "seekBackward15", "seekForward15"):
+    require(shared_wire, control, f"Cross-device player control {control}")
+require(watch_views, "remote.send(.next)", "Watch next-track control")
+require(watch_views, "remote.send(.previous)", "Watch previous-track control")
+require(watch_views, "remote.send(.seekBackward15)", "Watch seek-back control")
+require(watch_views, "remote.send(.seekForward15)", "Watch seek-forward control")
+require(player, "case .next:", "iPhone player accepts Watch next")
+require(player, "case .previous:", "iPhone player accepts Watch previous")
+require(player, "case .seekBackward15:", "iPhone player accepts Watch seek back")
+require(player, "case .seekForward15:", "iPhone player accepts Watch seek forward")
+
+# Mutating product actions present on iPhone must have Watch equivalents.
+parity_pairs = (
+    ("WaxloomAPI.setStarred", "remote.toggleStar", "favorite toggle"),
+    ("WaxloomAPI.createPlaylist", "remote.createPlaylist", "playlist create"),
+    ("WaxloomAPI.deletePlaylist", "remote.deletePlaylist", "playlist delete"),
+    ("songIDsToAdd", "remote.addToPlaylist", "playlist add track"),
+    ("songIndexesToRemove", "remote.removeFromPlaylist", "playlist remove track"),
+    ("WaxloomAPI.search", "route: .search", "library search"),
+    ("WaxloomAPI.discoveryFeedback", "remote.discoveryFeedback", "Discovery feedback"),
+    ("WaxloomAPI.youtubeSearch", "remote.youtubeSearch", "authorized source search"),
+    ("WaxloomAPI.youtubeImport", "remote.youtubeImport", "authorized media import"),
+)
+for iphone_token, watch_token, label in parity_pairs:
+    require(product_views, iphone_token, f"iPhone {label}")
+    require(watch_views + "\n" + watch_discovery, watch_token, f"Watch {label}")
+
+# Discovery feedback and source rejection must be reversible on Watch and the
+# transport must support clearing the persisted source-rejection row.
+require(watch_discovery, "let nextValue = currentFeedback == target ? 0 : target", "Watch Like/Less toggle semantics")
+require(watch_discovery, "let next = !sourceRejected", "Watch bad-source undo state")
+require(watch_discovery, "remote.setBadSource(item, rejected: next)", "Watch bad-source reversible action")
 
 # Discovery import UX: automatic match/import first, manual picker only
 # when the automatic source score is genuinely ambiguous.
