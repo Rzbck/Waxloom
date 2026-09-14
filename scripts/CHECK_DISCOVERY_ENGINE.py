@@ -89,6 +89,18 @@ def main() -> None:
             "artist": "Breathing Machinery (Official Audio",
             "title": "Underground Deep House",
         },
+        {
+            "artist": "Devinylhunter-records.de",
+            "title": "New Arrivals! Used Vinyl Records | 23.10.25 | Pop, Rock, New Wave, Punk",
+        },
+        {
+            "artist": "RARE 80s HEAVY METAL VINYL FINDS! New Used LP Arrivals",
+            "title": "Devinylhunter-records.de",
+        },
+        {
+            "artist": "Devinylhunter-records.de",
+            "title": "New Arrivals! Used Vinyl Records | 16.10.25 | ProgRock, Hardrock, Vertigo",
+        },
     ]
     for row in bad_youtube_rows:
         keep, reason = youtube_track_quality(row)
@@ -98,8 +110,10 @@ def main() -> None:
         {"artist": "THE NEWS", "title": "It's A Long Time, 1969 Rare Private Press U.K Pop"}
     )
     keep_fresh, _ = youtube_track_quality({"artist": "Bow Anderson", "title": "New Wave"})
+    keep_vinyl_word, _ = youtube_track_quality({"artist": "The Vinyls", "title": "Arrival"})
     require(keep_archive, "quality gate must not reject a real archive track because it is old")
     require(keep_fresh, "quality gate must keep a plausible current single")
+    require(keep_vinyl_word, "quality gate must not reject track-like names merely containing vinyl language")
 
     with tempfile.TemporaryDirectory() as temp:
         store = DiscoveryFeedbackStore(Path(temp) / "feedback.json")
