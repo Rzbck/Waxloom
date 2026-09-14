@@ -47,6 +47,7 @@ jobs:
           .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check -e .\apps\api
           .\.ci-venv\Scripts\python.exe -m compileall -q .\apps\api\src
           .\.ci-venv\Scripts\python.exe -c "from waxloom_api.main import app; assert app.title == 'Waxloom API'; print('Waxloom API import PASS')"
+          .\.ci-venv\Scripts\python.exe .\scripts\CHECK_DISCOVERY_ENGINE.py
 
       - name: Install web dependencies
         shell: pwsh
