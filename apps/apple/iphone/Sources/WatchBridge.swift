@@ -5,7 +5,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
     @Published private(set) var watchReachable = false
     @Published private(set) var watchInstalled = false
 
-    var commandHandler: ((PlaybackCommand) -> PlaybackCommandResult)?
+    var commandHandler: (@MainActor (PlaybackCommand, String) async -> PlaybackCommandResult)?
     var catalogHandler: (@MainActor (WatchCatalogRequest) async -> WatchCatalogResponse)?
 
     private var currentSnapshot = PlaybackSnapshot.idle
@@ -48,20 +48,23 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
 
             let now = Date().timeIntervalSince1970
             let age = now - message.timestamp
-            let startingRevision = self.currentSnapshot.revision
+            let coldStart = self.currentSnapshot.sessionID == "idle"
             let result: PlaybackCommandResult
 
             if age < -5 || age > WaxloomWatchCodec.commandTTL {
                 result = .expired
-            } else if message.sessionID != self.currentSnapshot.sessionID {
+            } else if !coldStart, message.sessionID != self.currentSnapshot.sessionID {
                 result = .sessionMismatch
-            } else if message.revision != self.currentSnapshot.revision {
+            } else if !coldStart, message.revision != self.currentSnapshot.revision {
                 result = .staleRevision
             } else if let command = message.command {
-                result = self.commandHandler?(command) ?? .unavailable
-                if result == .accepted, command == .next || command == .previous {
-                    await self.waitForSnapshotAdvance(after: startingRevision)
-                }
+                // When WatchConnectivity wakes a terminated-but-not-force-quit
+                // iPhone app, the bridge starts at an idle snapshot. Let the
+                // player restore its persisted queue before validating the old
+                // Watch session. The player still checks the expected session ID
+                // before executing the command, and the 2-second wire TTL keeps
+                // delayed commands from becoming ghost actions.
+                result = await self.commandHandler?(command, message.sessionID) ?? .unavailable
             } else {
                 result = .unsupported
             }
@@ -72,14 +75,6 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
                 snapshot: self.currentSnapshot
             )
             replyHandler(WaxloomWatchCodec.payload(acknowledgement) ?? ["ok": false])
-        }
-    }
-
-    @MainActor
-    private func waitForSnapshotAdvance(after revision: Int64) async {
-        let deadline = Date().addingTimeInterval(1.5)
-        while currentSnapshot.revision <= revision, Date() < deadline {
-            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 
