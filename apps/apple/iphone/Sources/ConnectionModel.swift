@@ -28,13 +28,18 @@ final class ConnectionModel: ObservableObject {
         let task: Task<Void, Never>
     }
 
-    @MainActor
     private final class ConnectionWaitGate {
+        private let lock = NSLock()
         private var finished = false
 
         func finish(_ continuation: CheckedContinuation<Void, Never>) {
-            guard !finished else { return }
+            lock.lock()
+            guard !finished else {
+                lock.unlock()
+                return
+            }
             finished = true
+            lock.unlock()
             continuation.resume()
         }
     }
