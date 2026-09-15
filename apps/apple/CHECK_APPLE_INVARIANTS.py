@@ -15,6 +15,16 @@ def read(relative: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def require(text: str, token: str, label: str) -> None:
+    if token not in text:
+        errors.append(f"{label}: missing {token!r}")
+
+
+def forbid(text: str, token: str, label: str) -> None:
+    if token in text:
+        errors.append(f"{label}: forbidden {token!r}")
+
+
 iphone_project = read("iphone/project.yml")
 watch_project = read("watch/project.yml")
 shared_wire = read("Shared/WatchWire.swift")
@@ -29,22 +39,11 @@ product_views = read("iphone/Sources/ProductViews.swift")
 catalog_service = read("iphone/Sources/WatchCatalogService.swift")
 workflow = (root.parent.parent / ".github/workflows/apple-native.yml").read_text(encoding="utf-8")
 
-
-def require(text: str, token: str, label: str) -> None:
-    if token not in text:
-        errors.append(f"{label}: missing {token!r}")
-
-
-def forbid(text: str, token: str, label: str) -> None:
-    if token in text:
-        errors.append(f"{label}: forbidden {token!r}")
-
-
 # Product identity / Apple capabilities.
 require(iphone_project, "PRODUCT_BUNDLE_IDENTIFIER: com.rzbck.waxloom", "iPhone bundle id")
 require(watch_project, "PRODUCT_BUNDLE_IDENTIFIER: com.rzbck.waxloom.watchkitapp", "Watch bundle id")
 require(watch_project, "WKCompanionAppBundleIdentifier: com.rzbck.waxloom", "Watch companion relationship")
-require(watch_project, "WKRunsIndependentlyOfCompanionApp: false", "Watch must remain companion")
+require(watch_project, "WKRunsIndependentlyOfCompanionApp: false", "Watch companion packaging")
 require(iphone_project, "UIBackgroundModes:", "Background audio declaration")
 require(iphone_project, "- audio", "Background audio mode")
 
@@ -59,26 +58,43 @@ for text, label in [
     forbid(text, "http://", f"{label} cleartext URL")
 
 require(connection, 'components.scheme?.lowercased() == "https"', "HTTPS-only endpoint")
-require(connection, "private var connectionCheckInFlight = false", "Single-flight server connection state")
-require(connection, "if connectionCheckInFlight { return }", "Duplicate connection suppression")
+require(connection, "private struct ConnectionFlight", "Shared connection flight")
+require(connection, "await active.task.value", "Concurrent callers await active connection")
+require(connection, "connectionFlight?.id == flightID", "Old waiter cannot clear newer connection")
+require(connection, "guard isCurrentEndpoint(endpoint) else { return }", "Stale endpoint result rejection")
 require(connection, "URLSessionConfiguration.ephemeral", "Private health-check session")
 require(connection, ".reloadIgnoringLocalAndRemoteCacheData", "Health check bypasses stale caches")
-require(connection, "configuration.waitsForConnectivity = true", "Health check waits for Tailscale connectivity")
+require(connection, "configuration.waitsForConnectivity = true", "Health check waits for connectivity")
+forbid(connection, "connectionCheckInFlight", "Return-instead-of-await connection anti-pattern")
 
-# Existing exact-token playback authority protocol.
-require(shared_wire, 'static let commandTTL: TimeInterval = 8', "Watch command expiry")
+# Playback authority: state and commands have intentionally different transports.
+require(shared_wire, 'static let commandTTL: TimeInterval = 8', "Watch command expiry metadata")
 require(shared_wire, "sessionID: String", "Watch session identity")
 require(shared_wire, "revision: Int64", "Watch authority revision")
 require(shared_wire, "seekBackward15", "Watch seek backward")
 require(shared_wire, "seekForward15", "Watch seek forward")
-require(phone_bridge, "message.sessionID != currentSnapshot.sessionID", "Phone session stale rejection")
-require(phone_bridge, "message.revision != currentSnapshot.revision", "Phone revision stale rejection")
-require(phone_bridge, "recentAcknowledgements", "Exact command acknowledgement replay")
-require(watch_remote, "UUID().uuidString", "Unique Watch control token")
-require(watch_remote, "pendingToken == nil", "No queued overlapping Watch commands")
-require(watch_remote, "WCSession.default.isReachable", "Immediate-only Watch controls")
 
-# Full Watch product requests must remain immediate request/reply, never delayed mutation transport.
+# Latest playback state is delivered only as application context. Do not duplicate
+# the same state through live sendMessage, which creates cross-channel reordering.
+require(phone_bridge, "updateApplicationContext(payload)", "Latest-state Watch synchronization")
+forbid(phone_bridge, "recentAcknowledgements", "Legacy separate acknowledgement cache")
+forbid(phone_bridge, "sendAcknowledgement", "Legacy second acknowledgement message")
+require(watch_remote, "didReceiveApplicationContext", "Watch receives latest playback state")
+require(watch_remote, "lastSnapshotTimestamp", "Cross-track stale snapshot ordering")
+require(watch_remote, "timestamp < lastSnapshotTimestamp", "Old snapshot rejection")
+
+# Immediate controls use one request and its correlated reply.
+require(phone_bridge, "handlePlaybackCommand", "Phone correlated playback command handler")
+require(phone_bridge, "replyHandler(WaxloomWatchCodec.payload(acknowledgement)", "Playback acknowledgement reply")
+require(phone_bridge, "waitForSnapshotAdvance", "Next/previous waits for resulting snapshot")
+require(watch_remote, "WCSession.default.sendMessage(payload) { [weak self] reply in", "Watch correlated command request")
+require(watch_remote, "commandReplyTimeout", "Bounded live command UI lock")
+require(watch_remote, "pendingToken == nil", "No overlapping immediate playback commands")
+require(watch_remote, "WCSession.default.isReachable", "Immediate playback controls require live peer")
+forbid(watch_remote, "DispatchQueue.main.asyncAfter(deadline: .now() + WaxloomWatchCodec.commandTTL", "Eight-second UI command lock")
+
+# Catalog stays an iPhone gateway until direct Watch -> private Tailscale HTTPS is
+# physically proven. Reads remain useful from a bounded local latest-value cache.
 require(catalog_wire, 'payloadType = "waxloom_catalog_wire_v1"', "Watch catalog protocol")
 require(catalog_wire, "requestTTL: TimeInterval = 20", "Watch catalog request expiry")
 for action in (
@@ -88,13 +104,16 @@ for action in (
 ):
     require(catalog_wire, f"case {action}", f"Watch catalog action {action}")
 
-require(phone_bridge, "didReceiveMessage message: [String: Any],", "Watch catalog reply channel")
 require(phone_bridge, "WatchCatalogCodec.request", "Watch catalog request decode")
-require(watch_remote, "sendMessage(payload)", "Immediate Watch catalog transport")
+require(watch_remote, "sendMessage(payload)", "Immediate Watch catalog gateway")
+require(watch_remote, "catalogRequestCount", "Overlapping catalog busy accounting")
+require(watch_remote, "cachedCatalogResponse", "Offline Watch catalog read cache")
+require(watch_remote, "cacheCatalogResponse", "Successful Watch catalog cache write")
+require(watch_remote, 'cached.status = "cached"', "Cached response is explicit")
 for forbidden_transport in ("transferUserInfo", "transferFile"):
     forbid(watch_remote, forbidden_transport, "Watch mutation transport")
 
-# Full Watch navigation/product surface.
+# Full Watch product surface remains available while the transport is refactored.
 for route in (".albums", ".artists", ".favorites", ".playlists", ".discovery", ".search", ".imports"):
     require(watch_views, route, f"Watch route {route}")
 for feature in (
@@ -105,41 +124,13 @@ for feature in (
 require(watch_views, "remote.rejectBadSource", "Watch bad-source action")
 require(watch_views, "remote.discoveryFeedback", "Watch Discovery feedback")
 require(watch_views, "remote.youtubeImport", "Watch authorized import")
-require(
-    watch_views,
-    "WatchDiscoveryDashboard",
-    "Watch dedicated Discovery dashboard",
-)
-require(
-    watch_views,
-    '@AppStorage("waxloom.authorizedMediaImports.v1")',
-    "Watch persistent import authorization",
-)
-require(
-    watch_views,
-    "beginQuickImport(item)",
-    "Watch Discovery one-tap import",
-)
-require(
-    watch_views,
-    "sources.items.max",
-    "Watch automatic best-source selection",
-)
-require(
-    watch_views,
-    "guard (best.score ?? 0) >= 80 else",
-    "Watch ambiguous-source fallback threshold",
-)
-require(
-    watch_views,
-    "manualImportItem = item",
-    "Watch manual-source fallback",
-)
-require(
-    watch_views,
-    "items.removeAll {",
-    "Watch imported Discovery candidate immediate removal",
-)
+require(watch_views, "WatchDiscoveryDashboard", "Watch dedicated Discovery dashboard")
+require(watch_views, '@AppStorage("waxloom.authorizedMediaImports.v1")', "Watch persistent import authorization")
+require(watch_views, "beginQuickImport(item)", "Watch Discovery one-tap import")
+require(watch_views, "sources.items.max", "Watch automatic best-source selection")
+require(watch_views, "guard (best.score ?? 0) >= 80 else", "Watch ambiguous-source fallback threshold")
+require(watch_views, "manualImportItem = item", "Watch manual-source fallback")
+require(watch_views, "items.removeAll {", "Watch imported Discovery immediate removal")
 
 # iPhone product surface and media semantics.
 for feature in (
@@ -148,49 +139,16 @@ for feature in (
 ):
     require(product_views, feature, f"iPhone feature {feature}")
 
-# Discovery import UX: automatic match/import first, manual picker only
-# when the automatic source score is genuinely ambiguous.
-require(
-    product_views,
-    '@AppStorage("waxloom.authorizedMediaImports.v1")',
-    "Persistent authorized-import acknowledgement",
-)
-if product_views.count(
-    '@AppStorage("waxloom.authorizedMediaImports.v1")'
-) < 2:
-    errors.append(
-        "iPhone direct import: authorization must be shared by Discovery and manual Imports"
-    )
-require(
-    product_views,
-    "beginQuickImport(candidate)",
-    "Discovery one-tap import action",
-)
-require(
-    product_views,
-    "limit: 1",
-    "Discovery automatic best-source lookup",
-)
-require(
-    product_views,
-    "if best.score < 80",
-    "Discovery ambiguous-source fallback threshold",
-)
-require(
-    product_views,
-    "manualImportCandidate = candidate",
-    "Discovery manual-source fallback",
-)
-require(
-    product_views,
-    "sourceURL: best.url",
-    "Discovery direct import selected source",
-)
-require(
-    product_views,
-    "candidates.removeAll {",
-    "Imported Discovery candidate immediate removal",
-)
+require(product_views, '@AppStorage("waxloom.authorizedMediaImports.v1")', "Persistent authorized-import acknowledgement")
+if product_views.count('@AppStorage("waxloom.authorizedMediaImports.v1")') < 2:
+    errors.append("iPhone direct import: authorization must be shared by Discovery and manual Imports")
+require(product_views, "beginQuickImport(candidate)", "Discovery one-tap import action")
+require(product_views, "limit: 1", "Discovery automatic best-source lookup")
+require(product_views, "if best.score < 80", "Discovery ambiguous-source fallback threshold")
+require(product_views, "manualImportCandidate = candidate", "Discovery manual-source fallback")
+require(product_views, "sourceURL: best.url", "Discovery direct import selected source")
+require(product_views, "candidates.removeAll {", "Imported Discovery immediate removal")
+
 require(player, "restoreQueue", "Native queue restore")
 require(player, "savePlayQueue", "Native queue persistence")
 require(player, "MPNowPlayingInfoCenter", "System Now Playing")
@@ -208,27 +166,20 @@ forbid(player, "await player.seek(to: .zero)", "Blocking Discovery seek before p
 forbid(player, "asset.load(.isPlayable)", "Blocking Discovery isPlayable preload")
 forbid(player, "asset.load(.duration)", "Blocking Discovery duration preload")
 
-# Playback UI must never cover the bottom tab navigation.
 mini_player_insets = product_views.count(".productMiniPlayerInset(connection: connection, player: player)")
 if mini_player_insets < 5:
     errors.append(f"iPhone playback navigation: expected mini-player inset on 5 tabs, found {mini_player_insets}")
 require(product_views, ".toolbarBackground(.visible, for: .tabBar)", "Visible iPhone tab bar during playback")
-forbid(
-    product_views,
-    '.tint(ProductTheme.accent)\n        .safeAreaInset(edge: .bottom',
-    "Root TabView mini-player overlay",
-)
+forbid(product_views, '.tint(ProductTheme.accent)\n        .safeAreaInset(edge: .bottom', "Root TabView mini-player overlay")
 
-# Bad source must stay separate from musical Less on both iPhone and Watch gateway.
-# The backend deliberately interprets sourceRejectTag + -1 as a source-rejection row,
-# outside the musical taste table; tagged 0 removes a rejection.
+# Bad source remains separate from musical taste on both clients.
 require(product_views, "badSource: true", "iPhone bad-source marker")
 require(catalog_service, "badSource: true", "Watch bad-source marker")
 require(api_client, 'sourceRejectTag = "__waxloom_source:not_music__"', "Bad-source persistence tag")
 require(api_client, "let feedbackValue = badSource ? -1 : value", "Bad-source negative is source-only")
 require(api_client, "value: feedbackValue", "Bad-source encoded feedback value")
 
-# Full server API adapters stay centralized in the iPhone client.
+# Server API adapters remain centralized in the iPhone client for this tranche.
 for function in (
     "static func artists", "static func search", "static func playlists", "static func playlist",
     "static func createPlaylist", "static func updatePlaylist", "static func deletePlaylist",
