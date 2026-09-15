@@ -19,8 +19,6 @@ struct WatchProductRootView: View {
 
 private struct WatchNowPlayingDashboard: View {
     @ObservedObject var remote: WatchRemoteModel
-    @State private var seekPosition = 0.0
-    @State private var seeking = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -46,42 +44,6 @@ private struct WatchNowPlayingDashboard: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-
-            VStack(spacing: 2) {
-                Slider(
-                    value: Binding(
-                        get: {
-                            if seeking { return seekPosition }
-                            return min(
-                                remote.snapshot.elapsedSeconds,
-                                max(0, remote.snapshot.durationSeconds)
-                            )
-                        },
-                        set: { seekPosition = $0 }
-                    ),
-                    in: 0...max(1, remote.snapshot.durationSeconds),
-                    onEditingChanged: { editing in
-                        if editing {
-                            seeking = true
-                            seekPosition = remote.snapshot.elapsedSeconds
-                        } else {
-                            let target = seekPosition
-                            seeking = false
-                            Task { _ = await remote.seek(to: target) }
-                        }
-                    }
-                )
-                .tint(WatchProductStyle.accent)
-                .disabled(!canSend || remote.snapshot.durationSeconds <= 0)
-
-                HStack {
-                    Text(watchTime(seeking ? seekPosition : remote.snapshot.elapsedSeconds))
-                    Spacer()
-                    Text(watchTime(remote.snapshot.durationSeconds))
-                }
-                .font(.system(size: 8, design: .monospaced))
-                .foregroundStyle(.secondary)
-            }
 
             HStack(spacing: 7) {
                 WatchRoundControl(symbol: "backward.fill", enabled: canSend) { remote.send(.previous) }
@@ -146,13 +108,6 @@ private struct WatchBrowseDashboard: View {
                         WatchSearchView(remote: remote)
                     } label: {
                         WatchMenuTile(title: "Search", symbol: "magnifyingglass")
-                    }
-                    .buttonStyle(.plain)
-
-                    NavigationLink {
-                        WatchImportsView(remote: remote)
-                    } label: {
-                        WatchMenuTile(title: "Manual", symbol: "slider.horizontal.3")
                     }
                     .buttonStyle(.plain)
                 }
@@ -1078,10 +1033,4 @@ private struct WatchStatusRow: View {
 
 private enum WatchProductStyle {
     static let accent = Color(red: 0.68, green: 0.34, blue: 0.98)
-}
-
-private func watchTime(_ seconds: Double) -> String {
-    guard seconds.isFinite, seconds > 0 else { return "0:00" }
-    let value = Int(seconds)
-    return String(format: "%d:%02d", value / 60, value % 60)
 }
