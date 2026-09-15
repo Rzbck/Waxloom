@@ -19,6 +19,8 @@ struct WatchProductRootView: View {
 
 private struct WatchNowPlayingDashboard: View {
     @ObservedObject var remote: WatchRemoteModel
+    @State private var seekPosition = 0.0
+    @State private var seeking = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -45,18 +47,35 @@ private struct WatchNowPlayingDashboard: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
-            VStack(spacing: 3) {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.white.opacity(0.10))
-                        Capsule()
-                            .fill(WatchProductStyle.accent)
-                            .frame(width: proxy.size.width * progressFraction)
+            VStack(spacing: 2) {
+                Slider(
+                    value: Binding(
+                        get: {
+                            if seeking { return seekPosition }
+                            return min(
+                                remote.snapshot.elapsedSeconds,
+                                max(0, remote.snapshot.durationSeconds)
+                            )
+                        },
+                        set: { seekPosition = $0 }
+                    ),
+                    in: 0...max(1, remote.snapshot.durationSeconds),
+                    onEditingChanged: { editing in
+                        if editing {
+                            seeking = true
+                            seekPosition = remote.snapshot.elapsedSeconds
+                        } else {
+                            let target = seekPosition
+                            seeking = false
+                            Task { _ = await remote.seek(to: target) }
+                        }
                     }
-                }
-                .frame(height: 4)
+                )
+                .tint(WatchProductStyle.accent)
+                .disabled(!canSend || remote.snapshot.durationSeconds <= 0)
+
                 HStack {
-                    Text(watchTime(remote.snapshot.elapsedSeconds))
+                    Text(watchTime(seeking ? seekPosition : remote.snapshot.elapsedSeconds))
                     Spacer()
                     Text(watchTime(remote.snapshot.durationSeconds))
                 }
@@ -93,11 +112,6 @@ private struct WatchNowPlayingDashboard: View {
     private var canSend: Bool {
         remote.phoneReachable && remote.pendingCommand == nil && remote.snapshot.sessionID != "idle"
     }
-
-    private var progressFraction: CGFloat {
-        guard remote.snapshot.durationSeconds > 0 else { return 0 }
-        return CGFloat(max(0, min(1, remote.snapshot.elapsedSeconds / remote.snapshot.durationSeconds)))
-    }
 }
 
 private struct WatchBrowseDashboard: View {
@@ -122,7 +136,7 @@ private struct WatchBrowseDashboard: View {
                     WatchMenuLink(remote: remote, title: "Favorites", symbol: "heart.fill", route: .favorites)
                     WatchMenuLink(remote: remote, title: "Playlists", symbol: "music.note.list", route: .playlists)
                     NavigationLink {
-                        WatchDiscoveryDashboard(remote: remote)
+                        WatchDiscoveryDashboardV2(remote: remote)
                     } label: {
                         WatchMenuTile(title: "Discovery", symbol: "sparkles")
                     }
@@ -335,7 +349,7 @@ private struct WatchDiscoveryDashboard: View {
         guard let best = sources.items.max(by: {
             ($0.score ?? 0) < ($1.score ?? 0)
         }) else {
-            message = "No automatic source found. Choose one manually."
+            message = "No automatic source found. Choose the source manually."
             manualImportItem = item
             return
         }
@@ -461,6 +475,7 @@ private struct WatchCatalogListView: View {
     let containerItem: WatchCatalogItem?
     @State private var response: WatchCatalogResponse?
     @State private var loading = false
+    @State private var containerStarred: Bool
 
     init(
         remote: WatchRemoteModel,
@@ -474,6 +489,7 @@ private struct WatchCatalogListView: View {
         self.id = id
         self.title = title
         self.containerItem = containerItem
+        _containerStarred = State(initialValue: containerItem?.starred ?? false)
     }
 
     var body: some View {
@@ -482,7 +498,10 @@ private struct WatchCatalogListView: View {
                 Button {
                     Task { await toggleContainerStar(containerItem) }
                 } label: {
-                    Label(containerItem.starred ? "Remove favorite" : "Favorite", systemImage: containerItem.starred ? "heart.fill" : "heart")
+                    Label(
+                        containerStarred ? "Remove favorite" : "Favorite",
+                        systemImage: containerStarred ? "heart.fill" : "heart"
+                    )
                 }
             }
 
@@ -511,7 +530,7 @@ private struct WatchCatalogListView: View {
             }
         }
         .navigationTitle(response?.title ?? title)
-        .task { await load() }
+        .task(id: remote.catalogRevision) { await load() }
     }
 
     @ViewBuilder
@@ -554,8 +573,11 @@ private struct WatchCatalogListView: View {
     }
 
     private func toggleContainerStar(_ item: WatchCatalogItem) async {
-        let result = await remote.toggleStar(item)
+        var requestItem = item
+        requestItem.starred = containerStarred
+        let result = await remote.toggleStar(requestItem)
         if result.ok, let updated = result.items.first {
+            containerStarred = updated.starred
             var current = response
             current?.message = updated.starred ? "Favorited" : "Favorite removed"
             response = current
@@ -597,7 +619,7 @@ private struct WatchPlaylistDetailView: View {
             if let message { Text(message).font(.caption2).foregroundStyle(.orange) }
         }
         .navigationTitle(playlist.title)
-        .task { await load() }
+        .task(id: remote.catalogRevision) { await load() }
     }
 
     private func load() async {
@@ -732,7 +754,9 @@ private struct WatchPlaylistPickerView: View {
             if let message { Text(message).font(.caption2).foregroundStyle(.secondary) }
         }
         .navigationTitle("Add to")
-        .task { items = (await remote.load(route: .playlists)).items }
+        .task(id: remote.catalogRevision) {
+            items = (await remote.load(route: .playlists)).items
+        }
     }
 }
 
@@ -770,6 +794,7 @@ private struct WatchPlaylistAddView: View {
 
 private struct WatchNewPlaylistView: View {
     @ObservedObject var remote: WatchRemoteModel
+    @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var message: String?
 
@@ -780,7 +805,10 @@ private struct WatchNewPlaylistView: View {
                 Task {
                     let result = await remote.createPlaylist(name: name)
                     message = result.ok ? "Created" : result.message
-                    if result.ok { name = "" }
+                    if result.ok {
+                        name = ""
+                        dismiss()
+                    }
                 }
             } label: {
                 Label("Create", systemImage: "plus.circle.fill")
@@ -822,6 +850,11 @@ private struct WatchSearchView: View {
             }
         }
         .navigationTitle("Search")
+        .task(id: remote.catalogRevision) {
+            if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                await search()
+            }
+        }
     }
 
     @ViewBuilder
