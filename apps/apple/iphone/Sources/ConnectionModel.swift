@@ -20,11 +20,23 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var health: WaxloomHealth?
 
     private static let serverKey = "waxloom.server.https"
+    private static let passiveConnectWait: TimeInterval = 6
 
     private struct ConnectionFlight {
         let id: UUID
         let endpoint: String
         let task: Task<Void, Never>
+    }
+
+    @MainActor
+    private final class ConnectionWaitGate {
+        private var finished = false
+
+        func finish(_ continuation: CheckedContinuation<Void, Never>) {
+            guard !finished else { return }
+            finished = true
+            continuation.resume()
+        }
     }
 
     private var connectionFlight: ConnectionFlight?
@@ -56,9 +68,26 @@ final class ConnectionModel: ObservableObject {
         }
     }
 
+    // Automatic/background callers should not inherit the full transport retry
+    // budget. The shared connection flight keeps running, but this caller regains
+    // control after a short bounded wait. Explicit user Connect still calls
+    // `connect()` and awaits the complete check.
     func connectSavedIfNeeded() async {
         guard !serverURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        await connect()
+        guard !isConnected else { return }
+
+        let gate = ConnectionWaitGate()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            Task { @MainActor [weak self] in
+                if let self {
+                    await self.connect()
+                }
+                gate.finish(continuation)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.passiveConnectWait) {
+                gate.finish(continuation)
+            }
+        }
     }
 
     func connect() async {
@@ -164,7 +193,10 @@ final class ConnectionModel: ObservableObject {
 
                     // A stale request must never overwrite a URL edited while the
                     // network request was in flight.
-                    guard isCurrentEndpoint(endpoint) else { return }
+                    guard isCurrentEndpoint(endpoint) else {
+                        settleStaleFlight(endpoint: endpoint)
+                        return
+                    }
 
                     serverURLText = endpoint
                     UserDefaults.standard.set(endpoint, forKey: Self.serverKey)
@@ -188,11 +220,21 @@ final class ConnectionModel: ObservableObject {
             }
             throw ConnectionError.invalidResponse(statusCode: nil)
         } catch {
-            guard isCurrentEndpoint(endpoint) else { return }
+            guard isCurrentEndpoint(endpoint) else {
+                settleStaleFlight(endpoint: endpoint)
+                return
+            }
             connectedServerURL = nil
             health = nil
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func settleStaleFlight(endpoint: String) {
+        guard connectionFlight?.endpoint == endpoint else { return }
+        connectedServerURL = nil
+        health = nil
+        state = .idle
     }
 
     private func isCurrentEndpoint(_ endpoint: String) -> Bool {
