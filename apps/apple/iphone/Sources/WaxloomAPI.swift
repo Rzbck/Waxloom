@@ -379,10 +379,10 @@ enum WaxloomAPI {
             tags.insert(sourceRejectTag, at: 0)
             tags = Array(tags.prefix(12))
         }
-        // The backend stores source-rejection rows separately from musical
-        // taste feedback. A tagged -1 hides the bad source without adding a
-        // musical dislike. A tagged 0 would *remove* an existing rejection.
+        // Keep the established source-only rejection invariant. A tagged 0
+        // still removes the rejection so the Watch action can be undone.
         let feedbackValue = badSource ? -1 : value
+        let persistedValue = badSource && value == 0 ? 0 : feedbackValue
         let _: OKResponse = try await request(
             baseURL: baseURL,
             path: "/api/discovery/feedback",
@@ -392,7 +392,7 @@ enum WaxloomAPI {
                 artist: candidate.artist,
                 title: candidate.title,
                 tags: tags,
-                value: feedbackValue
+                value: persistedValue
             )
         )
     }
