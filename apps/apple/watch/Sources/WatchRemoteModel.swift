@@ -92,14 +92,23 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func load(route: WatchCatalogRoute, id: String? = nil, query: String? = nil) async -> WatchCatalogResponse {
-        let response = await catalog(
-            WatchCatalogRequest(
-                action: .load,
-                route: route,
-                id: id,
-                query: query
-            )
+        let request = WatchCatalogRequest(
+            action: .load,
+            route: route,
+            id: id,
+            query: query
         )
+
+        // Discovery is intentionally cache-first on Watch. Re-entering the
+        // screen must be instant instead of waking the iPhone and rebuilding
+        // the same feed every time. Explicit refresh/mutations invalidate this
+        // cache so the next load becomes authoritative again.
+        if route == .discovery, let cached = cachedCatalogResponse(for: request) {
+            rememberPlaybackQueues(cached.items)
+            return cached
+        }
+
+        let response = await catalog(request)
         if response.ok {
             rememberPlaybackQueues(response.items)
         }
@@ -107,14 +116,16 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func refreshDiscovery() async -> WatchCatalogResponse {
-        registerMutation(
-            await catalog(
-                WatchCatalogRequest(
-                    action: .refreshDiscovery,
-                    route: .discovery
-                )
+        let response = await catalog(
+            WatchCatalogRequest(
+                action: .refreshDiscovery,
+                route: .discovery
             )
         )
+        if response.ok {
+            invalidateDiscoveryCache()
+        }
+        return registerMutation(response)
     }
 
     func play(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
@@ -154,21 +165,27 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func discoveryFeedback(_ item: WatchCatalogItem, value: Int) async -> WatchCatalogResponse {
-        registerMutation(
-            await catalog(WatchCatalogRequest(action: .discoveryFeedback, value: value, item: item))
+        let response = await catalog(
+            WatchCatalogRequest(action: .discoveryFeedback, value: value, item: item)
         )
+        if response.ok {
+            invalidateDiscoveryCache()
+        }
+        return registerMutation(response)
     }
 
     func setBadSource(_ item: WatchCatalogItem, rejected: Bool) async -> WatchCatalogResponse {
-        registerMutation(
-            await catalog(
-                WatchCatalogRequest(
-                    action: .badSource,
-                    value: rejected ? 1 : 0,
-                    item: item
-                )
+        let response = await catalog(
+            WatchCatalogRequest(
+                action: .badSource,
+                value: rejected ? 1 : 0,
+                item: item
             )
         )
+        if response.ok {
+            invalidateDiscoveryCache()
+        }
+        return registerMutation(response)
     }
 
     func rejectBadSource(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
@@ -227,17 +244,19 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         title: String,
         authorized: Bool
     ) async -> WatchCatalogResponse {
-        registerMutation(
-            await catalog(
-                WatchCatalogRequest(
-                    action: .youtubeImport,
-                    artist: artist,
-                    title: title,
-                    authorized: authorized,
-                    item: item
-                )
+        let response = await catalog(
+            WatchCatalogRequest(
+                action: .youtubeImport,
+                artist: artist,
+                title: title,
+                authorized: authorized,
+                item: item
             )
         )
+        if response.ok {
+            invalidateDiscoveryCache()
+        }
+        return registerMutation(response)
     }
 
     func catalog(_ request: WatchCatalogRequest) async -> WatchCatalogResponse {
@@ -371,6 +390,12 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             let id = request.id ?? "root"
             return "\(Self.catalogCachePrefix).\(route.rawValue).\(id)"
         }
+    }
+
+    private func invalidateDiscoveryCache() {
+        let request = WatchCatalogRequest(action: .load, route: .discovery)
+        guard let key = catalogCacheKey(for: request) else { return }
+        UserDefaults.standard.removeObject(forKey: key)
     }
 
     private func cachedCatalogResponse(for request: WatchCatalogRequest) -> WatchCatalogResponse? {
