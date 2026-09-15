@@ -17,6 +17,25 @@ enum WatchCatalogService {
             case .load:
                 return try await load(request, baseURL: baseURL)
 
+            case .refreshDiscovery:
+                try await WaxloomAPI.refreshDiscoveryFeed(baseURL: baseURL)
+                return .success(
+                    token: request.token,
+                    title: "Discovery refreshed",
+                    message: "Generating a new Discovery feed"
+                )
+
+            case .seek:
+                guard let position = request.position else {
+                    return .failure(token: request.token, message: "Missing playback position")
+                }
+                player.seek(to: max(0, position))
+                return .success(
+                    token: request.token,
+                    title: "Seeked",
+                    message: "Playback position updated"
+                )
+
             case .play:
                 guard let item = request.item else {
                     return .failure(token: request.token, message: "Missing media item")
@@ -24,13 +43,46 @@ enum WatchCatalogService {
                 switch item.kind {
                 case .song:
                     let song = try await WaxloomAPI.song(baseURL: baseURL, id: item.id)
-                    player.play(song: song, queue: [song], baseURL: baseURL)
+                    let requestedQueue = (request.items ?? [])
+                        .filter { $0.kind == .song }
+                    let queueItems = requestedQueue.contains(where: { $0.id == item.id })
+                        ? requestedQueue
+                        : [item]
+                    var queue = queueItems.map(songFromCatalogItem)
+                    if let currentIndex = queue.firstIndex(where: { $0.id == song.id }) {
+                        queue[currentIndex] = song
+                    }
+                    player.play(song: song, queue: queue, baseURL: baseURL)
                     return .success(token: request.token, title: "Playing", message: song.title ?? "Track")
 
                 case .discovery:
                     let candidate = discoveryCandidate(from: item)
-                    await player.playPreview(candidate: candidate, queue: [candidate], baseURL: baseURL)
-                    return .success(token: request.token, title: "Preview", message: candidate.title)
+
+                    let feed = try await WaxloomAPI.discoveryFeed(baseURL: baseURL)
+                    let authoritativeDiscoveryItems = discoveryItems(feed.external.items)
+                    let section = item.section ?? "Closest"
+                    let authoritativeShelf = authoritativeDiscoveryItems.filter {
+                        ($0.section ?? "Closest") == section
+                    }
+
+                    let requestedQueue = (request.items ?? [])
+                        .filter { $0.kind == .discovery }
+                    let queueItems: [WatchCatalogItem]
+                    if authoritativeShelf.contains(where: { $0.id == item.id }) {
+                        queueItems = authoritativeShelf
+                    } else if requestedQueue.contains(where: { $0.id == item.id }) {
+                        queueItems = requestedQueue
+                    } else {
+                        queueItems = [item]
+                    }
+
+                    let queue = queueItems.map(discoveryCandidate)
+                    await player.playPreview(candidate: candidate, queue: queue, baseURL: baseURL)
+                    return .success(
+                        token: request.token,
+                        title: "Preview",
+                        message: "\(candidate.title) · \(queue.count) in queue"
+                    )
 
                 default:
                     return .failure(token: request.token, message: "Open this item first")
@@ -55,19 +107,29 @@ enum WatchCatalogService {
                     candidate: discoveryCandidate(from: item),
                     value: value
                 )
-                return .success(token: request.token, title: value > 0 ? "Liked" : value < 0 ? "Less like this" : "Feedback cleared")
+                return .success(
+                    token: request.token,
+                    title: value > 0 ? "Liked" : value < 0 ? "Less like this" : "Feedback cleared"
+                )
 
             case .badSource:
                 guard let item = request.item else {
                     return .failure(token: request.token, message: "Missing Discovery item")
                 }
+                let rejected = (request.value ?? 1) != 0
                 try await WaxloomAPI.discoveryFeedback(
                     baseURL: baseURL,
                     candidate: discoveryCandidate(from: item),
-                    value: 0,
+                    value: rejected ? -1 : 0,
                     badSource: true
                 )
-                return .success(token: request.token, title: "Source rejected", message: "Marked bad / non-music without changing musical taste")
+                return .success(
+                    token: request.token,
+                    title: rejected ? "Source rejected" : "Source restored",
+                    message: rejected
+                        ? "Marked bad / non-music without changing musical taste"
+                        : "Bad-source mark removed"
+                )
 
             case .createPlaylist:
                 let name = (request.query ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -192,11 +254,12 @@ enum WatchCatalogService {
 
         case .discovery:
             let feed = try await WaxloomAPI.discoveryFeed(baseURL: baseURL)
-            let items = feed.external.items
-                .filter { ($0.feedback ?? 0) >= 0 }
-                .sorted { $0.rank > $1.rank }
-                .map(discoveryItem)
-            return .success(token: request.token, title: "Discovery", status: feed.status, items: items)
+            return .success(
+                token: request.token,
+                title: "Discovery",
+                status: feed.status,
+                items: discoveryItems(feed.external.items)
+            )
 
         case .search:
             let query = (request.query ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -260,6 +323,126 @@ enum WatchCatalogService {
         }
     }
 
+    private static func discoveryItems(_ values: [WaxloomDiscoveryCandidate]) -> [WatchCatalogItem] {
+        let ranked = values
+            .filter { ($0.feedback ?? 0) >= 0 }
+            .sorted { $0.rank > $1.rank }
+
+        let listenbrainz = ranked.filter { $0.source == "listenbrainz" }
+        let catalogue = ranked.filter { $0.source == "musicbrainz_catalog" }
+        let otherMetadata = ranked.filter {
+            $0.source != "youtube_dig"
+                && $0.source != "listenbrainz"
+                && $0.source != "musicbrainz_catalog"
+        }
+
+        var used = Set<String>()
+
+        func artistKey(_ item: WaxloomDiscoveryCandidate) -> String {
+            item.artist
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+                .lowercased()
+        }
+
+        func fillShelf(
+            primary: [WaxloomDiscoveryCandidate],
+            fallback: [WaxloomDiscoveryCandidate],
+            target: Int
+        ) -> [WaxloomDiscoveryCandidate] {
+            var output: [WaxloomDiscoveryCandidate] = []
+            var localIDs = Set<String>()
+            var artistCounts: [String: Int] = [:]
+
+            func append(_ candidate: WaxloomDiscoveryCandidate) {
+                guard output.count < target else { return }
+                guard !used.contains(candidate.recordingMbid) else { return }
+                guard !localIDs.contains(candidate.recordingMbid) else { return }
+
+                let artist = artistKey(candidate)
+                guard artistCounts[artist, default: 0] < 2 else { return }
+
+                output.append(candidate)
+                localIDs.insert(candidate.recordingMbid)
+                used.insert(candidate.recordingMbid)
+                artistCounts[artist, default: 0] += 1
+            }
+
+            for candidate in primary { append(candidate) }
+            if output.count < target {
+                for candidate in fallback { append(candidate) }
+            }
+            return output
+        }
+
+        let deepListenbrainz = listenbrainz.sorted { lhs, rhs in
+            let leftDepth = lhs.underground * 0.65 + max(0, 1 - lhs.rank) * 0.35
+            let rightDepth = rhs.underground * 0.65 + max(0, 1 - rhs.rank) * 0.35
+            return leftDepth > rightDepth
+        }
+
+        let proportionalReserve = listenbrainz.count < 2
+            ? 0
+            : max(1, Int(Double(listenbrainz.count) * 0.35))
+        let catalogueShortfall = max(0, 6 - catalogue.count)
+        let deepFallbackQuota = min(6, min(catalogueShortfall, proportionalReserve))
+        let deepFallback = Array(deepListenbrainz.prefix(deepFallbackQuota))
+
+        let deep = fillShelf(
+            primary: catalogue,
+            fallback: deepFallback,
+            target: 20
+        )
+
+        let closestPrimary = (listenbrainz + otherMetadata)
+            .filter { !used.contains($0.recordingMbid) }
+            .sorted { $0.rank > $1.rank }
+
+        let closest = fillShelf(
+            primary: closestPrimary,
+            fallback: closestPrimary,
+            target: 20
+        )
+
+        let youtubeDigPrimary = ranked
+            .filter { $0.source == "youtube_dig" }
+            .sorted {
+                ($0.underground + $0.rank * 0.25)
+                    > ($1.underground + $1.rank * 0.25)
+            }
+
+        let rareMetadataFallback = listenbrainz
+            .filter {
+                !used.contains($0.recordingMbid)
+                    && $0.underground >= 0.82
+            }
+            .sorted {
+                ($0.underground + $0.rank * 0.15)
+                    > ($1.underground + $1.rank * 0.15)
+            }
+
+        let underground = fillShelf(
+            primary: youtubeDigPrimary,
+            fallback: rareMetadataFallback,
+            target: 28
+        )
+
+        func mapSection(
+            _ section: String,
+            _ candidates: [WaxloomDiscoveryCandidate]
+        ) -> [WatchCatalogItem] {
+            candidates.map { candidate in
+                var item = discoveryItem(candidate)
+                item.section = section
+                return item
+            }
+        }
+
+        return mapSection("Closest", closest)
+            + mapSection("Underground", underground)
+            + mapSection("Deep cuts", deep)
+    }
+
     private static func songItem(_ value: WaxloomSong) -> WatchCatalogItem {
         WatchCatalogItem(
             id: value.id,
@@ -270,6 +453,26 @@ enum WatchCatalogService {
             coverArt: value.coverArt,
             duration: value.duration,
             starred: !(value.starred ?? "").isEmpty
+        )
+    }
+
+    private static func songFromCatalogItem(_ item: WatchCatalogItem) -> WaxloomSong {
+        WaxloomSong(
+            id: item.id,
+            title: item.title,
+            artist: item.subtitle,
+            artistId: nil,
+            album: item.detail,
+            albumId: nil,
+            coverArt: item.coverArt,
+            duration: item.duration,
+            track: nil,
+            discNumber: nil,
+            year: nil,
+            genre: nil,
+            suffix: nil,
+            starred: item.starred ? "watch" : nil,
+            musicBrainzId: nil
         )
     }
 
