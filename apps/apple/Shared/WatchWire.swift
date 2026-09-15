@@ -106,7 +106,12 @@ struct WaxloomWatchMessage: Codable {
 enum WaxloomWatchCodec {
     static let payloadType = "waxloom_player_wire_v1"
     static let payloadDataKey = "data"
-    static let commandTTL: TimeInterval = 8
+
+    // Playback commands are meaningful only as immediate interactions. A command
+    // delivered after this window is rejected on the phone, preventing a late
+    // message from becoming a surprising "ghost" action after the Watch UI has
+    // already recovered from a transport timeout.
+    static let commandTTL: TimeInterval = 2
 
     static func encode(_ message: WaxloomWatchMessage) -> Data? {
         try? JSONEncoder().encode(message)
