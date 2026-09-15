@@ -9,7 +9,12 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     @Published private(set) var catalogBusy = false
     @Published private(set) var catalogMessage: String?
 
+    private static let commandReplyTimeout: TimeInterval = 3
+    private static let catalogCachePrefix = "waxloom.watch.catalog.cache.v2"
+
     private var pendingToken: String?
+    private var lastSnapshotTimestamp: TimeInterval = 0
+    private var catalogRequestCount = 0
 
     override init() {
         super.init()
@@ -38,7 +43,26 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         pendingCommand = command
         lastResult = nil
 
-        WCSession.default.sendMessage(payload, replyHandler: nil) { [weak self] _ in
+        // One request, one correlated reply. There is no second acknowledgement
+        // message that can be delayed, lost, or reordered independently.
+        WCSession.default.sendMessage(payload) { [weak self] reply in
+            guard let decoded = WaxloomWatchCodec.message(from: reply) else {
+                DispatchQueue.main.async {
+                    guard self?.pendingToken == token else { return }
+                    self?.pendingToken = nil
+                    self?.pendingCommand = nil
+                    self?.lastResult = .unsupported
+                }
+                return
+            }
+
+            DispatchQueue.main.async {
+                guard self?.pendingToken == token else { return }
+                self?.pendingToken = nil
+                self?.pendingCommand = nil
+                self?.apply(decoded)
+            }
+        } errorHandler: { [weak self] _ in
             DispatchQueue.main.async {
                 guard self?.pendingToken == token else { return }
                 self?.pendingToken = nil
@@ -47,11 +71,13 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             }
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + WaxloomWatchCodec.commandTTL) { [weak self] in
+        // A live transport failure must never freeze all controls for the old
+        // eight-second command TTL. Late replies are simply ignored by token.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.commandReplyTimeout) { [weak self] in
             guard self?.pendingToken == token else { return }
             self?.pendingToken = nil
             self?.pendingCommand = nil
-            self?.lastResult = .expired
+            self?.lastResult = .unavailable
         }
     }
 
@@ -144,12 +170,16 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             WCSession.default.isReachable,
             let payload = WatchCatalogCodec.payload(request)
         else {
-            return .failure(token: request.token, message: "iPhone not reachable")
+            if let cached = cachedCatalogResponse(for: request) {
+                return cached
+            }
+            return .failure(token: request.token, message: "iPhone live link unavailable")
         }
 
-        DispatchQueue.main.async { [weak self] in
-            self?.catalogBusy = true
-            self?.catalogMessage = nil
+        await MainActor.run {
+            catalogRequestCount += 1
+            catalogBusy = true
+            catalogMessage = nil
         }
 
         let response: WatchCatalogResponse = await withCheckedContinuation { continuation in
@@ -164,9 +194,14 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             }
         }
 
-        DispatchQueue.main.async { [weak self] in
-            self?.catalogBusy = false
-            self?.catalogMessage = response.ok ? response.message : response.message ?? "Request failed"
+        if response.ok {
+            cacheCatalogResponse(response, for: request)
+        }
+
+        await MainActor.run {
+            catalogRequestCount = max(0, catalogRequestCount - 1)
+            catalogBusy = catalogRequestCount > 0
+            catalogMessage = response.ok ? response.message : response.message ?? "Request failed"
         }
         return response
     }
@@ -190,16 +225,13 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         switch message.kind {
         case .snapshot:
             if let incoming = message.snapshot {
-                applySnapshot(incoming)
+                applySnapshot(incoming, timestamp: message.timestamp)
             }
 
         case .acknowledgement:
-            guard let token = message.token, token == pendingToken else { return }
-            pendingToken = nil
-            pendingCommand = nil
             lastResult = message.result
             if let incoming = message.snapshot {
-                applySnapshot(incoming)
+                applySnapshot(incoming, timestamp: message.timestamp)
             }
 
         case .command:
@@ -207,14 +239,52 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         }
     }
 
-    private func applySnapshot(_ incoming: PlaybackSnapshot) {
-        if
-            incoming.sessionID == snapshot.sessionID,
-            incoming.revision < snapshot.revision
-        {
+    private func applySnapshot(_ incoming: PlaybackSnapshot, timestamp: TimeInterval) {
+        // Revision is monotonic only for one iPhone player process. Timestamp is
+        // the cross-session ordering key, so an old application-context delivery
+        // cannot replace a newer track simply because sessionID changed.
+        if timestamp < lastSnapshotTimestamp {
             return
         }
+        if timestamp == lastSnapshotTimestamp, incoming.revision < snapshot.revision {
+            return
+        }
+        lastSnapshotTimestamp = timestamp
         snapshot = incoming
+    }
+
+    private func catalogCacheKey(for request: WatchCatalogRequest) -> String? {
+        guard request.action == .load, let route = request.route else { return nil }
+        switch route {
+        case .search, .imports:
+            return nil
+        default:
+            let id = request.id ?? "root"
+            return "\(Self.catalogCachePrefix).\(route.rawValue).\(id)"
+        }
+    }
+
+    private func cachedCatalogResponse(for request: WatchCatalogRequest) -> WatchCatalogResponse? {
+        guard
+            let key = catalogCacheKey(for: request),
+            let data = UserDefaults.standard.data(forKey: key),
+            var cached = try? JSONDecoder().decode(WatchCatalogResponse.self, from: data)
+        else {
+            return nil
+        }
+        cached.token = request.token
+        cached.status = "cached"
+        return cached
+    }
+
+    private func cacheCatalogResponse(_ response: WatchCatalogResponse, for request: WatchCatalogRequest) {
+        guard
+            let key = catalogCacheKey(for: request),
+            let data = try? JSONEncoder().encode(response)
+        else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: key)
     }
 }
 
@@ -239,12 +309,13 @@ extension WatchRemoteModel: WCSessionDelegate {
             if !session.isReachable {
                 self?.pendingToken = nil
                 self?.pendingCommand = nil
-                self?.catalogBusy = false
             }
         }
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
+        // Kept for rolling-version compatibility. New playback snapshots use
+        // application context and new command acknowledgements are replies.
         receive(message)
     }
 
