@@ -11,6 +11,46 @@ struct WaxloomApp: App {
         let bridge = PhoneWatchBridge()
         let player = NativePlayerModel(watchBridge: bridge)
 
+        bridge.coldStartCommandHandler = { command, expectedSessionID in
+            guard let baseURL = connection.baseURL else {
+                return .unavailable
+            }
+
+            // WatchConnectivity can wake the iPhone app in the background. The
+            // SwiftUI scene may not have reached its normal restore task yet, so
+            // recover the persisted library queue directly before applying the
+            // Watch command.
+            player.setBaseURL(baseURL)
+            await player.restoreQueue(baseURL: baseURL)
+
+            let restoredSessionID: String
+            if let song = player.currentSong {
+                restoredSessionID = "song:\(song.id)"
+            } else if let preview = player.currentPreview {
+                restoredSessionID = "preview:\(preview.recordingMbid)"
+            } else {
+                restoredSessionID = "idle"
+            }
+
+            guard restoredSessionID == expectedSessionID else {
+                return .sessionMismatch
+            }
+
+            switch command {
+            case .playPause:
+                player.toggle()
+            case .next:
+                await player.next()
+            case .previous:
+                await player.previous()
+            case .seekBackward15:
+                player.skip(by: -15)
+            case .seekForward15:
+                player.skip(by: 15)
+            }
+            return .accepted
+        }
+
         bridge.catalogHandler = { request in
             await WatchCatalogService.handle(
                 request,
