@@ -32,6 +32,7 @@ catalog_wire = read("Shared/WatchCatalogWire.swift")
 phone_bridge = read("iphone/Sources/WatchBridge.swift")
 watch_remote = read("watch/Sources/WatchRemoteModel.swift")
 watch_views = read("watch/Sources/WatchProductViews.swift")
+watch_discovery_v2 = read("watch/Sources/WatchDiscoveryV2.swift")
 connection = read("iphone/Sources/ConnectionModel.swift")
 api_client = read("iphone/Sources/WaxloomAPI.swift")
 player = read("iphone/Sources/NativePlayer.swift")
@@ -92,7 +93,8 @@ require(watch_remote, "didReceiveApplicationContext", "Watch receives latest pla
 require(watch_remote, "lastSnapshotTimestamp", "Cross-track stale snapshot ordering")
 require(watch_remote, "timestamp < lastSnapshotTimestamp", "Old snapshot rejection")
 
-# Immediate controls use one request and its correlated reply.
+# Immediate controls use one request and its correlated reply. Do not preflight
+# isReachable: a Watch-originated live message may wake a suspended iPhone app.
 require(phone_bridge, "handlePlaybackCommand", "Phone correlated playback command handler")
 require(phone_bridge, "replyHandler(WaxloomWatchCodec.payload(acknowledgement)", "Playback acknowledgement reply")
 require(phone_bridge, "waitForSnapshotAdvance", "Next/previous waits for resulting snapshot")
@@ -104,7 +106,7 @@ require(app, "restoredSessionID == expectedSessionID", "Cold-start command valid
 require(watch_remote, "WCSession.default.sendMessage(payload) { [weak self] reply in", "Watch correlated command request")
 require(watch_remote, "commandReplyTimeout", "Bounded live command UI lock")
 require(watch_remote, "pendingToken == nil", "No overlapping immediate playback commands")
-require(watch_remote, "WCSession.default.isReachable", "Immediate playback controls require live peer")
+forbid(watch_remote, "WCSession.default.isReachable", "Watch playback reachability preflight")
 forbid(watch_remote, "DispatchQueue.main.asyncAfter(deadline: .now() + WaxloomWatchCodec.commandTTL", "Eight-second UI command lock")
 
 # Catalog stays an iPhone gateway until direct Watch -> private Tailscale HTTPS is
@@ -112,11 +114,13 @@ forbid(watch_remote, "DispatchQueue.main.asyncAfter(deadline: .now() + WaxloomWa
 require(catalog_wire, 'payloadType = "waxloom_catalog_wire_v1"', "Watch catalog protocol")
 require(catalog_wire, "requestTTL: TimeInterval = 20", "Watch catalog request expiry")
 for action in (
-    "load", "play", "toggleStar", "discoveryFeedback", "badSource",
+    "load", "play", "seek", "toggleStar", "discoveryFeedback", "badSource", "refreshDiscovery",
     "createPlaylist", "deletePlaylist", "addToPlaylist", "removeFromPlaylist",
     "youtubeSearch", "youtubeImport",
 ):
     require(catalog_wire, f"case {action}", f"Watch catalog action {action}")
+require(catalog_wire, "var position: Double?", "Watch catalog seek position")
+require(catalog_wire, "var items: [WatchCatalogItem]?", "Watch catalog playback queue")
 
 require(phone_bridge, "WatchCatalogCodec.request", "Watch catalog request decode")
 require(watch_remote, "sendMessage(payload)", "Immediate Watch catalog gateway")
@@ -124,6 +128,12 @@ require(watch_remote, "catalogRequestCount", "Overlapping catalog busy accountin
 require(watch_remote, "cachedCatalogResponse", "Offline Watch catalog read cache")
 require(watch_remote, "cacheCatalogResponse", "Successful Watch catalog cache write")
 require(watch_remote, 'cached.status = "cached"', "Cached response is explicit")
+require(watch_remote, "catalogRevision", "Watch catalog mutation refresh revision")
+require(watch_remote, "playbackQueuesByItemID", "Watch remembers playback queues")
+require(watch_remote, "func refreshDiscovery()", "Watch Discovery refresh command")
+require(watch_remote, "func playDiscovery", "Watch Discovery queue playback")
+require(watch_remote, "func seek(to position: Double)", "Watch seek API")
+require(watch_remote, "func setBadSource", "Watch reversible bad-source action")
 for forbidden_transport in ("transferUserInfo", "transferFile"):
     forbid(watch_remote, forbidden_transport, "Watch mutation transport")
 
@@ -139,12 +149,30 @@ require(watch_views, "remote.rejectBadSource", "Watch bad-source action")
 require(watch_views, "remote.discoveryFeedback", "Watch Discovery feedback")
 require(watch_views, "remote.youtubeImport", "Watch authorized import")
 require(watch_views, "WatchDiscoveryDashboard", "Watch dedicated Discovery dashboard")
+require(watch_views, "WatchDiscoveryDashboardV2(remote: remote)", "Watch routes Discovery to v2 UX")
+require(watch_views, "Slider(", "Watch Now Playing seek slider")
+require(watch_views, "remote.seek(to: target)", "Watch Now Playing seek action")
 require(watch_views, '@AppStorage("waxloom.authorizedMediaImports.v1")', "Watch persistent import authorization")
 require(watch_views, "beginQuickImport(item)", "Watch Discovery one-tap import")
 require(watch_views, "sources.items.max", "Watch automatic best-source selection")
 require(watch_views, "guard (best.score ?? 0) >= 80 else", "Watch ambiguous-source fallback threshold")
 require(watch_views, "manualImportItem = item", "Watch manual-source fallback")
 require(watch_views, "items.removeAll {", "Watch imported Discovery immediate removal")
+
+# Discovery v2 is a retained product requirement, not an optional experiment.
+require(watch_discovery_v2, "struct WatchDiscoveryDashboardV2", "Watch Discovery v2 dashboard")
+require(watch_discovery_v2, 'case closest = "Closest"', "Watch Discovery Closest shelf")
+require(watch_discovery_v2, 'case underground = "Underground"', "Watch Discovery Underground shelf")
+require(watch_discovery_v2, 'case deepCuts = "Deep cuts"', "Watch Discovery Deep cuts shelf")
+require(watch_discovery_v2, "struct WatchDiscoveryItemActionsV2", "Watch compact Discovery item actions")
+require(watch_discovery_v2, "struct WatchDiscoveryActionButtonV2", "Watch compact Discovery action buttons")
+require(watch_discovery_v2, 'symbol: isCurrentAndPlaying ? "pause.fill" : "play.fill"', "Watch Discovery play/pause icon")
+require(watch_discovery_v2, 'symbol: addedToLibrary ? "checkmark" : "plus"', "Watch Discovery add icon")
+require(watch_discovery_v2, 'currentFeedback == 1 ? "heart.fill" : "heart"', "Watch Discovery like icon")
+require(watch_discovery_v2, 'currentFeedback == -1 ? "hand.thumbsdown.fill" : "hand.thumbsdown"', "Watch Discovery dislike icon")
+require(watch_discovery_v2, "remote.playDiscovery(item, queue: queue)", "Watch Discovery shelf playback queue")
+require(watch_discovery_v2, "remote.refreshDiscovery()", "Watch Discovery refresh UI")
+require(watch_discovery_v2, "remote.setBadSource(item, rejected: next)", "Watch Discovery bad-source undo UI")
 
 # iPhone product surface and media semantics.
 for feature in (
@@ -186,19 +214,29 @@ if mini_player_insets < 5:
 require(product_views, ".toolbarBackground(.visible, for: .tabBar)", "Visible iPhone tab bar during playback")
 forbid(product_views, '.tint(ProductTheme.accent)\n        .safeAreaInset(edge: .bottom', "Root TabView mini-player overlay")
 
-# Bad source remains separate from musical taste on both clients.
+# Bad source remains separate from musical taste on both clients and can be undone.
 require(product_views, "badSource: true", "iPhone bad-source marker")
 require(catalog_service, "badSource: true", "Watch bad-source marker")
+require(catalog_service, "let rejected = (request.value ?? 1) != 0", "Watch bad-source reversible state")
 require(api_client, 'sourceRejectTag = "__waxloom_source:not_music__"', "Bad-source persistence tag")
 require(api_client, "let feedbackValue = badSource ? -1 : value", "Bad-source negative is source-only")
-require(api_client, "value: feedbackValue", "Bad-source encoded feedback value")
+require(api_client, "let persistedValue = badSource && value == 0 ? 0 : feedbackValue", "Bad-source undo value")
+require(api_client, "value: persistedValue", "Bad-source encoded feedback value")
+
+# Discovery v2 service semantics.
+require(catalog_service, "case .refreshDiscovery:", "Watch service Discovery refresh")
+require(catalog_service, "case .seek:", "Watch service seek")
+require(catalog_service, "request.items", "Watch service queue transport")
+require(catalog_service, 'mapSection("Closest", closest)', "Watch service Closest shelf")
+require(catalog_service, 'mapSection("Underground", underground)', "Watch service Underground shelf")
+require(catalog_service, 'mapSection("Deep cuts", deep)', "Watch service Deep cuts shelf")
 
 # Server API adapters remain centralized in the iPhone client for this tranche.
 for function in (
     "static func artists", "static func search", "static func playlists", "static func playlist",
     "static func createPlaylist", "static func updatePlaylist", "static func deletePlaylist",
-    "static func playQueue", "static func discoveryFeed", "static func youtubeSearch",
-    "static func youtubeImport", "static func setStarred",
+    "static func playQueue", "static func discoveryFeed", "static func refreshDiscoveryFeed",
+    "static func youtubeSearch", "static func youtubeImport", "static func setStarred",
 ):
     require(api_client, function, f"Native API {function}")
 
