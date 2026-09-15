@@ -5,7 +5,8 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
     @Published private(set) var watchReachable = false
     @Published private(set) var watchInstalled = false
 
-    var commandHandler: (@MainActor (PlaybackCommand, String) async -> PlaybackCommandResult)?
+    var commandHandler: ((PlaybackCommand) -> PlaybackCommandResult)?
+    var coldStartCommandHandler: (@MainActor (PlaybackCommand, String) async -> PlaybackCommandResult)?
     var catalogHandler: (@MainActor (WatchCatalogRequest) async -> WatchCatalogResponse)?
 
     private var currentSnapshot = PlaybackSnapshot.idle
@@ -49,6 +50,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
             let now = Date().timeIntervalSince1970
             let age = now - message.timestamp
             let coldStart = self.currentSnapshot.sessionID == "idle"
+            let startingRevision = self.currentSnapshot.revision
             let result: PlaybackCommandResult
 
             if age < -5 || age > WaxloomWatchCodec.commandTTL {
@@ -58,13 +60,20 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
             } else if !coldStart, message.revision != self.currentSnapshot.revision {
                 result = .staleRevision
             } else if let command = message.command {
-                // When WatchConnectivity wakes a terminated-but-not-force-quit
-                // iPhone app, the bridge starts at an idle snapshot. Let the
-                // player restore its persisted queue before validating the old
-                // Watch session. The player still checks the expected session ID
-                // before executing the command, and the 2-second wire TTL keeps
-                // delayed commands from becoming ghost actions.
-                result = await self.commandHandler?(command, message.sessionID) ?? .unavailable
+                if coldStart {
+                    // A live Watch message can wake a terminated (but not
+                    // user-force-quit) iPhone app in the background. At that
+                    // point this bridge has an idle snapshot even though the
+                    // Watch still has the last persisted player session. Restore
+                    // that player session before deciding whether the command is
+                    // valid; the handler verifies the expected session ID.
+                    result = await self.coldStartCommandHandler?(command, message.sessionID) ?? .unavailable
+                } else {
+                    result = self.commandHandler?(command) ?? .unavailable
+                    if result == .accepted, command == .next || command == .previous {
+                        await self.waitForSnapshotAdvance(after: startingRevision)
+                    }
+                }
             } else {
                 result = .unsupported
             }
@@ -75,6 +84,14 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
                 snapshot: self.currentSnapshot
             )
             replyHandler(WaxloomWatchCodec.payload(acknowledgement) ?? ["ok": false])
+        }
+    }
+
+    @MainActor
+    private func waitForSnapshotAdvance(after revision: Int64) async {
+        let deadline = Date().addingTimeInterval(1.5)
+        while currentSnapshot.revision <= revision, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
         }
     }
 
