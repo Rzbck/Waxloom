@@ -8,6 +8,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     @Published private(set) var lastResult: PlaybackCommandResult?
     @Published private(set) var catalogBusy = false
     @Published private(set) var catalogMessage: String?
+    @Published private(set) var catalogRevision = 0
 
     private static let commandReplyTimeout: TimeInterval = 3
     private static let catalogCachePrefix = "waxloom.watch.catalog.cache.v2"
@@ -15,6 +16,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     private var pendingToken: String?
     private var lastSnapshotTimestamp: TimeInterval = 0
     private var catalogRequestCount = 0
+    private var playbackQueuesByItemID: [String: [WatchCatalogItem]] = [:]
 
     override init() {
         super.init()
@@ -25,7 +27,6 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         guard
             WCSession.isSupported(),
             WCSession.default.activationState == .activated,
-            WCSession.default.isReachable,
             pendingToken == nil
         else {
             lastResult = .unavailable
@@ -43,8 +44,9 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         pendingCommand = command
         lastResult = nil
 
-        // One request, one correlated reply. There is no second acknowledgement
-        // message that can be delayed, lost, or reordered independently.
+        // Do not gate a Watch-originated command on isReachable. A live message
+        // may wake the companion iPhone app from suspension/background. The
+        // correlated reply or the bounded local timeout decides availability.
         WCSession.default.sendMessage(payload) { [weak self] reply in
             guard let decoded = WaxloomWatchCodec.message(from: reply) else {
                 DispatchQueue.main.async {
@@ -57,10 +59,17 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             }
 
             DispatchQueue.main.async {
-                guard self?.pendingToken == token else { return }
-                self?.pendingToken = nil
-                self?.pendingCommand = nil
-                self?.apply(decoded)
+                guard let self, self.pendingToken == token else { return }
+                guard decoded.kind == .acknowledgement, decoded.token == token else {
+                    self.pendingToken = nil
+                    self.pendingCommand = nil
+                    self.lastResult = .unsupported
+                    return
+                }
+                self.phoneReachable = true
+                self.pendingToken = nil
+                self.pendingCommand = nil
+                self.apply(decoded)
             }
         } errorHandler: { [weak self] _ in
             DispatchQueue.main.async {
@@ -68,11 +77,12 @@ final class WatchRemoteModel: NSObject, ObservableObject {
                 self?.pendingToken = nil
                 self?.pendingCommand = nil
                 self?.lastResult = .unavailable
+                self?.phoneReachable = false
             }
         }
 
-        // A live transport failure must never freeze all controls for the old
-        // eight-second command TTL. Late replies are simply ignored by token.
+        // Never freeze the controls for transport retry/command TTL budgets.
+        // Late replies are ignored by the per-command token.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.commandReplyTimeout) { [weak self] in
             guard self?.pendingToken == token else { return }
             self?.pendingToken = nil
@@ -82,7 +92,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func load(route: WatchCatalogRoute, id: String? = nil, query: String? = nil) async -> WatchCatalogResponse {
-        await catalog(
+        let response = await catalog(
             WatchCatalogRequest(
                 action: .load,
                 route: route,
@@ -90,48 +100,113 @@ final class WatchRemoteModel: NSObject, ObservableObject {
                 query: query
             )
         )
+        if response.ok {
+            rememberPlaybackQueues(response.items)
+        }
+        return response
+    }
+
+    func refreshDiscovery() async -> WatchCatalogResponse {
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .refreshDiscovery,
+                    route: .discovery
+                )
+            )
+        )
     }
 
     func play(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .play, item: item))
+        let queue = playbackQueuesByItemID[item.id] ?? [item]
+        return await catalog(
+            WatchCatalogRequest(
+                action: .play,
+                item: item,
+                items: queue
+            )
+        )
+    }
+
+    func playDiscovery(_ item: WatchCatalogItem, queue: [WatchCatalogItem]) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .play,
+                item: item,
+                items: queue
+            )
+        )
+    }
+
+    func seek(to position: Double) async -> WatchCatalogResponse {
+        await catalog(
+            WatchCatalogRequest(
+                action: .seek,
+                position: max(0, position)
+            )
+        )
     }
 
     func toggleStar(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .toggleStar, item: item))
+        registerMutation(
+            await catalog(WatchCatalogRequest(action: .toggleStar, item: item))
+        )
     }
 
     func discoveryFeedback(_ item: WatchCatalogItem, value: Int) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .discoveryFeedback, value: value, item: item))
+        registerMutation(
+            await catalog(WatchCatalogRequest(action: .discoveryFeedback, value: value, item: item))
+        )
+    }
+
+    func setBadSource(_ item: WatchCatalogItem, rejected: Bool) async -> WatchCatalogResponse {
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .badSource,
+                    value: rejected ? 1 : 0,
+                    item: item
+                )
+            )
+        )
     }
 
     func rejectBadSource(_ item: WatchCatalogItem) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .badSource, item: item))
+        await setBadSource(item, rejected: true)
     }
 
     func createPlaylist(name: String) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .createPlaylist, query: name))
+        registerMutation(
+            await catalog(WatchCatalogRequest(action: .createPlaylist, query: name))
+        )
     }
 
     func deletePlaylist(id: String) async -> WatchCatalogResponse {
-        await catalog(WatchCatalogRequest(action: .deletePlaylist, id: id))
+        registerMutation(
+            await catalog(WatchCatalogRequest(action: .deletePlaylist, id: id))
+        )
     }
 
     func addToPlaylist(playlistID: String, songID: String) async -> WatchCatalogResponse {
-        await catalog(
-            WatchCatalogRequest(
-                action: .addToPlaylist,
-                id: playlistID,
-                secondaryID: songID
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .addToPlaylist,
+                    id: playlistID,
+                    secondaryID: songID
+                )
             )
         )
     }
 
     func removeFromPlaylist(playlistID: String, index: Int) async -> WatchCatalogResponse {
-        await catalog(
-            WatchCatalogRequest(
-                action: .removeFromPlaylist,
-                id: playlistID,
-                index: index
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .removeFromPlaylist,
+                    id: playlistID,
+                    index: index
+                )
             )
         )
     }
@@ -152,13 +227,15 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         title: String,
         authorized: Bool
     ) async -> WatchCatalogResponse {
-        await catalog(
-            WatchCatalogRequest(
-                action: .youtubeImport,
-                artist: artist,
-                title: title,
-                authorized: authorized,
-                item: item
+        registerMutation(
+            await catalog(
+                WatchCatalogRequest(
+                    action: .youtubeImport,
+                    artist: artist,
+                    title: title,
+                    authorized: authorized,
+                    item: item
+                )
             )
         )
     }
@@ -167,13 +244,12 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         guard
             WCSession.isSupported(),
             WCSession.default.activationState == .activated,
-            WCSession.default.isReachable,
             let payload = WatchCatalogCodec.payload(request)
         else {
             if let cached = cachedCatalogResponse(for: request) {
                 return cached
             }
-            return .failure(token: request.token, message: "iPhone live link unavailable")
+            return .failure(token: request.token, message: "iPhone bridge unavailable")
         }
 
         await MainActor.run {
@@ -182,19 +258,31 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             catalogMessage = nil
         }
 
+        // As with playback commands, do not preflight isReachable. sendMessage
+        // itself is allowed to wake the iPhone companion when watchOS can do so.
         let response: WatchCatalogResponse = await withCheckedContinuation { continuation in
-            WCSession.default.sendMessage(payload) { reply in
+            WCSession.default.sendMessage(payload) { [weak self] reply in
                 let decoded = WatchCatalogCodec.response(from: reply)
                     ?? .failure(token: request.token, message: "Invalid iPhone response")
+                DispatchQueue.main.async {
+                    if decoded.ok {
+                        self?.phoneReachable = true
+                    }
+                }
                 continuation.resume(returning: decoded)
-            } errorHandler: { error in
+            } errorHandler: { [weak self] error in
+                let fallback = self?.cachedCatalogResponse(for: request)
+                DispatchQueue.main.async {
+                    self?.phoneReachable = false
+                }
                 continuation.resume(
-                    returning: .failure(token: request.token, message: error.localizedDescription)
+                    returning: fallback
+                        ?? .failure(token: request.token, message: error.localizedDescription)
                 )
             }
         }
 
-        if response.ok {
+        if response.ok, response.status != "cached" {
             cacheCatalogResponse(response, for: request)
         }
 
@@ -206,17 +294,38 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         return response
     }
 
+    private func registerMutation(_ response: WatchCatalogResponse) -> WatchCatalogResponse {
+        guard response.ok else { return response }
+        DispatchQueue.main.async { [weak self] in
+            self?.catalogRevision &+= 1
+        }
+        return response
+    }
+
+    private func rememberPlaybackQueues(_ items: [WatchCatalogItem]) {
+        let songs = items.filter { $0.kind == .song }
+        for item in songs {
+            playbackQueuesByItemID[item.id] = songs
+        }
+
+        let discovery = items.filter { $0.kind == .discovery }
+        for item in discovery {
+            playbackQueuesByItemID[item.id] = discovery
+        }
+    }
+
     private func activate() {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         session.delegate = self
         session.activate()
-        phoneReachable = session.isReachable
+        phoneReachable = session.activationState == .activated
     }
 
     private func receive(_ payload: [String: Any]) {
         guard let message = WaxloomWatchCodec.message(from: payload) else { return }
         DispatchQueue.main.async { [weak self] in
+            self?.phoneReachable = true
             self?.apply(message)
         }
     }
@@ -295,7 +404,9 @@ extension WatchRemoteModel: WCSessionDelegate {
         error: Error?
     ) {
         DispatchQueue.main.async { [weak self] in
-            self?.phoneReachable = session.isReachable
+            // Activation means a Watch-originated live message may be attempted.
+            // A send failure is stronger evidence that the iPhone is unavailable.
+            self?.phoneReachable = activationState == .activated
         }
 
         if activationState == .activated {
@@ -305,10 +416,10 @@ extension WatchRemoteModel: WCSessionDelegate {
 
     func sessionReachabilityDidChange(_ session: WCSession) {
         DispatchQueue.main.async { [weak self] in
-            self?.phoneReachable = session.isReachable
-            if !session.isReachable {
-                self?.pendingToken = nil
-                self?.pendingCommand = nil
+            // A false reachability sample often means iOS is suspended. Do not
+            // disable controls on that sample; a live message may wake the phone.
+            if session.isReachable {
+                self?.phoneReachable = true
             }
         }
     }
