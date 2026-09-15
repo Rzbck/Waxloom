@@ -20,7 +20,14 @@ final class ConnectionModel: ObservableObject {
     @Published private(set) var health: WaxloomHealth?
 
     private static let serverKey = "waxloom.server.https"
-    private var connectionCheckInFlight = false
+
+    private struct ConnectionFlight {
+        let id: UUID
+        let endpoint: String
+        let task: Task<Void, Never>
+    }
+
+    private var connectionFlight: ConnectionFlight?
     private var connectedServerURL: String?
 
     init() {
@@ -51,33 +58,57 @@ final class ConnectionModel: ObservableObject {
 
     func connectSavedIfNeeded() async {
         guard !serverURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        guard !isConnected else { return }
         await connect()
     }
 
     func connect() async {
-        let baseURL: URL
+        let requestedURL: URL
         do {
-            baseURL = try secureBaseURL(from: serverURLText)
+            requestedURL = try secureBaseURL(from: serverURLText)
         } catch {
             health = nil
+            connectedServerURL = nil
             state = .failed(error.localizedDescription)
             return
         }
 
-        let canonicalURL = canonicalString(baseURL)
+        let endpoint = canonicalString(requestedURL)
 
-        // The root view reconnects automatically on launch. If the user taps
-        // Connect at the same time, do not start a second health request that
-        // can race the successful automatic connection and overwrite its state.
-        if connectionCheckInFlight { return }
+        if isConnected, connectedServerURL == endpoint {
+            return
+        }
 
-        // Once this exact endpoint has been validated, repeated taps on
-        // "Connect securely" are intentionally idempotent.
-        if isConnected, connectedServerURL == canonicalURL { return }
+        // Every caller requesting the same endpoint awaits the exact same task.
+        // If another endpoint is currently being checked, wait for that flight to
+        // settle first, then re-evaluate this endpoint instead of racing it.
+        if let active = connectionFlight {
+            await active.task.value
+            if isConnected, connectedServerURL == endpoint {
+                return
+            }
+            if active.endpoint == endpoint {
+                return
+            }
+        }
 
-        connectionCheckInFlight = true
-        defer { connectionCheckInFlight = false }
+        let flightID = UUID()
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performConnection(baseURL: requestedURL, endpoint: endpoint)
+        }
+        connectionFlight = ConnectionFlight(id: flightID, endpoint: endpoint, task: task)
+
+        await task.value
+
+        // A waiter for another endpoint may already have installed the next
+        // flight. Never clear a newer task when this older caller resumes.
+        if connectionFlight?.id == flightID {
+            connectionFlight = nil
+        }
+    }
+
+    private func performConnection(baseURL: URL, endpoint: String) async {
+        guard isCurrentEndpoint(endpoint) else { return }
 
         state = .connecting
         health = nil
@@ -131,9 +162,13 @@ final class ConnectionModel: ObservableObject {
                         throw ConnectionError.serverNotReady
                     }
 
-                    serverURLText = canonicalURL
-                    UserDefaults.standard.set(canonicalURL, forKey: Self.serverKey)
-                    connectedServerURL = canonicalURL
+                    // A stale request must never overwrite a URL edited while the
+                    // network request was in flight.
+                    guard isCurrentEndpoint(endpoint) else { return }
+
+                    serverURLText = endpoint
+                    UserDefaults.standard.set(endpoint, forKey: Self.serverKey)
+                    connectedServerURL = endpoint
                     health = decoded
                     state = .connected
                     return
@@ -153,10 +188,16 @@ final class ConnectionModel: ObservableObject {
             }
             throw ConnectionError.invalidResponse(statusCode: nil)
         } catch {
+            guard isCurrentEndpoint(endpoint) else { return }
             connectedServerURL = nil
             health = nil
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func isCurrentEndpoint(_ endpoint: String) -> Bool {
+        guard let current = try? secureBaseURL(from: serverURLText) else { return false }
+        return canonicalString(current) == endpoint
     }
 
     private func canonicalString(_ url: URL) -> String {
