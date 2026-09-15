@@ -68,7 +68,7 @@ require(connection, "configuration.waitsForConnectivity = true", "Health check w
 forbid(connection, "connectionCheckInFlight", "Return-instead-of-await connection anti-pattern")
 
 # Playback authority: state and commands have intentionally different transports.
-require(shared_wire, 'static let commandTTL: TimeInterval = 8', "Watch command expiry metadata")
+require(shared_wire, 'static let commandTTL: TimeInterval = 2', "Immediate Watch command expiry")
 require(shared_wire, "sessionID: String", "Watch session identity")
 require(shared_wire, "revision: Int64", "Watch authority revision")
 require(shared_wire, "seekBackward15", "Watch seek backward")
