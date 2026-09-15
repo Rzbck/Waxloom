@@ -73,9 +73,13 @@ jobs:
         run: |
           set -euo pipefail
           SHORT_SHA="${GITHUB_SHA:0:12}"
+          BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
+          test -n "$BUILD_NUMBER"
+          echo "APPLE_BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
           cat > "$APP_DIR/Shared/BuildInfo.swift" <<EOF
           enum BuildInfo {
               static let gitSHA = "$SHORT_SHA"
+              static let buildNumber = "$BUILD_NUMBER"
           }
           EOF
       - name: Generate and build unsigned iPhone app
@@ -84,7 +88,7 @@ jobs:
           set -euo pipefail
           IPHONE_DIR="$GITHUB_WORKSPACE/$APP_DIR/iphone"; "$XCODEGEN_BIN" generate --spec "$IPHONE_DIR/project.yml" --project "$IPHONE_DIR"; IPHONE_XCODEPROJ="$IPHONE_DIR/Waxloom.xcodeproj"; test -d "$IPHONE_XCODEPROJ"
           IPHONE_DERIVED="$RUNNER_TEMP/DerivedData-iPhone"; rm -rf "$IPHONE_DERIVED"
-          xcodebuild -project "$IPHONE_XCODEPROJ" -scheme Waxloom -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$IPHONE_DERIVED" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" build
+          xcodebuild -project "$IPHONE_XCODEPROJ" -scheme Waxloom -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$IPHONE_DERIVED" CURRENT_PROJECT_VERSION="$APPLE_BUILD_NUMBER" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" build
           IPHONE_APP_PATH="$(find "$IPHONE_DERIVED/Build/Products" -type d -path '*Release-iphoneos/*.app' | head -n 1)"; test -n "$IPHONE_APP_PATH"; echo "IPHONE_APP_PATH=$IPHONE_APP_PATH" >> "$GITHUB_ENV"
       - name: Generate and build unsigned watchOS companion
         shell: bash
@@ -92,7 +96,7 @@ jobs:
           set -euo pipefail
           WATCH_DIR="$GITHUB_WORKSPACE/$APP_DIR/watch"; "$XCODEGEN_BIN" generate --spec "$WATCH_DIR/project.yml" --project "$WATCH_DIR"; WATCH_XCODEPROJ="$WATCH_DIR/WaxloomWatch.xcodeproj"; test -d "$WATCH_XCODEPROJ"
           WATCH_DERIVED="$RUNNER_TEMP/DerivedData-Watch"; rm -rf "$WATCH_DERIVED"
-          xcodebuild -project "$WATCH_XCODEPROJ" -scheme WaxloomWatch -configuration Release -sdk watchos -destination 'generic/platform=watchOS' -derivedDataPath "$WATCH_DERIVED" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" build
+          xcodebuild -project "$WATCH_XCODEPROJ" -scheme WaxloomWatch -configuration Release -sdk watchos -destination 'generic/platform=watchOS' -derivedDataPath "$WATCH_DERIVED" CURRENT_PROJECT_VERSION="$APPLE_BUILD_NUMBER" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" build
           WATCH_APP_PATH="$(find "$WATCH_DERIVED/Build/Products" -type d -path '*Release-watchos/*.app' | head -n 1)"; test -n "$WATCH_APP_PATH"; WATCH_APPLICATION="$(/usr/libexec/PlistBuddy -c 'Print :WKApplication' "$WATCH_APP_PATH/Info.plist")"; test "$WATCH_APPLICATION" = "true"; echo "WATCH_APP_PATH=$WATCH_APP_PATH" >> "$GITHUB_ENV"
       - name: Assemble companion and verify bundle relationship
         shell: bash
@@ -101,7 +105,8 @@ jobs:
           COMBINED_ROOT="$RUNNER_TEMP/combined-app"; rm -rf "$COMBINED_ROOT"; mkdir -p "$COMBINED_ROOT"; COMBINED_APP_PATH="$COMBINED_ROOT/$(basename "$IPHONE_APP_PATH")"; ditto "$IPHONE_APP_PATH" "$COMBINED_APP_PATH"
           mkdir -p "$COMBINED_APP_PATH/Watch"; EMBEDDED_WATCH_PATH="$COMBINED_APP_PATH/Watch/$(basename "$WATCH_APP_PATH")"; ditto "$WATCH_APP_PATH" "$EMBEDDED_WATCH_PATH"
           IPHONE_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$COMBINED_APP_PATH/Info.plist")"; WATCH_ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$EMBEDDED_WATCH_PATH/Info.plist")"; COMPANION_ID="$(/usr/libexec/PlistBuddy -c 'Print :WKCompanionAppBundleIdentifier' "$EMBEDDED_WATCH_PATH/Info.plist")"; RUNS_INDEPENDENT="$(/usr/libexec/PlistBuddy -c 'Print :WKRunsIndependentlyOfCompanionApp' "$EMBEDDED_WATCH_PATH/Info.plist")"
-          test "$IPHONE_ID" = "$IPHONE_BUNDLE_ID"; test "$WATCH_ID" = "$WATCH_BUNDLE_ID"; test "$COMPANION_ID" = "$IPHONE_BUNDLE_ID"; test "$RUNS_INDEPENDENT" = "false"; test -d "$EMBEDDED_WATCH_PATH"; echo "COMBINED_APP_PATH=$COMBINED_APP_PATH" >> "$GITHUB_ENV"
+          IPHONE_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$COMBINED_APP_PATH/Info.plist")"; WATCH_BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$EMBEDDED_WATCH_PATH/Info.plist")"
+          test "$IPHONE_ID" = "$IPHONE_BUNDLE_ID"; test "$WATCH_ID" = "$WATCH_BUNDLE_ID"; test "$COMPANION_ID" = "$IPHONE_BUNDLE_ID"; test "$RUNS_INDEPENDENT" = "false"; test "$IPHONE_BUILD" = "$APPLE_BUILD_NUMBER"; test "$WATCH_BUILD" = "$APPLE_BUILD_NUMBER"; test -d "$EMBEDDED_WATCH_PATH"; echo "COMBINED_APP_PATH=$COMBINED_APP_PATH" >> "$GITHUB_ENV"
       - name: Package exact-SHA unsigned IPA
         shell: bash
         run: |
@@ -109,7 +114,7 @@ jobs:
           SHORT_SHA="${GITHUB_SHA:0:12}"; OUT="$GITHUB_WORKSPACE/build/waxloom-apple"; PACKAGE="$RUNNER_TEMP/waxloom-ipa"; rm -rf "$OUT" "$PACKAGE"; mkdir -p "$OUT" "$PACKAGE/Payload"; ditto "$COMBINED_APP_PATH" "$PACKAGE/Payload/$(basename "$COMBINED_APP_PATH")"; IPA_PATH="$OUT/Waxloom-companion-unsigned-${SHORT_SHA}.ipa"; (cd "$PACKAGE" && /usr/bin/zip -qry "$IPA_PATH" Payload)
           /usr/bin/unzip -l "$IPA_PATH" > "$OUT/IPA-CONTENTS.txt"; grep -F "Payload/$(basename "$COMBINED_APP_PATH")/Watch/$(basename "$WATCH_APP_PATH")/Info.plist" "$OUT/IPA-CONTENTS.txt"
           cat > "$OUT/BUILD-METADATA.json" <<EOF
-          {"repository":"${GITHUB_REPOSITORY}","ref":"${GITHUB_REF}","sha":"${GITHUB_SHA}","event":"${GITHUB_EVENT_NAME}","product_shell":"native-swiftui","xcode":"$(xcodebuild -version | tr '\n' ' ')","iphoneos_sdk":"$(xcrun --sdk iphoneos --show-sdk-version)","watchos_sdk":"$(xcrun --sdk watchos --show-sdk-version)","xcodegen":"${XCODEGEN_VERSION}","iphone_bundle_id":"${IPHONE_BUNDLE_ID}","watch_bundle_id":"${WATCH_BUNDLE_ID}","signed":false,"ready_for_local_signing":true,"iloader_workflow":true,"watch_companion_integrated_in_ipa":true,"hardware_validated":false,"classification":"CI ASSEMBLED WAXLOOM APPLE - HARDWARE NOT VALIDATED"}
+          {"repository":"${GITHUB_REPOSITORY}","ref":"${GITHUB_REF}","sha":"${GITHUB_SHA}","event":"${GITHUB_EVENT_NAME}","build_number":"${APPLE_BUILD_NUMBER}","product_shell":"native-swiftui","xcode":"$(xcodebuild -version | tr '\n' ' ')","iphoneos_sdk":"$(xcrun --sdk iphoneos --show-sdk-version)","watchos_sdk":"$(xcrun --sdk watchos --show-sdk-version)","xcodegen":"${XCODEGEN_VERSION}","iphone_bundle_id":"${IPHONE_BUNDLE_ID}","watch_bundle_id":"${WATCH_BUNDLE_ID}","signed":false,"ready_for_local_signing":true,"iloader_workflow":true,"watch_companion_integrated_in_ipa":true,"hardware_validated":false,"classification":"CI ASSEMBLED WAXLOOM APPLE - HARDWARE NOT VALIDATED"}
           EOF
           shasum -a 256 "$IPA_PATH" > "$IPA_PATH.sha256"; shasum -a 256 "$OUT/BUILD-METADATA.json" "$OUT/IPA-CONTENTS.txt" > "$OUT/SHA256SUMS.txt"; cat "$IPA_PATH.sha256"
       - name: Upload exact-SHA iLoader candidate
