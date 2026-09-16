@@ -28,6 +28,7 @@ enum WatchCatalogAction: String, Codable {
     case seek
     case toggleStar
     case discoveryFeedback
+    case nowPlayingFeedback
     case badSource
     case refreshDiscovery
     case createPlaylist
@@ -96,6 +97,7 @@ struct WatchCatalogResponse: Codable {
     var message: String?
     var items: [WatchCatalogItem] = []
     var runtimeReady: Bool?
+    var value: Int?
 
     static func success(
         token: String,
@@ -104,7 +106,8 @@ struct WatchCatalogResponse: Codable {
         status: String? = nil,
         message: String? = nil,
         items: [WatchCatalogItem] = [],
-        runtimeReady: Bool? = nil
+        runtimeReady: Bool? = nil,
+        value: Int? = nil
     ) -> Self {
         Self(
             token: token,
@@ -114,7 +117,8 @@ struct WatchCatalogResponse: Codable {
             status: status,
             message: message,
             items: items,
-            runtimeReady: runtimeReady
+            runtimeReady: runtimeReady,
+            value: value
         )
     }
 
