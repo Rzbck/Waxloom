@@ -36,6 +36,14 @@ enum WatchCatalogService {
                     message: "Playback position updated"
                 )
 
+            case .stop:
+                player.stopAndClear()
+                return .success(
+                    token: request.token,
+                    title: "Player cleared",
+                    message: "Playback stopped"
+                )
+
             case .play:
                 guard let item = request.item else {
                     return .failure(token: request.token, message: "Missing media item")
