@@ -19,6 +19,8 @@ struct WatchProductRootView: View {
 
 private struct WatchNowPlayingDashboard: View {
     @ObservedObject var remote: WatchRemoteModel
+    @State private var feedback = 0
+    @State private var feedbackBusy = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -55,24 +57,59 @@ private struct WatchNowPlayingDashboard: View {
                 WatchRoundControl(symbol: "forward.fill", enabled: canSend) { remote.send(.next) }
             }
 
-            HStack(spacing: 12) {
+            HStack(spacing: 13) {
+                Button {
+                    Task { await setFeedback(1) }
+                } label: {
+                    Image(systemName: feedback == 1 ? "heart.fill" : "heart")
+                }
+                .foregroundStyle(feedback == 1 ? Color.pink : WatchProductStyle.accent)
+                .accessibilityLabel(feedback == 1 ? "Clear like" : "Like")
+
                 Button { remote.send(.seekBackward15) } label: {
                     Label("15", systemImage: "gobackward.15").labelStyle(.iconOnly)
                 }
+
                 Button { remote.send(.seekForward15) } label: {
                     Label("15", systemImage: "goforward.15").labelStyle(.iconOnly)
                 }
+
+                Button {
+                    Task { await setFeedback(-1) }
+                } label: {
+                    Image(systemName: feedback == -1 ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                }
+                .foregroundStyle(feedback == -1 ? Color.orange : WatchProductStyle.accent)
+                .accessibilityLabel(feedback == -1 ? "Clear dislike" : "Dislike")
             }
             .font(.system(size: 15, weight: .bold))
             .buttonStyle(.plain)
             .foregroundStyle(canSend ? WatchProductStyle.accent : .secondary)
-            .disabled(!canSend)
+            .disabled(!canSend || feedbackBusy)
         }
         .padding(.horizontal, 4)
+        .onAppear {
+            feedback = remote.snapshot.feedback ?? 0
+        }
+        .onChange(of: remote.snapshot.sessionID) { _, _ in
+            feedback = remote.snapshot.feedback ?? 0
+        }
+        .onChange(of: remote.snapshot.feedback) { _, value in
+            feedback = value ?? 0
+        }
     }
 
     private var canSend: Bool {
         remote.phoneReachable && remote.pendingCommand == nil && remote.snapshot.sessionID != "idle"
+    }
+
+    private func setFeedback(_ value: Int) async {
+        guard !feedbackBusy, canSend else { return }
+        feedbackBusy = true
+        defer { feedbackBusy = false }
+        let result = await remote.nowPlayingFeedback(value)
+        guard result.ok else { return }
+        feedback = result.value ?? 0
     }
 }
 
