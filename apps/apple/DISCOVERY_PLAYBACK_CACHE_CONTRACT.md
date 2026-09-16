@@ -10,6 +10,7 @@ Discovery playback spans three independently rotating pieces of state: the Watch
 - Now Playing taste feedback must refresh the cached Discovery payload before the user returns to Browse, so a persisted Like/Dislike cannot visually revert to stale feedback state.
 - A Discovery `+` import must prefer the verified source already backing the playable preview. Re-running a fuzzy YouTube search is a fallback only when no usable cached preview source remains.
 - Debugging must correlate client-originated playback traces, server HTTP receipt, structured server decision traces, and final result. Cache counters alone are not sufficient evidence of success or failure.
+- `scripts/TRACE_WATCH_DISCOVERY.ps1` is the standard evidence collector for physical Watch/iPhone testing, while `scripts/CHECK_DISCOVERY_RUNTIME_HOOKS.py` verifies cached-source reuse and persisted feedback without network access.
 
 The important invariants are:
 
