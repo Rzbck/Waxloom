@@ -1,9 +1,12 @@
 __version__ = "0.1.0"
 
 from waxloom_api.discovery_identity_hooks import install_discovery_identity_hooks
+from waxloom_api.discovery_recent_persistence import install_discovery_recent_persistence
 from waxloom_api.discovery_runtime_hooks import install_discovery_runtime_hooks
 
+install_discovery_recent_persistence()
 install_discovery_identity_hooks()
 install_discovery_runtime_hooks()
+del install_discovery_recent_persistence
 del install_discovery_identity_hooks
 del install_discovery_runtime_hooks
