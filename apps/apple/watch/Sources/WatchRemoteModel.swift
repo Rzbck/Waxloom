@@ -10,9 +10,16 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     @Published private(set) var catalogMessage: String?
     @Published private(set) var catalogRevision = 0
 
-    private static let commandReplyTimeout: TimeInterval = 3
+    private static let commandReplyTimeout: TimeInterval = 6
+    private static let wakeRetryDelayNanoseconds: UInt64 = 900_000_000
+    private static let wakeType = "waxloom_wake_v1"
     private static let catalogCachePrefix = "waxloom.watch.catalog.cache.v2"
     private static let discoveryCacheMaxAge: TimeInterval = 10 * 60
+
+    private enum CatalogTransportResult {
+        case response(WatchCatalogResponse)
+        case failure(String)
+    }
 
     private var pendingToken: String?
     private var lastSnapshotTimestamp: TimeInterval = 0
@@ -31,11 +38,13 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             pendingToken == nil
         else {
             lastResult = .unavailable
+            WCSession.default.activate()
             return
         }
 
+        let originSnapshot = snapshot
         let token = UUID().uuidString
-        let message = WaxloomWatchMessage.command(command, token: token, snapshot: snapshot)
+        let message = WaxloomWatchMessage.command(command, token: token, snapshot: originSnapshot)
         guard let payload = WaxloomWatchCodec.payload(message) else {
             lastResult = .unsupported
             return
@@ -45,9 +54,33 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         pendingCommand = command
         lastResult = nil
 
-        // Do not gate a Watch-originated command on isReachable. A live message
-        // may wake the companion iPhone app from suspension/background. The
-        // correlated reply or the bounded local timeout decides availability.
+        sendPlaybackAttempt(
+            payload: payload,
+            token: token,
+            command: command,
+            originSnapshot: originSnapshot,
+            didWakeRetry: false
+        )
+
+        // Bound the whole immediate + wake-retry path. A recovery catalog action
+        // clears the pending token before it starts, so this timeout cannot race a
+        // successful reconstructed Discovery session.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.commandReplyTimeout) { [weak self] in
+            guard self?.pendingToken == token else { return }
+            self?.pendingToken = nil
+            self?.pendingCommand = nil
+            self?.lastResult = .unavailable
+            self?.phoneReachable = false
+        }
+    }
+
+    private func sendPlaybackAttempt(
+        payload: [String: Any],
+        token: String,
+        command: PlaybackCommand,
+        originSnapshot: PlaybackSnapshot,
+        didWakeRetry: Bool
+    ) {
         WCSession.default.sendMessage(payload) { [weak self] reply in
             guard let decoded = WaxloomWatchCodec.message(from: reply) else {
                 DispatchQueue.main.async {
@@ -67,6 +100,22 @@ final class WatchRemoteModel: NSObject, ObservableObject {
                     self.lastResult = .unsupported
                     return
                 }
+
+                let result = decoded.result ?? .unsupported
+                if self.shouldRecoverPreview(result: result, snapshot: originSnapshot) {
+                    self.pendingToken = nil
+                    self.pendingCommand = nil
+                    self.phoneReachable = true
+                    Task { [weak self] in
+                        await self?.recoverPreviewCommand(
+                            command,
+                            originSnapshot: originSnapshot,
+                            fallbackResult: result
+                        )
+                    }
+                    return
+                }
+
                 self.phoneReachable = true
                 self.pendingToken = nil
                 self.pendingCommand = nil
@@ -74,22 +123,132 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             }
         } errorHandler: { [weak self] _ in
             DispatchQueue.main.async {
-                guard self?.pendingToken == token else { return }
-                self?.pendingToken = nil
-                self?.pendingCommand = nil
-                self?.lastResult = .unavailable
-                self?.phoneReachable = false
+                guard let self, self.pendingToken == token else { return }
+
+                if !didWakeRetry {
+                    self.sendWakeHint(
+                        reason: "playback_\(command.rawValue)",
+                        token: token
+                    )
+                    DispatchQueue.main.asyncAfter(
+                        deadline: .now() + Double(Self.wakeRetryDelayNanoseconds) / 1_000_000_000
+                    ) { [weak self] in
+                        guard let self, self.pendingToken == token else { return }
+                        self.sendPlaybackAttempt(
+                            payload: payload,
+                            token: token,
+                            command: command,
+                            originSnapshot: originSnapshot,
+                            didWakeRetry: true
+                        )
+                    }
+                    return
+                }
+
+                self.pendingToken = nil
+                self.pendingCommand = nil
+                self.phoneReachable = false
+
+                if originSnapshot.sessionID.hasPrefix("preview:") {
+                    Task { [weak self] in
+                        await self?.recoverPreviewCommand(
+                            command,
+                            originSnapshot: originSnapshot,
+                            fallbackResult: .unavailable
+                        )
+                    }
+                } else {
+                    self.lastResult = .unavailable
+                }
             }
         }
+    }
 
-        // Never freeze the controls for transport retry/command TTL budgets.
-        // Late replies are ignored by the per-command token.
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.commandReplyTimeout) { [weak self] in
-            guard self?.pendingToken == token else { return }
-            self?.pendingToken = nil
-            self?.pendingCommand = nil
-            self?.lastResult = .unavailable
+    private func shouldRecoverPreview(
+        result: PlaybackCommandResult,
+        snapshot: PlaybackSnapshot
+    ) -> Bool {
+        guard snapshot.sessionID.hasPrefix("preview:") else { return false }
+        switch result {
+        case .sessionMismatch, .stateMismatch, .unavailable:
+            return true
+        default:
+            return false
         }
+    }
+
+    private func recoverPreviewCommand(
+        _ command: PlaybackCommand,
+        originSnapshot: PlaybackSnapshot,
+        fallbackResult: PlaybackCommandResult
+    ) async {
+        let prefix = "preview:"
+        guard originSnapshot.sessionID.hasPrefix(prefix) else {
+            await MainActor.run { lastResult = fallbackResult }
+            return
+        }
+
+        let currentID = String(originSnapshot.sessionID.dropFirst(prefix.count))
+        guard
+            let queue = playbackQueuesByItemID[currentID],
+            !queue.isEmpty,
+            let currentIndex = queue.firstIndex(where: { $0.id == currentID })
+        else {
+            await MainActor.run {
+                lastResult = fallbackResult
+                catalogMessage = "Discovery recovery queue unavailable"
+            }
+            return
+        }
+
+        let response: WatchCatalogResponse
+        switch command {
+        case .next:
+            let target = queue[(currentIndex + 1) % queue.count]
+            response = await playDiscovery(target, queue: queue)
+
+        case .previous:
+            let target = queue[(currentIndex - 1 + queue.count) % queue.count]
+            response = await playDiscovery(target, queue: queue)
+
+        case .playPause:
+            response = await playDiscovery(queue[currentIndex], queue: queue)
+
+        case .seekBackward15, .seekForward15:
+            let restore = await playDiscovery(queue[currentIndex], queue: queue)
+            guard restore.ok else {
+                await MainActor.run {
+                    lastResult = fallbackResult
+                    catalogMessage = restore.message ?? "Discovery recovery failed"
+                }
+                return
+            }
+            let delta = command == .seekBackward15 ? -15.0 : 15.0
+            response = await seek(to: max(0, originSnapshot.elapsedSeconds + delta))
+        }
+
+        await MainActor.run {
+            phoneReachable = response.ok
+            lastResult = response.ok ? .accepted : fallbackResult
+            if !response.ok {
+                catalogMessage = response.message ?? "Discovery recovery failed"
+            }
+        }
+    }
+
+    private func sendWakeHint(reason: String, token: String) {
+        guard
+            WCSession.isSupported(),
+            WCSession.default.activationState == .activated
+        else {
+            return
+        }
+        WCSession.default.transferUserInfo([
+            "type": Self.wakeType,
+            "reason": reason,
+            "token": token,
+            "timestamp": Date().timeIntervalSince1970,
+        ])
     }
 
     func load(route: WatchCatalogRoute, id: String? = nil, query: String? = nil) async -> WatchCatalogResponse {
@@ -266,6 +425,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             WCSession.default.activationState == .activated,
             let payload = WatchCatalogCodec.payload(request)
         else {
+            WCSession.default.activate()
             if let cached = cachedCatalogResponse(for: request) {
                 return cached
             }
@@ -278,27 +438,30 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             catalogMessage = nil
         }
 
-        // As with playback commands, do not preflight isReachable. sendMessage
-        // itself is allowed to wake the iPhone companion when watchOS can do so.
-        let response: WatchCatalogResponse = await withCheckedContinuation { continuation in
-            WCSession.default.sendMessage(payload) { [weak self] reply in
-                let decoded = WatchCatalogCodec.response(from: reply)
-                    ?? .failure(token: request.token, message: "Invalid iPhone response")
-                DispatchQueue.main.async {
-                    if decoded.ok {
-                        self?.phoneReachable = true
-                    }
-                }
-                continuation.resume(returning: decoded)
-            } errorHandler: { [weak self] error in
-                let fallback = self?.cachedCatalogResponse(for: request)
-                DispatchQueue.main.async {
-                    self?.phoneReachable = false
-                }
-                continuation.resume(
-                    returning: fallback
-                        ?? .failure(token: request.token, message: error.localizedDescription)
-                )
+        var transport = await catalogAttempt(payload: payload, request: request)
+        if case .failure = transport {
+            sendWakeHint(
+                reason: "catalog_\(request.action.rawValue)",
+                token: request.token
+            )
+            try? await Task.sleep(nanoseconds: Self.wakeRetryDelayNanoseconds)
+            transport = await catalogAttempt(payload: payload, request: request)
+        }
+
+        let response: WatchCatalogResponse
+        switch transport {
+        case .response(let value):
+            response = value
+            await MainActor.run {
+                phoneReachable = true
+            }
+
+        case .failure(let message):
+            let fallback = cachedCatalogResponse(for: request)
+            response = fallback
+                ?? .failure(token: request.token, message: message)
+            await MainActor.run {
+                phoneReachable = false
             }
         }
 
@@ -312,6 +475,21 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             catalogMessage = response.ok ? response.message : response.message ?? "Request failed"
         }
         return response
+    }
+
+    private func catalogAttempt(
+        payload: [String: Any],
+        request: WatchCatalogRequest
+    ) async -> CatalogTransportResult {
+        await withCheckedContinuation { continuation in
+            WCSession.default.sendMessage(payload) { reply in
+                let decoded = WatchCatalogCodec.response(from: reply)
+                    ?? .failure(token: request.token, message: "Invalid iPhone response")
+                continuation.resume(returning: .response(decoded))
+            } errorHandler: { error in
+                continuation.resume(returning: .failure(error.localizedDescription))
+            }
+        }
     }
 
     private func registerMutation(_ response: WatchCatalogResponse) -> WatchCatalogResponse {
