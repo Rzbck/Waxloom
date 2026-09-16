@@ -31,6 +31,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
     private var lastWatchProgressBucket = -1
     private var lastQueuePersistBucket = -1
     private var lastPreviewProgressTraceID: String?
+    private var currentTasteFeedback = 0
 
     var queue: [WaxloomSong] { libraryQueue }
     var queueIndex: Int { libraryIndex }
@@ -190,6 +191,68 @@ final class NativePlayerModel: NSObject, ObservableObject {
         }
     }
 
+    func toggleCurrentTasteFeedback(_ requestedValue: Int) async -> Int? {
+        guard mode != .idle, let baseURL else { return nil }
+
+        let requested = max(-1, min(1, requestedValue))
+        let nextValue = currentTasteFeedback == requested ? 0 : requested
+        let candidate: WaxloomDiscoveryCandidate
+
+        switch mode {
+        case .preview:
+            guard let currentPreview else { return nil }
+            candidate = currentPreview
+
+        case .library:
+            guard let song = currentSong else { return nil }
+            let rawMbid = (song.musicBrainzId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let identity = rawMbid.isEmpty ? "navidrome:\(song.id)" : rawMbid
+            let tags = (song.genre ?? "")
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            candidate = WaxloomDiscoveryCandidate(
+                recordingMbid: identity,
+                artist: song.artist ?? "Unknown artist",
+                title: song.title ?? "Unknown title",
+                release: song.album,
+                releaseMbid: nil,
+                similarity: 0,
+                underground: 0,
+                rank: 0,
+                tags: tags,
+                musicbrainzUrl: nil,
+                source: "library",
+                reason: "Now Playing feedback",
+                feedback: currentTasteFeedback
+            )
+
+        case .idle:
+            return nil
+        }
+
+        do {
+            try await WaxloomAPI.discoveryFeedback(
+                baseURL: baseURL,
+                candidate: candidate,
+                value: nextValue
+            )
+            currentTasteFeedback = nextValue
+            if mode == .preview {
+                currentPreview?.feedback = nextValue
+                if previewQueue.indices.contains(previewIndex) {
+                    previewQueue[previewIndex].feedback = nextValue
+                }
+            }
+            revision += 1
+            publishSnapshot()
+            return nextValue
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     private func startLibrarySong(
         _ song: WaxloomSong,
         baseURL: URL,
@@ -207,6 +270,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         mode = .library
         currentSong = song
         currentPreview = nil
+        currentTasteFeedback = 0
         elapsedSeconds = position
         durationSeconds = song.duration ?? 0
         errorMessage = nil
@@ -270,6 +334,7 @@ final class NativePlayerModel: NSObject, ObservableObject {
         mode = .preview
         currentPreview = candidate
         currentSong = nil
+        currentTasteFeedback = candidate.feedback ?? 0
         elapsedSeconds = 0
         durationSeconds = 0
         errorMessage = nil
@@ -498,7 +563,8 @@ final class NativePlayerModel: NSObject, ObservableObject {
                 artworkURL: artworkURL,
                 isPlaying: isPlaying,
                 elapsedSeconds: elapsedSeconds,
-                durationSeconds: durationSeconds
+                durationSeconds: durationSeconds,
+                feedback: currentTasteFeedback
             ),
             interactive: interactive
         )
