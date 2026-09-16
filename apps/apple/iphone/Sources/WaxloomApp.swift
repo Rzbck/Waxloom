@@ -28,16 +28,95 @@ struct WaxloomApp: App {
             )
         }
 
-        bridge.coldStartCommandHandler = { command, expectedSessionID in
+        bridge.coldStartCommandHandler = { command, originSnapshot in
             guard let baseURL = connection.baseURL else {
                 return .unavailable
             }
 
-            // WatchConnectivity can wake the iPhone app in the background. The
-            // SwiftUI scene may not have reached its normal restore task yet, so
-            // recover the persisted library queue directly before applying the
-            // Watch command.
             player.setBaseURL(baseURL)
+
+            if originSnapshot.sessionID.hasPrefix("preview:") {
+                guard
+                    let stored = DiscoverySessionStore.load(
+                        expectedSessionID: originSnapshot.sessionID
+                    )
+                else {
+                    await WaxloomClientTelemetry.shared.emit(
+                        component: "watch_bridge",
+                        event: "cold_start_discovery_missing",
+                        detail: "session=\(originSnapshot.sessionID)"
+                    )
+                    return .sessionMismatch
+                }
+
+                let prefix = "preview:"
+                let currentID = String(
+                    originSnapshot.sessionID.dropFirst(prefix.count)
+                )
+                let items = stored.items
+                guard
+                    let currentIndex = items.firstIndex(where: { $0.id == currentID })
+                else {
+                    return .sessionMismatch
+                }
+
+                let queue = DiscoverySessionStore.queue(from: stored)
+
+                func candidate(at index: Int) -> WaxloomDiscoveryCandidate {
+                    DiscoverySessionStore.candidate(from: items[index])
+                }
+
+                switch command {
+                case .next:
+                    let index = (currentIndex + 1) % items.count
+                    await player.playPreview(
+                        candidate: candidate(at: index),
+                        queue: queue,
+                        baseURL: baseURL
+                    )
+
+                case .previous:
+                    let index = (currentIndex - 1 + items.count) % items.count
+                    await player.playPreview(
+                        candidate: candidate(at: index),
+                        queue: queue,
+                        baseURL: baseURL
+                    )
+
+                case .playPause:
+                    await player.playPreview(
+                        candidate: candidate(at: currentIndex),
+                        queue: queue,
+                        baseURL: baseURL
+                    )
+                    if originSnapshot.isPlaying {
+                        player.pause()
+                    }
+
+                case .seekBackward15, .seekForward15:
+                    await player.playPreview(
+                        candidate: candidate(at: currentIndex),
+                        queue: queue,
+                        baseURL: baseURL
+                    )
+                    let delta = command == .seekBackward15 ? -15.0 : 15.0
+                    player.seek(to: max(0, originSnapshot.elapsedSeconds + delta))
+                    if !originSnapshot.isPlaying {
+                        player.pause()
+                    }
+                }
+
+                await WaxloomClientTelemetry.shared.emit(
+                    component: "watch_bridge",
+                    event: "cold_start_discovery_restored",
+                    detail: "command=\(command.rawValue) session=\(originSnapshot.sessionID) items=\(items.count)"
+                )
+                return .accepted
+            }
+
+            // Library playback already has a server-persisted play queue. Restore
+            // it before applying the Watch command, while using the Watch snapshot
+            // to preserve play/pause and seek intent across the process restart.
             await player.restoreQueue(baseURL: baseURL)
 
             let restoredSessionID: String
@@ -49,26 +128,37 @@ struct WaxloomApp: App {
                 restoredSessionID = "idle"
             }
 
-            guard restoredSessionID == expectedSessionID else {
+            guard restoredSessionID == originSnapshot.sessionID else {
                 await WaxloomClientTelemetry.shared.emit(
                     component: "watch_bridge",
                     event: "cold_start_session_mismatch",
-                    detail: "expected=\(expectedSessionID) restored=\(restoredSessionID)"
+                    detail: "expected=\(originSnapshot.sessionID) restored=\(restoredSessionID)"
                 )
                 return .sessionMismatch
             }
 
             switch command {
             case .playPause:
-                player.toggle()
+                if originSnapshot.isPlaying {
+                    player.pause()
+                } else {
+                    player.resume()
+                }
+
             case .next:
                 await player.next()
+
             case .previous:
                 await player.previous()
-            case .seekBackward15:
-                player.skip(by: -15)
-            case .seekForward15:
-                player.skip(by: 15)
+
+            case .seekBackward15, .seekForward15:
+                let delta = command == .seekBackward15 ? -15.0 : 15.0
+                player.seek(to: max(0, originSnapshot.elapsedSeconds + delta))
+                if originSnapshot.isPlaying {
+                    player.resume()
+                } else {
+                    player.pause()
+                }
             }
             return .accepted
         }
