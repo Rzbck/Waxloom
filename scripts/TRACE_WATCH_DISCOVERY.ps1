@@ -33,6 +33,64 @@ $grace = (
 Save-Json "preview-before.json" $before
 Save-Json "health-before.json" $health
 
+# ------------------------------------------------------------
+# Optional iOS system diagnostics. Nothing is installed here.
+# ------------------------------------------------------------
+
+$iosDir = Join-Path $outDir "ios-system"
+New-Item -ItemType Directory -Force -Path $iosDir | Out-Null
+
+$idTool = Get-Command idevice_id -ErrorAction SilentlyContinue
+$syslogTool = Get-Command idevicesyslog -ErrorAction SilentlyContinue
+$crashTool = Get-Command idevicecrashreport -ErrorAction SilentlyContinue
+$syslogProcess = $null
+$iosDevicePresent = $false
+$iosSyslogStarted = $false
+
+if ($idTool) {
+    $devices = @(
+        & $idTool.Source -l 2>$null |
+            Where-Object { $_ -and -not [string]::IsNullOrWhiteSpace($_) }
+    )
+    $iosDevicePresent = $devices.Count -gt 0
+}
+else {
+    $devices = @()
+}
+
+if ($iosDevicePresent -and $syslogTool) {
+    $syslogPath = Join-Path $iosDir "iphone-syslog-live.log"
+    $syslogErr = Join-Path $iosDir "iphone-syslog-errors.log"
+    try {
+        $syslogProcess = Start-Process `
+            -FilePath $syslogTool.Source `
+            -ArgumentList @("-u", $devices[0]) `
+            -RedirectStandardOutput $syslogPath `
+            -RedirectStandardError $syslogErr `
+            -WindowStyle Hidden `
+            -PassThru
+        $iosSyslogStarted = $true
+    }
+    catch {
+        "idevicesyslog start failed: $($_.Exception.Message)" |
+            Set-Content (Join-Path $iosDir "SYSLOG-START-ERROR.txt") -Encoding UTF8
+    }
+}
+
+if (-not $idTool -or -not $syslogTool -or -not $crashTool) {
+    @"
+Optional iOS diagnostic tools are incomplete on this PC.
+idevice_id          : $([bool]$idTool)
+idevicesyslog       : $([bool]$syslogTool)
+idevicecrashreport  : $([bool]$crashTool)
+No tool was installed automatically.
+"@ | Set-Content (Join-Path $iosDir "IOS-DIAGNOSTICS-TOOLS.txt") -Encoding UTF8
+}
+elseif (-not $iosDevicePresent) {
+    "libimobiledevice tools are present, but no iPhone was detected when tracing started." |
+        Set-Content (Join-Path $iosDir "IOS-NO-DEVICE.txt") -Encoding UTF8
+}
+
 Write-Host ""
 Write-Host "=== WAXLOOM WATCH / IPHONE / SERVER TRACE ===" -ForegroundColor Cyan
 Write-Host "Image         : $image"
@@ -44,22 +102,87 @@ Write-Host "Failed recent : $($before.failed_recent)"
 if ($null -ne $before.quarantined) {
     Write-Host "Quarantined   : $($before.quarantined)"
 }
+Write-Host "iOS syslog    : $(if ($iosSyslogStarted) { 'LIVE' } else { 'not collected' })"
 Write-Host ""
 Write-Host "Evidence model:" -ForegroundColor DarkCyan
-Write-Host "  PLAYER    = AVPlayer trace emitted by iPhone and received by API"
-Write-Host "  CLIENT    = iPhone lifecycle / thermal / WCSession trace received by API"
-Write-Host "  HTTP      = request actually received/answered by API"
-Write-Host "  WATCHFLOW = server decision/result for preview, source, import or feedback"
-Write-Host "  RANGE     = actual bounded preview response and bytes written by server"
+Write-Host "  CLIENT component=watch        = event originally recorded on Apple Watch"
+Write-Host "  CLIENT component=watch_bridge = event received/handled by iPhone WCSession"
+Write-Host "  PLAYER                        = AVPlayer event emitted by iPhone"
+Write-Host "  HTTP                          = request actually received/answered by API"
+Write-Host "  WATCHFLOW                     = server decision/result"
+Write-Host "  RANGE                         = actual preview bytes written by server"
+Write-Host "  iOS syslog/crash              = system evidence when libimobiledevice is available"
 Write-Host ""
 Write-Host "Use Waxloom normally now." -ForegroundColor Yellow
 Write-Host "Play/Next, background iPhone, use Watch, Like, +, reopen screens, etc."
+Write-Host "Try Watch controls while the iPhone app is NOT foreground." -ForegroundColor Yellow
 Write-Host "When finished, return here and press ENTER." -ForegroundColor Yellow
-Write-Host "The raw trace will be saved even if the console is cleared afterwards."
+Write-Host "Everything is saved to disk; clearing the console afterwards will not lose it."
 
 $started = (Get-Date).ToUniversalTime()
-Read-Host | Out-Null
+try {
+    Read-Host | Out-Null
+}
+finally {
+    if ($syslogProcess -and -not $syslogProcess.HasExited) {
+        try {
+            Stop-Process -Id $syslogProcess.Id -Force -ErrorAction SilentlyContinue
+            Wait-Process -Id $syslogProcess.Id -Timeout 5 -ErrorAction SilentlyContinue
+        }
+        catch {}
+    }
+}
+
 Start-Sleep -Seconds 2
+
+# ------------------------------------------------------------
+# Crash/Jetsam/watchdog reports after the test, if available.
+# ------------------------------------------------------------
+
+$crashCollected = $false
+if ($iosDevicePresent -and $crashTool) {
+    $crashDir = Join-Path $iosDir "crash-reports"
+    New-Item -ItemType Directory -Force -Path $crashDir | Out-Null
+    try {
+        $crashOutput = @(
+            & $crashTool.Source -u $devices[0] -e -k $crashDir 2>&1 |
+                ForEach-Object { [string]$_ }
+        )
+        $crashOutput |
+            Set-Content (Join-Path $iosDir "idevicecrashreport-output.txt") -Encoding UTF8
+        $crashCollected = $LASTEXITCODE -eq 0
+    }
+    catch {
+        "idevicecrashreport failed: $($_.Exception.Message)" |
+            Set-Content (Join-Path $iosDir "CRASH-REPORT-ERROR.txt") -Encoding UTF8
+    }
+}
+
+$iosReportFiles = @(
+    Get-ChildItem $iosDir -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -in @(".ips", ".crash", ".log") }
+)
+$iosIncidentMatches = @()
+foreach ($file in $iosReportFiles) {
+    try {
+        $matches = Select-String `
+            -Path $file.FullName `
+            -Pattern "Waxloom|Jetsam|watchdog|thermal|memory pressure|EXC_RESOURCE|termination reason" `
+            -CaseSensitive:$false `
+            -ErrorAction SilentlyContinue
+        foreach ($match in $matches) {
+            $iosIncidentMatches += "[$($file.Name):$($match.LineNumber)] $($match.Line)"
+        }
+    }
+    catch {}
+}
+$iosIncidentMatches |
+    Select-Object -First 1000 |
+    Set-Content (Join-Path $iosDir "ios-incident-matches.txt") -Encoding UTF8
+
+# ------------------------------------------------------------
+# Server-side evidence.
+# ------------------------------------------------------------
 
 $since = $started.ToString("yyyy-MM-ddTHH:mm:ssZ")
 $raw = @(
@@ -132,11 +255,21 @@ $transcodeError = @($flow | Where-Object { $_ -cmatch 'stage=preview_transcode r
 $queueNormalized = @($raw | Where-Object { $_ -cmatch 'stage=queue_position decision=normalize_fractional' })
 $queue422 = @($http | Where-Object { $_ -cmatch 'HTTP PUT /api/player/queue -> 422' })
 
+$watchEvents = @($client | Where-Object { $_ -cmatch 'component=watch\s' })
 $bridgeEvents = @($client | Where-Object { $_ -cmatch 'component=watch_bridge\s' })
+$watchCommandAttempts = @($watchEvents | Where-Object { $_ -cmatch 'event=command_attempt\s' })
+$watchCommandReplies = @($watchEvents | Where-Object { $_ -cmatch 'event=command_reply\s' })
+$watchTransportErrors = @($watchEvents | Where-Object { $_ -cmatch 'event=command_transport_error\s' })
+$watchTimeouts = @($watchEvents | Where-Object { $_ -cmatch 'event=command_timeout\s' })
+$watchCatalogErrors = @($watchEvents | Where-Object { $_ -cmatch 'event=catalog_transport_error\s' })
+$watchReachability = @($watchEvents | Where-Object { $_ -cmatch 'event=reachability_changed\s' })
+$watchActivations = @($watchEvents | Where-Object { $_ -cmatch 'event=activation_(request|complete)\s' })
+$bridgeColdReceived = @($bridgeEvents | Where-Object { $_ -cmatch 'event=command_received\s' -and $_ -cmatch 'cold=1' })
+$coldRestored = @($client | Where-Object { $_ -cmatch 'event=cold_start_discovery_restored\s' })
+$coldMismatches = @($client | Where-Object { $_ -cmatch 'event=cold_start_(session_mismatch|discovery_missing)\s' })
 $thermalEvents = @($client | Where-Object { $_ -cmatch 'component=app event=thermal_state\s' })
 $sceneEvents = @($client | Where-Object { $_ -cmatch 'component=app event=scene_phase\s' })
-$wakeEvents = @($bridgeEvents | Where-Object { $_ -cmatch 'event=wake_hint_received\s' })
-$coldMismatches = @($client | Where-Object { $_ -cmatch 'event=cold_start_session_mismatch\s' })
+$memoryWarnings = @($client | Where-Object { $_ -cmatch 'component=app event=memory_warning\s' })
 
 $actualPreviewBytes = [int64]0
 $completedRanges = 0
@@ -160,6 +293,7 @@ $rateEvents = @(
         $minute = $Matches.minute
         $category = $null
         if ($line -cmatch '\]\s+PLAYER\s+') { $category = 'PLAYER' }
+        elseif ($line -cmatch 'CLIENT component=watch\s') { $category = 'WATCH' }
         elseif ($line -cmatch '\]\s+CLIENT\s+') { $category = 'CLIENT' }
         elseif ($line -cmatch '\bWATCHFLOW\s+stage=') { $category = 'WATCHFLOW' }
         elseif ($line -cmatch '\]\s+PREVIEW_RANGE_DONE\s+') { $category = 'RANGE_DONE' }
@@ -194,6 +328,7 @@ $errors = @(
         $_ -cmatch ' -> (4\d\d|5\d\d)' -or
         $_ -cmatch 'result=error' -or
         $_ -cmatch 'preview_item_failed|preview_no_progress' -or
+        $_ -cmatch 'event=(command_transport_error|command_timeout|catalog_transport_error)' -or
         $_ -cmatch 'thermal_state detail=''critical''' -or
         $_ -cmatch 'memory_warning'
     }
@@ -207,13 +342,20 @@ HEALTH                      : $($health.status)
 PREVIEW GRACE               : $grace
 
 EVIDENCE
+Watch-origin CLIENT lines   : $($watchEvents.Count)
+iPhone CLIENT lines         : $($client.Count - $watchEvents.Count)
 PLAYER trace lines          : $($player.Count)
-CLIENT trace lines          : $($client.Count)
 HTTP lines                  : $($http.Count)
 WATCHFLOW lines             : $($flow.Count)
 RANGE requests/done         : $($rangeStart.Count) / $($rangeDone.Count)
 Actual preview bytes sent   : $actualPreviewBytes
 Completed/cancelled ranges  : $completedRanges / $cancelledRanges
+
+iOS SYSTEM
+Live syslog collected       : $iosSyslogStarted
+Crash collection attempted  : $([bool]($iosDevicePresent -and $crashTool))
+Crash collection succeeded  : $crashCollected
+System incident matches     : $($iosIncidentMatches.Count)
 
 PLAYBACK
 Unique previews progressed  : $($playedIDs.Count)
@@ -237,12 +379,23 @@ QUEUE
 Fractional normalization    : $($queueNormalized.Count)
 Queue HTTP 422              : $($queue422.Count)
 
-IPHONE / WATCH BRIDGE
-Bridge events               : $($bridgeEvents.Count)
-Wake hints received         : $($wakeEvents.Count)
+WATCH -> IPHONE
+Watch command attempts      : $($watchCommandAttempts.Count)
+Watch command replies       : $($watchCommandReplies.Count)
+Watch transport errors      : $($watchTransportErrors.Count)
+Watch command timeouts      : $($watchTimeouts.Count)
+Watch catalog errors        : $($watchCatalogErrors.Count)
+Watch reachability changes  : $($watchReachability.Count)
+Watch activation events     : $($watchActivations.Count)
+iPhone cold commands recv   : $($bridgeColdReceived.Count)
+Cold Discovery restored     : $($coldRestored.Count)
 Cold-start mismatches       : $($coldMismatches.Count)
+
+IPHONE LIFECYCLE
+Bridge events               : $($bridgeEvents.Count)
 Scene events                : $($sceneEvents.Count)
 Thermal events              : $($thermalEvents.Count)
+Memory warnings             : $($memoryWarnings.Count)
 
 CACHE BEFORE -> AFTER
 Active                      : $($before.active) -> $($after.active)
@@ -264,8 +417,8 @@ Write-Host "Raw evidence : $rawPath" -ForegroundColor DarkCyan
 Write-Host "ZIP          : $zipPath" -ForegroundColor Green
 Write-Host ""
 
-if ($notFoundIDs.Count -gt 0 -or $failedIDs.Count -gt 0 -or $importError.Count -gt 0 -or $queue422.Count -gt 0) {
-    Write-Host "Confirmed user-path failure(s) were captured above." -ForegroundColor Red
+if ($notFoundIDs.Count -gt 0 -or $failedIDs.Count -gt 0 -or $importError.Count -gt 0 -or $queue422.Count -gt 0 -or $watchTimeouts.Count -gt 0) {
+    Write-Host "Confirmed user/transport-path failure(s) were captured above." -ForegroundColor Red
 }
 elseif ($prepareNone.Count -gt 0 -or $downloadError.Count -gt 0 -or $transcodeError.Count -gt 0 -or $quarantine.Count -gt 0) {
     Write-Host "User path passed, but a background preparation problem was captured." -ForegroundColor Yellow
