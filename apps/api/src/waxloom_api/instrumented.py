@@ -8,6 +8,7 @@ import os
 import tempfile
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from datetime import datetime
 from email.utils import formatdate
 from logging.handlers import RotatingFileHandler
@@ -297,11 +298,10 @@ class QueuePositionCompatibility:
 
 
 class PreviewRangeTransport:
-    # AVPlayer can ask for broad overlapping ranges. A 206 response may legally
-    # satisfy a subset of the requested range, so bound each response and let the
-    # client request subsequent bytes. This prevents transient player restarts
-    # from queueing several complete 10-20 MB transfers at once.
-    max_range_bytes = 2 * 1024 * 1024
+    # AVPlayer is strict about byte-range consistency. If a single range is
+    # accepted, return that exact range; never silently shorten Content-Range.
+    # Traffic reduction belongs in cancellation/cache/player policy, not in a
+    # protocol response that claims to honor a larger request.
     chunk_bytes = 64 * 1024
 
     def __init__(self, app: Any) -> None:
@@ -337,6 +337,13 @@ class PreviewRangeTransport:
             raise ValueError("range outside file")
         return start, min(end, size - 1)
 
+    @staticmethod
+    async def _wait_for_disconnect(receive: Any) -> str:
+        while True:
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                return "client"
+
     async def _send_file(
         self,
         *,
@@ -344,6 +351,7 @@ class PreviewRangeTransport:
         method: str,
         range_value: str,
         recording_mbid: str,
+        receive: Any,
         send: Any,
     ) -> None:
         stat = path.stat()
@@ -367,8 +375,7 @@ class PreviewRangeTransport:
             status = 200
         else:
             requested_start, requested_end = parsed
-            start = requested_start
-            end = min(requested_end, start + self.max_range_bytes - 1)
+            start, end = requested_start, requested_end
             status = 206
 
         length = end - start + 1
@@ -399,15 +406,20 @@ class PreviewRangeTransport:
         sent_bytes = 0
         completed = method == "HEAD"
         disconnect_type = "none"
+        disconnect_task: asyncio.Task[str] | None = None
 
         if method == "HEAD":
             await send({"type": "http.response.body", "body": b"", "more_body": False})
         else:
             remaining = length
+            disconnect_task = asyncio.create_task(self._wait_for_disconnect(receive))
             try:
                 with path.open("rb") as handle:
                     handle.seek(start)
                     while remaining > 0:
+                        if disconnect_task.done():
+                            disconnect_type = disconnect_task.result()
+                            break
                         chunk = handle.read(min(self.chunk_bytes, remaining))
                         if not chunk:
                             break
@@ -422,7 +434,7 @@ class PreviewRangeTransport:
                         )
                         await asyncio.sleep(0)
                 completed = remaining == 0
-                if remaining > 0:
+                if remaining > 0 and disconnect_type == "none":
                     await send({"type": "http.response.body", "body": b"", "more_body": False})
             except asyncio.CancelledError:
                 disconnect_type = "cancelled"
@@ -431,6 +443,10 @@ class PreviewRangeTransport:
                 disconnect_type = type(exc).__name__
                 completed = False
             finally:
+                if disconnect_task is not None and not disconnect_task.done():
+                    disconnect_task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await disconnect_task
                 elapsed_ms = (time.perf_counter() - started) * 1000
                 _log(
                     "PREVIEW_RANGE_DONE "
@@ -479,6 +495,7 @@ class PreviewRangeTransport:
             method=method,
             range_value=request_headers.get("range", ""),
             recording_mbid=recording_mbid,
+            receive=receive,
             send=send,
         )
 
