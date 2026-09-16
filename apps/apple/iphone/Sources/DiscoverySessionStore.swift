@@ -31,6 +31,10 @@ enum DiscoverySessionStore {
         UserDefaults.standard.set(data, forKey: key)
     }
 
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
     static func load(expectedSessionID: String) -> StoredDiscoverySession? {
         let prefix = "preview:"
         guard expectedSessionID.hasPrefix(prefix) else { return nil }
