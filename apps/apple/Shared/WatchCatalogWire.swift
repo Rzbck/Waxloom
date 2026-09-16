@@ -26,6 +26,7 @@ enum WatchCatalogAction: String, Codable {
     case load
     case play
     case seek
+    case stop
     case toggleStar
     case discoveryFeedback
     case nowPlayingFeedback
