@@ -19,8 +19,16 @@ struct WatchProductRootView: View {
 
 private struct WatchNowPlayingDashboard: View {
     @ObservedObject var remote: WatchRemoteModel
+
+    @AppStorage("waxloom.authorizedMediaImports.v1")
+    private var importAuthorized = false
+
     @State private var feedback = 0
     @State private var feedbackBusy = false
+    @State private var importing = false
+    @State private var importedSessionID: String?
+    @State private var showingImportAuthorization = false
+    @State private var manualImportItem: WatchCatalogItem?
 
     var body: some View {
         VStack(spacing: 6) {
@@ -48,16 +56,22 @@ private struct WatchNowPlayingDashboard: View {
                 .lineLimit(1)
 
             HStack(spacing: 7) {
-                WatchRoundControl(symbol: "backward.fill", enabled: canSend) { remote.send(.previous) }
+                WatchRoundControl(symbol: "backward.fill", enabled: canInteract) {
+                    remote.send(.previous)
+                }
                 WatchRoundControl(
                     symbol: remote.snapshot.isPlaying ? "pause.fill" : "play.fill",
-                    enabled: canSend,
+                    enabled: canInteract,
                     prominent: true
-                ) { remote.send(.playPause) }
-                WatchRoundControl(symbol: "forward.fill", enabled: canSend) { remote.send(.next) }
+                ) {
+                    remote.send(.playPause)
+                }
+                WatchRoundControl(symbol: "forward.fill", enabled: canInteract) {
+                    remote.send(.next)
+                }
             }
 
-            HStack(spacing: 13) {
+            HStack(spacing: currentPreviewItem == nil ? 13 : 10) {
                 Button {
                     Task { await setFeedback(1) }
                 } label: {
@@ -68,6 +82,34 @@ private struct WatchNowPlayingDashboard: View {
 
                 Button { remote.send(.seekBackward15) } label: {
                     Label("15", systemImage: "gobackward.15").labelStyle(.iconOnly)
+                }
+
+                if currentPreviewItem != nil {
+                    Button {
+                        beginQuickImport()
+                    } label: {
+                        Group {
+                            if importing {
+                                ProgressView().controlSize(.mini)
+                            } else {
+                                Image(
+                                    systemName: importedSessionID == remote.snapshot.sessionID
+                                        ? "checkmark"
+                                        : "plus"
+                                )
+                            }
+                        }
+                    }
+                    .foregroundStyle(
+                        importedSessionID == remote.snapshot.sessionID
+                            ? Color.green
+                            : WatchProductStyle.accent
+                    )
+                    .accessibilityLabel(
+                        importedSessionID == remote.snapshot.sessionID
+                            ? "Added to library"
+                            : "Add to library"
+                    )
                 }
 
                 Button { remote.send(.seekForward15) } label: {
@@ -83,33 +125,110 @@ private struct WatchNowPlayingDashboard: View {
                 .accessibilityLabel(feedback == -1 ? "Clear dislike" : "Dislike")
             }
             .font(.system(size: 15, weight: .bold))
-            .buttonStyle(.plain)
-            .foregroundStyle(canSend ? WatchProductStyle.accent : .secondary)
-            .disabled(!canSend || feedbackBusy)
+            .buttonStyle(WatchTapPulseStyle())
+            .foregroundStyle(canInteract ? WatchProductStyle.accent : .secondary)
+            .disabled(!canInteract)
         }
         .padding(.horizontal, 4)
         .onAppear {
             feedback = remote.snapshot.feedback ?? 0
         }
-        .onChange(of: remote.snapshot.sessionID) { _, _ in
+        .onChange(of: remote.snapshot.sessionID) { oldValue, newValue in
             feedback = remote.snapshot.feedback ?? 0
+            if oldValue != newValue {
+                importing = false
+                importedSessionID = nil
+            }
         }
         .onChange(of: remote.snapshot.feedback) { _, value in
             feedback = value ?? 0
         }
+        .navigationDestination(item: $manualImportItem) { item in
+            WatchImportsView(
+                remote: remote,
+                seedArtist: item.subtitle ?? "",
+                seedTitle: item.title
+            )
+        }
+        .alert("Authorized media import", isPresented: $showingImportAuthorization) {
+            Button("Cancel", role: .cancel) {}
+            Button("Confirm & import") {
+                importAuthorized = true
+                Task { await quickImportCurrentPreview() }
+            }
+        } message: {
+            Text("Confirm that you are authorized to save media you import into your local library.")
+        }
     }
 
-    private var canSend: Bool {
-        remote.phoneReachable && remote.pendingCommand == nil && remote.snapshot.sessionID != "idle"
+    private var canInteract: Bool {
+        remote.phoneReachable && remote.snapshot.sessionID != "idle"
+    }
+
+    private var currentPreviewItem: WatchCatalogItem? {
+        let prefix = "preview:"
+        guard remote.snapshot.sessionID.hasPrefix(prefix) else { return nil }
+        let recordingMbid = String(remote.snapshot.sessionID.dropFirst(prefix.count))
+        guard !recordingMbid.isEmpty else { return nil }
+        return WatchCatalogItem(
+            id: recordingMbid,
+            kind: .discovery,
+            title: remote.snapshot.title,
+            subtitle: remote.snapshot.artist,
+            recordingMbid: recordingMbid,
+            feedback: remote.snapshot.feedback
+        )
     }
 
     private func setFeedback(_ value: Int) async {
-        guard !feedbackBusy, canSend else { return }
+        guard !feedbackBusy, canInteract else { return }
         feedbackBusy = true
         defer { feedbackBusy = false }
         let result = await remote.nowPlayingFeedback(value)
         guard result.ok else { return }
         feedback = result.value ?? 0
+    }
+
+    private func beginQuickImport() {
+        guard currentPreviewItem != nil, !importing else { return }
+        if importAuthorized {
+            Task { await quickImportCurrentPreview() }
+        } else {
+            showingImportAuthorization = true
+        }
+    }
+
+    private func quickImportCurrentPreview() async {
+        guard let item = currentPreviewItem, !importing else { return }
+        let sessionID = remote.snapshot.sessionID
+        let artist = (item.subtitle ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = item.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !artist.isEmpty, !title.isEmpty else { return }
+
+        importing = true
+        defer { importing = false }
+
+        let sources = await remote.youtubeSearch(artist: artist, title: title)
+        guard sources.ok else { return }
+        guard let best = sources.items.max(by: { ($0.score ?? 0) < ($1.score ?? 0) }) else {
+            manualImportItem = item
+            return
+        }
+        guard (best.score ?? 0) >= 80 else {
+            manualImportItem = item
+            return
+        }
+
+        let result = await remote.youtubeImport(
+            item: best,
+            artist: artist,
+            title: title,
+            authorized: true
+        )
+        guard result.ok else { return }
+        if remote.snapshot.sessionID == sessionID {
+            importedSessionID = sessionID
+        }
     }
 }
 
@@ -1038,8 +1157,22 @@ private struct WatchRoundControl: View {
                     in: Circle()
                 )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WatchTapPulseStyle(strength: prominent ? 0.78 : 0.84))
         .disabled(!enabled)
+    }
+}
+
+struct WatchTapPulseStyle: ButtonStyle {
+    var strength: CGFloat = 0.82
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? strength : 1)
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .animation(
+                .spring(response: 0.16, dampingFraction: 0.55),
+                value: configuration.isPressed
+            )
     }
 }
 
