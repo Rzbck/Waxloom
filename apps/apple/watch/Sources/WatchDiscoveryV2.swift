@@ -211,7 +211,7 @@ struct WatchDiscoveryDashboardV2: View {
                             in: Circle()
                         )
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(WatchTapPulseStyle())
                     .disabled(importingID != nil)
                     .accessibilityLabel("Add to library")
                 }
@@ -392,7 +392,7 @@ struct WatchDiscoveryItemActionsV2: View {
                             .font(.system(size: 12, weight: .bold))
                             .foregroundStyle(sourceRejected ? Color.green : Color.secondary)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(WatchTapPulseStyle())
                     .accessibilityLabel(sourceRejected ? "Undo bad source" : "Bad source")
                 }
             }
@@ -595,7 +595,7 @@ private struct WatchDiscoveryManualSourceV2: View {
                         }
                     }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(WatchTapPulseStyle())
                 .disabled(importingID != nil)
             }
 
@@ -708,7 +708,7 @@ private struct WatchDiscoveryActionButtonV2: View {
                 in: Circle()
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(WatchTapPulseStyle(strength: 0.78))
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.55)
     }
