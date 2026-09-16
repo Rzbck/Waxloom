@@ -11,6 +11,23 @@ struct WaxloomApp: App {
         let bridge = PhoneWatchBridge()
         let player = NativePlayerModel(watchBridge: bridge)
 
+        bridge.telemetryHandler = { component, event, detail in
+            Task {
+                await WaxloomClientTelemetry.shared.emit(
+                    component: component,
+                    event: event,
+                    detail: detail
+                )
+            }
+        }
+
+        Task {
+            await WaxloomClientTelemetry.shared.emit(
+                component: "app",
+                event: "process_init"
+            )
+        }
+
         bridge.coldStartCommandHandler = { command, expectedSessionID in
             guard let baseURL = connection.baseURL else {
                 return .unavailable
@@ -33,6 +50,11 @@ struct WaxloomApp: App {
             }
 
             guard restoredSessionID == expectedSessionID else {
+                await WaxloomClientTelemetry.shared.emit(
+                    component: "watch_bridge",
+                    event: "cold_start_session_mismatch",
+                    detail: "expected=\(expectedSessionID) restored=\(restoredSessionID)"
+                )
                 return .sessionMismatch
             }
 
@@ -72,6 +94,11 @@ struct WaxloomApp: App {
                 player: player
             )
             .preferredColorScheme(.dark)
+            .modifier(
+                WaxloomTelemetryLifecycleModifier(
+                    baseURL: connection.baseURL
+                )
+            )
         }
     }
 }
