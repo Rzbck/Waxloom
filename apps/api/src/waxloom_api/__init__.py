@@ -6,6 +6,8 @@ from waxloom_api.discovery_runtime_hooks import install_discovery_runtime_hooks
 from waxloom_api.import_source_safety import install_import_source_safety
 from waxloom_api.runtime_safety import install_runtime_safety
 
+# Runtime patch order is contractual: persistence/identity establish cache state,
+# runtime hooks add observability/import reuse, then quality/safety guards wrap it.
 install_discovery_recent_persistence()
 install_discovery_identity_hooks()
 install_discovery_runtime_hooks()
