@@ -44,12 +44,17 @@ actor WaxloomClientTelemetry {
         await flush()
     }
 
-    func emit(component: String, event: String, detail: String = "") async {
+    func emit(
+        component: String,
+        event: String,
+        detail: String = "",
+        clientEpochMs: Int? = nil
+    ) async {
         let row = WaxloomClientTraceEvent(
             component: clean(component, limit: 32),
             event: clean(event, limit: 48),
             detail: clean(detail, limit: 300),
-            clientEpochMs: Int(Date().timeIntervalSince1970 * 1000)
+            clientEpochMs: clientEpochMs ?? Int(Date().timeIntervalSince1970 * 1000)
         )
         pending.append(row)
         if pending.count > Self.maxPending {
