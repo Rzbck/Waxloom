@@ -21,6 +21,18 @@ struct WaxloomApp: App {
             }
         }
 
+        bridge.watchTelemetryHandler = { events in
+            await WaxloomClientTelemetry.shared.configure(baseURL: connection.baseURL)
+            for row in events {
+                await WaxloomClientTelemetry.shared.emit(
+                    component: "watch",
+                    event: row.event,
+                    detail: row.detail,
+                    clientEpochMs: Int(row.timestamp * 1000)
+                )
+            }
+        }
+
         Task {
             await WaxloomClientTelemetry.shared.emit(
                 component: "app",
