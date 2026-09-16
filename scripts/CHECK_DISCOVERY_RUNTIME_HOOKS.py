@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
+from waxloom_api.discovery_recent_persistence import _persist_recent, _restore_recent
 from waxloom_api.imports import ImportService
 from waxloom_api.preview_cache import DiscoveryPreviewCache
 from waxloom_api.providers.youtube import YouTubeProvider
@@ -14,6 +15,7 @@ from waxloom_api.providers.youtube import YouTubeProvider
 def main() -> None:
     runtime_module = "waxloom_api.discovery_runtime_hooks"
     identity_module = "waxloom_api.discovery_identity_hooks"
+    persistence_module = "waxloom_api.discovery_recent_persistence"
     assert YouTubeProvider.search_candidates.__module__ == runtime_module
     assert YouTubeProvider.download_selected.__module__ == runtime_module
     assert ImportService.import_youtube.__module__ == runtime_module
@@ -22,6 +24,9 @@ def main() -> None:
     assert DiscoveryPreviewCache._playback_compatible.__module__ == runtime_module
     assert DiscoveryPreviewCache.candidate_by_identity.__module__ == identity_module
     assert DiscoveryPreviewCache.ready_by_identity.__module__ == identity_module
+    assert DiscoveryPreviewCache.start.__module__ == persistence_module
+    assert DiscoveryPreviewCache._reconcile.__module__ == persistence_module
+    assert DiscoveryPreviewCache.evict.__module__ == persistence_module
 
     with tempfile.TemporaryDirectory(prefix="waxloom-runtime-hooks-") as raw_root:
         root = Path(raw_root)
@@ -88,6 +93,27 @@ def main() -> None:
         assert retained is not None
         assert retained.recording_mbid == recording_mbid
         assert retained.source_url == metadata["source_url"]
+
+        _persist_recent(preview_cache)
+        restarted_cache = DiscoveryPreviewCache(
+            youtube=provider,
+            feed_factory=lambda: {},
+            state_dir=root,
+        )
+        restored, migrated = _restore_recent(restarted_cache)
+        assert restored >= 1
+        assert migrated >= 0
+        restored_candidate = restarted_cache.candidate_by_identity(
+            "Test Artist",
+            "Test Track",
+        )
+        assert restored_candidate is not None
+        restored_entry = restarted_cache.ready_by_identity(
+            "Test Artist",
+            "Test Track",
+        )
+        assert restored_entry is not None
+        assert restored_entry.recording_mbid == recording_mbid
 
         feedback_path = root / "discovery-feedback.json"
         feedback = DiscoveryFeedbackStore(feedback_path)
