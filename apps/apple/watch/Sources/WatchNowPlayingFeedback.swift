@@ -9,18 +9,23 @@ extension WatchRemoteModel {
             )
         )
 
-        // A Now Playing taste mutation changes the Discovery annotation on the
-        // server. Refresh the cached Discovery payload immediately so returning
-        // to Browse cannot resurrect a stale heart/thumb state for up to the
-        // normal Discovery cache TTL.
-        if response.ok {
-            _ = await catalog(
-                WatchCatalogRequest(
-                    action: .load,
-                    route: .discovery
-                )
+        guard response.ok else { return response }
+
+        // Now Playing taste feedback changes the server-side Discovery
+        // annotation. Drop the old cached payload before trying to fetch the
+        // authoritative one so a failed follow-up request cannot resurrect a
+        // stale heart/thumb state on the next Browse visit.
+        let defaults = UserDefaults.standard
+        let discoveryCacheKey = "waxloom.watch.catalog.cache.v2.discovery.root"
+        defaults.removeObject(forKey: discoveryCacheKey)
+        defaults.removeObject(forKey: "\(discoveryCacheKey).storedAt")
+
+        _ = await catalog(
+            WatchCatalogRequest(
+                action: .load,
+                route: .discovery
             )
-        }
+        )
 
         return response
     }
