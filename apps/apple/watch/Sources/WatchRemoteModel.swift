@@ -10,9 +10,8 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     @Published private(set) var catalogMessage: String?
     @Published private(set) var catalogRevision = 0
 
-    private static let commandReplyTimeout: TimeInterval = 6
-    private static let wakeRetryDelayNanoseconds: UInt64 = 900_000_000
-    private static let wakeType = "waxloom_wake_v1"
+    private static let commandReplyTimeout: TimeInterval = 3
+    private static let immediateRetryDelayNanoseconds: UInt64 = 200_000_000
     private static let catalogCachePrefix = "waxloom.watch.catalog.cache.v2"
     private static let discoveryCacheMaxAge: TimeInterval = 10 * 60
 
@@ -32,19 +31,23 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func send(_ command: PlaybackCommand) {
-        guard
-            WCSession.isSupported(),
-            WCSession.default.activationState == .activated,
-            pendingToken == nil
-        else {
+        guard WCSession.isSupported(), pendingToken == nil else {
             lastResult = .unavailable
+            return
+        }
+        guard WCSession.default.activationState == .activated else {
             WCSession.default.activate()
+            lastResult = .unavailable
             return
         }
 
         let originSnapshot = snapshot
         let token = UUID().uuidString
-        let message = WaxloomWatchMessage.command(command, token: token, snapshot: originSnapshot)
+        let message = WaxloomWatchMessage.command(
+            command,
+            token: token,
+            snapshot: originSnapshot
+        )
         guard let payload = WaxloomWatchCodec.payload(message) else {
             lastResult = .unsupported
             return
@@ -53,18 +56,14 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         pendingToken = token
         pendingCommand = command
         lastResult = nil
-
         sendPlaybackAttempt(
             payload: payload,
             token: token,
             command: command,
             originSnapshot: originSnapshot,
-            didWakeRetry: false
+            retried: false
         )
 
-        // Bound the whole immediate + wake-retry path. A recovery catalog action
-        // clears the pending token before it starts, so this timeout cannot race a
-        // successful reconstructed Discovery session.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.commandReplyTimeout) { [weak self] in
             guard self?.pendingToken == token else { return }
             self?.pendingToken = nil
@@ -79,7 +78,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         token: String,
         command: PlaybackCommand,
         originSnapshot: PlaybackSnapshot,
-        didWakeRetry: Bool
+        retried: Bool
     ) {
         WCSession.default.sendMessage(payload) { [weak self] reply in
             guard let decoded = WaxloomWatchCodec.message(from: reply) else {
@@ -125,13 +124,10 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 guard let self, self.pendingToken == token else { return }
 
-                if !didWakeRetry {
-                    self.sendWakeHint(
-                        reason: "playback_\(command.rawValue)",
-                        token: token
-                    )
+                if !retried {
+                    WCSession.default.activate()
                     DispatchQueue.main.asyncAfter(
-                        deadline: .now() + Double(Self.wakeRetryDelayNanoseconds) / 1_000_000_000
+                        deadline: .now() + Double(Self.immediateRetryDelayNanoseconds) / 1_000_000_000
                     ) { [weak self] in
                         guard let self, self.pendingToken == token else { return }
                         self.sendPlaybackAttempt(
@@ -139,7 +135,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
                             token: token,
                             command: command,
                             originSnapshot: originSnapshot,
-                            didWakeRetry: true
+                            retried: true
                         )
                     }
                     return
@@ -147,19 +143,8 @@ final class WatchRemoteModel: NSObject, ObservableObject {
 
                 self.pendingToken = nil
                 self.pendingCommand = nil
+                self.lastResult = .unavailable
                 self.phoneReachable = false
-
-                if originSnapshot.sessionID.hasPrefix("preview:") {
-                    Task { [weak self] in
-                        await self?.recoverPreviewCommand(
-                            command,
-                            originSnapshot: originSnapshot,
-                            fallbackResult: .unavailable
-                        )
-                    }
-                } else {
-                    self.lastResult = .unavailable
-                }
             }
         }
     }
@@ -236,21 +221,6 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         }
     }
 
-    private func sendWakeHint(reason: String, token: String) {
-        guard
-            WCSession.isSupported(),
-            WCSession.default.activationState == .activated
-        else {
-            return
-        }
-        WCSession.default.transferUserInfo([
-            "type": Self.wakeType,
-            "reason": reason,
-            "token": token,
-            "timestamp": Date().timeIntervalSince1970,
-        ])
-    }
-
     func load(route: WatchCatalogRoute, id: String? = nil, query: String? = nil) async -> WatchCatalogResponse {
         let request = WatchCatalogRequest(
             action: .load,
@@ -259,10 +229,6 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             query: query
         )
 
-        // Discovery is cache-first for fast re-entry, but its lifetime is
-        // intentionally shorter than the server's stale-preview grace window.
-        // This prevents the Watch from presenting a preview that the server has
-        // already retired from both its active and recent rotations.
         if route == .discovery, let cached = cachedCatalogResponse(for: request) {
             rememberPlaybackQueues(cached.items)
             return cached
@@ -420,16 +386,17 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     func catalog(_ request: WatchCatalogRequest) async -> WatchCatalogResponse {
-        guard
-            WCSession.isSupported(),
-            WCSession.default.activationState == .activated,
-            let payload = WatchCatalogCodec.payload(request)
-        else {
+        guard WCSession.isSupported() else {
+            return cachedCatalogResponse(for: request)
+                ?? .failure(token: request.token, message: "iPhone bridge unavailable")
+        }
+        guard WCSession.default.activationState == .activated else {
             WCSession.default.activate()
-            if let cached = cachedCatalogResponse(for: request) {
-                return cached
-            }
-            return .failure(token: request.token, message: "iPhone bridge unavailable")
+            return cachedCatalogResponse(for: request)
+                ?? .failure(token: request.token, message: "iPhone bridge unavailable")
+        }
+        guard let payload = WatchCatalogCodec.payload(request) else {
+            return .failure(token: request.token, message: "Invalid Watch request")
         }
 
         await MainActor.run {
@@ -440,11 +407,8 @@ final class WatchRemoteModel: NSObject, ObservableObject {
 
         var transport = await catalogAttempt(payload: payload, request: request)
         if case .failure = transport {
-            sendWakeHint(
-                reason: "catalog_\(request.action.rawValue)",
-                token: request.token
-            )
-            try? await Task.sleep(nanoseconds: Self.wakeRetryDelayNanoseconds)
+            WCSession.default.activate()
+            try? await Task.sleep(nanoseconds: Self.immediateRetryDelayNanoseconds)
             transport = await catalogAttempt(payload: payload, request: request)
         }
 
@@ -452,17 +416,11 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         switch transport {
         case .response(let value):
             response = value
-            await MainActor.run {
-                phoneReachable = true
-            }
-
+            await MainActor.run { phoneReachable = true }
         case .failure(let message):
-            let fallback = cachedCatalogResponse(for: request)
-            response = fallback
+            response = cachedCatalogResponse(for: request)
                 ?? .failure(token: request.token, message: message)
-            await MainActor.run {
-                phoneReachable = false
-            }
+            await MainActor.run { phoneReachable = false }
         }
 
         if response.ok, response.status != "cached" {
@@ -481,7 +439,8 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         payload: [String: Any],
         request: WatchCatalogRequest
     ) async -> CatalogTransportResult {
-        await withCheckedContinuation { continuation in
+        await withCheckedContinuation {
+            (continuation: CheckedContinuation<CatalogTransportResult, Never>) in
             WCSession.default.sendMessage(payload) { reply in
                 let decoded = WatchCatalogCodec.response(from: reply)
                     ?? .failure(token: request.token, message: "Invalid iPhone response")
@@ -534,22 +493,17 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             if let incoming = message.snapshot {
                 applySnapshot(incoming, timestamp: message.timestamp)
             }
-
         case .acknowledgement:
             lastResult = message.result
             if let incoming = message.snapshot {
                 applySnapshot(incoming, timestamp: message.timestamp)
             }
-
         case .command:
             break
         }
     }
 
     private func applySnapshot(_ incoming: PlaybackSnapshot, timestamp: TimeInterval) {
-        // Revision is monotonic only for one iPhone player process. Timestamp is
-        // the cross-session ordering key, so an old application-context delivery
-        // cannot replace a newer track simply because sessionID changed.
         if timestamp < lastSnapshotTimestamp {
             return
         }
@@ -631,8 +585,6 @@ extension WatchRemoteModel: WCSessionDelegate {
         error: Error?
     ) {
         DispatchQueue.main.async { [weak self] in
-            // Activation means a Watch-originated live message may be attempted.
-            // A send failure is stronger evidence that the iPhone is unavailable.
             self?.phoneReachable = activationState == .activated
         }
 
@@ -643,8 +595,6 @@ extension WatchRemoteModel: WCSessionDelegate {
 
     func sessionReachabilityDidChange(_ session: WCSession) {
         DispatchQueue.main.async { [weak self] in
-            // A false reachability sample often means iOS is suspended. Do not
-            // disable controls on that sample; a live message may wake the phone.
             if session.isReachable {
                 self?.phoneReachable = true
             }
@@ -652,8 +602,6 @@ extension WatchRemoteModel: WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
-        // Kept for rolling-version compatibility. New playback snapshots use
-        // application context and new command acknowledgements are replies.
         receive(message)
     }
 
