@@ -30,12 +30,24 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         activate()
     }
 
+    private func traceWatch(_ event: String, detail: String = "") {
+        WatchTelemetryStore.record(event: event, detail: detail)
+    }
+
     func send(_ command: PlaybackCommand) {
         guard WCSession.isSupported(), pendingToken == nil else {
+            traceWatch(
+                "command_rejected_local",
+                detail: "command=\(command.rawValue) supported=\(WCSession.isSupported() ? 1 : 0) pending=\(pendingToken == nil ? 0 : 1)"
+            )
             lastResult = .unavailable
             return
         }
         guard WCSession.default.activationState == .activated else {
+            traceWatch(
+                "command_activation_needed",
+                detail: "command=\(command.rawValue) state=\(WCSession.default.activationState.rawValue)"
+            )
             WCSession.default.activate()
             lastResult = .unavailable
             return
@@ -49,10 +61,15 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             snapshot: originSnapshot
         )
         guard let payload = WaxloomWatchCodec.payload(message) else {
+            traceWatch("command_encode_failed", detail: "command=\(command.rawValue)")
             lastResult = .unsupported
             return
         }
 
+        traceWatch(
+            "command_begin",
+            detail: "command=\(command.rawValue) token=\(token.prefix(12)) session=\(originSnapshot.sessionID) rev=\(originSnapshot.revision)"
+        )
         pendingToken = token
         pendingCommand = command
         lastResult = nil
@@ -65,11 +82,15 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         )
 
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.commandReplyTimeout) { [weak self] in
-            guard self?.pendingToken == token else { return }
-            self?.pendingToken = nil
-            self?.pendingCommand = nil
-            self?.lastResult = .unavailable
-            self?.phoneReachable = false
+            guard let self, self.pendingToken == token else { return }
+            self.traceWatch(
+                "command_timeout",
+                detail: "command=\(command.rawValue) token=\(token.prefix(12)) session=\(originSnapshot.sessionID)"
+            )
+            self.pendingToken = nil
+            self.pendingCommand = nil
+            self.lastResult = .unavailable
+            self.phoneReachable = false
         }
     }
 
@@ -80,13 +101,21 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         originSnapshot: PlaybackSnapshot,
         retried: Bool
     ) {
+        traceWatch(
+            "command_attempt",
+            detail: "command=\(command.rawValue) token=\(token.prefix(12)) retry=\(retried ? 1 : 0) session=\(originSnapshot.sessionID)"
+        )
         WCSession.default.sendMessage(payload) { [weak self] reply in
             guard let decoded = WaxloomWatchCodec.message(from: reply) else {
                 DispatchQueue.main.async {
-                    guard self?.pendingToken == token else { return }
-                    self?.pendingToken = nil
-                    self?.pendingCommand = nil
-                    self?.lastResult = .unsupported
+                    guard let self, self.pendingToken == token else { return }
+                    self.traceWatch(
+                        "command_invalid_reply",
+                        detail: "command=\(command.rawValue) token=\(token.prefix(12))"
+                    )
+                    self.pendingToken = nil
+                    self.pendingCommand = nil
+                    self.lastResult = .unsupported
                 }
                 return
             }
@@ -94,6 +123,10 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             DispatchQueue.main.async {
                 guard let self, self.pendingToken == token else { return }
                 guard decoded.kind == .acknowledgement, decoded.token == token else {
+                    self.traceWatch(
+                        "command_uncorrelated_reply",
+                        detail: "command=\(command.rawValue) token=\(token.prefix(12))"
+                    )
                     self.pendingToken = nil
                     self.pendingCommand = nil
                     self.lastResult = .unsupported
@@ -101,7 +134,15 @@ final class WatchRemoteModel: NSObject, ObservableObject {
                 }
 
                 let result = decoded.result ?? .unsupported
+                self.traceWatch(
+                    "command_reply",
+                    detail: "command=\(command.rawValue) token=\(token.prefix(12)) result=\(result.rawValue) session=\(decoded.sessionID)"
+                )
                 if self.shouldRecoverPreview(result: result, snapshot: originSnapshot) {
+                    self.traceWatch(
+                        "preview_recovery_begin",
+                        detail: "command=\(command.rawValue) result=\(result.rawValue) session=\(originSnapshot.sessionID)"
+                    )
                     self.pendingToken = nil
                     self.pendingCommand = nil
                     self.phoneReachable = true
@@ -120,10 +161,14 @@ final class WatchRemoteModel: NSObject, ObservableObject {
                 self.pendingCommand = nil
                 self.apply(decoded)
             }
-        } errorHandler: { [weak self] _ in
+        } errorHandler: { [weak self] error in
             DispatchQueue.main.async {
                 guard let self, self.pendingToken == token else { return }
 
+                self.traceWatch(
+                    "command_transport_error",
+                    detail: "command=\(command.rawValue) token=\(token.prefix(12)) retry=\(retried ? 1 : 0) error=\(error.localizedDescription)"
+                )
                 if !retried {
                     WCSession.default.activate()
                     DispatchQueue.main.asyncAfter(
@@ -169,7 +214,13 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     ) async {
         let prefix = "preview:"
         guard originSnapshot.sessionID.hasPrefix(prefix) else {
-            await MainActor.run { lastResult = fallbackResult }
+            await MainActor.run {
+                traceWatch(
+                    "preview_recovery_rejected",
+                    detail: "command=\(command.rawValue) reason=not_preview"
+                )
+                lastResult = fallbackResult
+            }
             return
         }
 
@@ -180,6 +231,10 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             let currentIndex = queue.firstIndex(where: { $0.id == currentID })
         else {
             await MainActor.run {
+                traceWatch(
+                    "preview_recovery_failed",
+                    detail: "command=\(command.rawValue) reason=queue_unavailable session=\(originSnapshot.sessionID)"
+                )
                 lastResult = fallbackResult
                 catalogMessage = "Discovery recovery queue unavailable"
             }
@@ -203,6 +258,10 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             let restore = await playDiscovery(queue[currentIndex], queue: queue)
             guard restore.ok else {
                 await MainActor.run {
+                    traceWatch(
+                        "preview_recovery_failed",
+                        detail: "command=\(command.rawValue) reason=restore_failed session=\(originSnapshot.sessionID)"
+                    )
                     lastResult = fallbackResult
                     catalogMessage = restore.message ?? "Discovery recovery failed"
                 }
@@ -213,6 +272,10 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         }
 
         await MainActor.run {
+            traceWatch(
+                "preview_recovery_result",
+                detail: "command=\(command.rawValue) ok=\(response.ok ? 1 : 0) session=\(originSnapshot.sessionID)"
+            )
             phoneReachable = response.ok
             lastResult = response.ok ? .accepted : fallbackResult
             if !response.ok {
@@ -387,37 +450,62 @@ final class WatchRemoteModel: NSObject, ObservableObject {
 
     func catalog(_ request: WatchCatalogRequest) async -> WatchCatalogResponse {
         guard WCSession.isSupported() else {
+            traceWatch(
+                "catalog_unavailable",
+                detail: "action=\(request.action.rawValue) reason=unsupported"
+            )
             return cachedCatalogResponse(for: request)
                 ?? .failure(token: request.token, message: "iPhone bridge unavailable")
         }
         guard WCSession.default.activationState == .activated else {
+            traceWatch(
+                "catalog_activation_needed",
+                detail: "action=\(request.action.rawValue) state=\(WCSession.default.activationState.rawValue)"
+            )
             WCSession.default.activate()
             return cachedCatalogResponse(for: request)
                 ?? .failure(token: request.token, message: "iPhone bridge unavailable")
         }
         guard let payload = WatchCatalogCodec.payload(request) else {
+            traceWatch("catalog_encode_failed", detail: "action=\(request.action.rawValue)")
             return .failure(token: request.token, message: "Invalid Watch request")
         }
 
+        traceWatch(
+            "catalog_begin",
+            detail: "action=\(request.action.rawValue) token=\(request.token.prefix(12)) route=\(request.route?.rawValue ?? "none")"
+        )
         await MainActor.run {
             catalogRequestCount += 1
             catalogBusy = true
             catalogMessage = nil
         }
 
-        var transport = await catalogAttempt(payload: payload, request: request)
+        var transport = await catalogAttempt(payload: payload, request: request, retried: false)
         if case .failure = transport {
+            traceWatch(
+                "catalog_retry",
+                detail: "action=\(request.action.rawValue) token=\(request.token.prefix(12))"
+            )
             WCSession.default.activate()
             try? await Task.sleep(nanoseconds: Self.immediateRetryDelayNanoseconds)
-            transport = await catalogAttempt(payload: payload, request: request)
+            transport = await catalogAttempt(payload: payload, request: request, retried: true)
         }
 
         let response: WatchCatalogResponse
         switch transport {
         case .response(let value):
             response = value
+            traceWatch(
+                "catalog_reply",
+                detail: "action=\(request.action.rawValue) token=\(request.token.prefix(12)) ok=\(value.ok ? 1 : 0) status=\(value.status ?? "none")"
+            )
             await MainActor.run { phoneReachable = true }
         case .failure(let message):
+            traceWatch(
+                "catalog_transport_failed",
+                detail: "action=\(request.action.rawValue) token=\(request.token.prefix(12)) error=\(message)"
+            )
             response = cachedCatalogResponse(for: request)
                 ?? .failure(token: request.token, message: message)
             await MainActor.run { phoneReachable = false }
@@ -437,15 +525,24 @@ final class WatchRemoteModel: NSObject, ObservableObject {
 
     private func catalogAttempt(
         payload: [String: Any],
-        request: WatchCatalogRequest
+        request: WatchCatalogRequest,
+        retried: Bool
     ) async -> CatalogTransportResult {
-        await withCheckedContinuation {
+        traceWatch(
+            "catalog_attempt",
+            detail: "action=\(request.action.rawValue) token=\(request.token.prefix(12)) retry=\(retried ? 1 : 0)"
+        )
+        return await withCheckedContinuation {
             (continuation: CheckedContinuation<CatalogTransportResult, Never>) in
             WCSession.default.sendMessage(payload) { reply in
                 let decoded = WatchCatalogCodec.response(from: reply)
                     ?? .failure(token: request.token, message: "Invalid iPhone response")
                 continuation.resume(returning: .response(decoded))
             } errorHandler: { error in
+                WatchTelemetryStore.record(
+                    event: "catalog_transport_error",
+                    detail: "action=\(request.action.rawValue) token=\(request.token.prefix(12)) retry=\(retried ? 1 : 0) error=\(error.localizedDescription)"
+                )
                 continuation.resume(returning: .failure(error.localizedDescription))
             }
         }
@@ -472,15 +569,26 @@ final class WatchRemoteModel: NSObject, ObservableObject {
     }
 
     private func activate() {
-        guard WCSession.isSupported() else { return }
+        guard WCSession.isSupported() else {
+            WatchTelemetryStore.record(event: "activation_unsupported")
+            return
+        }
         let session = WCSession.default
         session.delegate = self
+        WatchTelemetryStore.record(
+            event: "activation_request",
+            detail: "state=\(session.activationState.rawValue) reachable=\(session.isReachable ? 1 : 0)"
+        )
         session.activate()
         phoneReachable = session.activationState == .activated
     }
 
     private func receive(_ payload: [String: Any]) {
         guard let message = WaxloomWatchCodec.message(from: payload) else { return }
+        traceWatch(
+            "snapshot_received",
+            detail: "kind=\(message.kind.rawValue) session=\(message.sessionID) rev=\(message.revision)"
+        )
         DispatchQueue.main.async { [weak self] in
             self?.phoneReachable = true
             self?.apply(message)
@@ -505,9 +613,17 @@ final class WatchRemoteModel: NSObject, ObservableObject {
 
     private func applySnapshot(_ incoming: PlaybackSnapshot, timestamp: TimeInterval) {
         if timestamp < lastSnapshotTimestamp {
+            traceWatch(
+                "snapshot_rejected_old",
+                detail: "session=\(incoming.sessionID) rev=\(incoming.revision)"
+            )
             return
         }
         if timestamp == lastSnapshotTimestamp, incoming.revision < snapshot.revision {
+            traceWatch(
+                "snapshot_rejected_revision",
+                detail: "session=\(incoming.sessionID) rev=\(incoming.revision) current=\(snapshot.revision)"
+            )
             return
         }
         lastSnapshotTimestamp = timestamp
@@ -584,19 +700,29 @@ extension WatchRemoteModel: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
+        WatchTelemetryStore.record(
+            event: "activation_complete",
+            detail: "state=\(activationState.rawValue) reachable=\(session.isReachable ? 1 : 0) error=\(error == nil ? "none" : "present")"
+        )
         DispatchQueue.main.async { [weak self] in
             self?.phoneReachable = activationState == .activated
         }
 
         if activationState == .activated {
             receive(session.receivedApplicationContext)
+            WatchTelemetryStore.flushPending()
         }
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
+        WatchTelemetryStore.record(
+            event: "reachability_changed",
+            detail: "reachable=\(session.isReachable ? 1 : 0)"
+        )
         DispatchQueue.main.async { [weak self] in
             if session.isReachable {
                 self?.phoneReachable = true
+                WatchTelemetryStore.flushPending()
             }
         }
     }
