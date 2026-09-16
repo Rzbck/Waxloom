@@ -9,6 +9,7 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
     var coldStartCommandHandler: (@MainActor (PlaybackCommand, PlaybackSnapshot) async -> PlaybackCommandResult)?
     var catalogHandler: (@MainActor (WatchCatalogRequest) async -> WatchCatalogResponse)?
     var telemetryHandler: ((String, String, String) -> Void)?
+    var watchTelemetryHandler: (@MainActor ([WatchTelemetryEvent]) async -> Void)?
 
     private var currentSnapshot = PlaybackSnapshot.idle
     private var recentCommandResults: [String: (timestamp: TimeInterval, result: PlaybackCommandResult)] = [:]
@@ -260,6 +261,20 @@ extension PhoneWatchBridge: WCSessionDelegate {
 
         trace("message_unsupported")
         replyHandler(["ok": false])
+    }
+
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        guard let events = WatchTelemetryCodec.events(from: userInfo), !events.isEmpty else {
+            trace("user_info_ignored")
+            return
+        }
+
+        trace("watch_telemetry_received", detail: "events=\(events.count)")
+        Task { @MainActor [weak self] in
+            if let handler = self?.watchTelemetryHandler {
+                await handler(events)
+            }
+        }
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {
