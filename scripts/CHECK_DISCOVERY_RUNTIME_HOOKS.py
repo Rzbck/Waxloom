@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import tempfile
 import time
@@ -7,6 +8,7 @@ from pathlib import Path
 
 from waxloom_api.discovery_feedback import DiscoveryFeedbackStore
 from waxloom_api.discovery_recent_persistence import _persist_recent, _restore_recent
+from waxloom_api.import_source_safety import _unsafe
 from waxloom_api.imports import ImportService
 from waxloom_api.preview_cache import DiscoveryPreviewCache
 from waxloom_api.providers.youtube import YouTubeProvider
@@ -14,19 +16,36 @@ from waxloom_api.providers.youtube import YouTubeProvider
 
 def main() -> None:
     runtime_module = "waxloom_api.discovery_runtime_hooks"
+    safety_module = "waxloom_api.runtime_safety"
     identity_module = "waxloom_api.discovery_identity_hooks"
     persistence_module = "waxloom_api.discovery_recent_persistence"
+
     assert YouTubeProvider.search_candidates.__module__ == runtime_module
     assert YouTubeProvider.download_selected.__module__ == runtime_module
     assert ImportService.import_youtube.__module__ == runtime_module
     assert DiscoveryFeedbackStore.set.__module__ == runtime_module
-    assert DiscoveryPreviewCache.ensure_candidate.__module__ == runtime_module
+    assert DiscoveryPreviewCache.ensure_candidate.__module__ == safety_module
+    assert DiscoveryPreviewCache.status.__module__ == safety_module
+    assert DiscoveryPreviewCache.evict.__module__ == safety_module
     assert DiscoveryPreviewCache._playback_compatible.__module__ == runtime_module
     assert DiscoveryPreviewCache.candidate_by_identity.__module__ == identity_module
     assert DiscoveryPreviewCache.ready_by_identity.__module__ == identity_module
     assert DiscoveryPreviewCache.start.__module__ == persistence_module
     assert DiscoveryPreviewCache._reconcile.__module__ == persistence_module
-    assert DiscoveryPreviewCache.evict.__module__ == persistence_module
+
+    assert _unsafe({"title": "Artist - Track", "duration": 180}) is None
+    assert _unsafe({"title": "Kid Kutt Nu Disco Crates", "duration": 360}) is not None
+    assert _unsafe({"title": "Friday DJ Set", "duration": 360}) is not None
+    assert _unsafe({"title": "Artist - Long Track", "duration": 13 * 60}) is not None
+
+    # Importing the production ASGI entrypoint is part of the test: syntax and
+    # route/middleware construction must succeed before an Apple artifact ships.
+    from waxloom_api import instrumented
+
+    assert instrumented.PreviewRangeTransport.max_range_bytes == 2 * 1024 * 1024
+    assert instrumented.PreviewRangeTransport.chunk_bytes == 64 * 1024
+    assert instrumented.QueuePositionCompatibility is not None
+    assert instrumented.ClientTraceRequest is not None
 
     with tempfile.TemporaryDirectory(prefix="waxloom-runtime-hooks-") as raw_root:
         root = Path(raw_root)
@@ -128,6 +147,27 @@ def main() -> None:
 
         reopened = DiscoveryFeedbackStore(feedback_path)
         assert reopened.exact(recording_mbid) == 1
+
+        # A candidate that cannot be prepared twice is quarantined for the long
+        # safety window instead of being retried every ten minutes forever.
+        broken_id = "yt:broken-preview-test"
+        broken = {
+            "recording_mbid": broken_id,
+            "artist": "Broken Artist",
+            "title": "Broken Track",
+            "tags": [],
+        }
+        restarted_cache._blocked.add(broken_id)
+        assert asyncio.run(
+            restarted_cache.ensure_candidate(broken, foreground=True)
+        ) is None
+        assert asyncio.run(
+            restarted_cache.ensure_candidate(broken, foreground=True)
+        ) is None
+        assert restarted_cache.status().get("quarantined", 0) >= 1
+
+        asyncio.run(restarted_cache.evict(broken_id))
+        assert restarted_cache.status().get("quarantined", 0) == 0
 
     print("Discovery runtime hooks PASS")
 
