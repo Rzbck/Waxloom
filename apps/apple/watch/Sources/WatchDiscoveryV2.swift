@@ -183,8 +183,8 @@ struct WatchDiscoveryDashboardV2: View {
                                     items[index] = updated
                                 }
                             },
-                            onImported: {
-                                items.removeAll { $0.id == item.id }
+                            onImported: { importedID in
+                                items.removeAll { $0.id == importedID }
                             }
                         )
                     } label: {
@@ -289,7 +289,7 @@ struct WatchDiscoveryItemActionsV2: View {
 
     let queue: [WatchCatalogItem]
     let onUpdate: (WatchCatalogItem) -> Void
-    let onImported: () -> Void
+    let onImported: (String) -> Void
 
     @AppStorage("waxloom.authorizedMediaImports.v1")
     private var importAuthorized = false
@@ -300,6 +300,7 @@ struct WatchDiscoveryItemActionsV2: View {
     @State private var manualImportItem: WatchCatalogItem?
     @State private var sourceRejected = false
     @State private var message: String?
+    @State private var crownPosition = 0.0
 
     var body: some View {
         VStack(spacing: 4) {
@@ -377,6 +378,12 @@ struct WatchDiscoveryItemActionsV2: View {
 
                 Spacer(minLength: 0)
 
+                if queue.count > 1 {
+                    Text("CROWN \(currentQueueIndex + 1)/\(queue.count)")
+                        .font(.system(size: 6.5, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                }
+
                 if item.source == "youtube_dig" {
                     Button {
                         Task { await toggleBadSource() }
@@ -404,6 +411,22 @@ struct WatchDiscoveryItemActionsV2: View {
         }
         .padding(.horizontal, 4)
         .navigationTitle("Discovery")
+        .focusable(queue.count > 1)
+        .digitalCrownRotation(
+            $crownPosition,
+            from: 0,
+            through: Double(max(0, queue.count - 1)),
+            by: 1,
+            sensitivity: .low,
+            isContinuous: false,
+            isHapticFeedbackEnabled: true
+        )
+        .onAppear {
+            syncCrownToItem()
+        }
+        .onChange(of: crownPosition) { _, value in
+            selectQueueItem(at: Int(value.rounded()))
+        }
         .navigationDestination(item: $manualImportItem) { candidate in
             WatchDiscoveryManualSourceV2(
                 remote: remote,
@@ -411,7 +434,7 @@ struct WatchDiscoveryItemActionsV2: View {
             ) { importedMessage in
                 addedToLibrary = true
                 message = importedMessage
-                onImported()
+                onImported(item.id)
             }
         }
         .alert("Authorized media import", isPresented: $showingAuthorization) {
@@ -423,6 +446,10 @@ struct WatchDiscoveryItemActionsV2: View {
         } message: {
             Text("Confirm that you are authorized to save media you import into your local library.")
         }
+    }
+
+    private var currentQueueIndex: Int {
+        queue.firstIndex(where: { $0.id == item.id }) ?? 0
     }
 
     private var currentFeedback: Int {
@@ -440,6 +467,21 @@ struct WatchDiscoveryItemActionsV2: View {
 
     private var isCurrentAndPlaying: Bool {
         isCurrentTrack && remote.snapshot.isPlaying
+    }
+
+    private func syncCrownToItem() {
+        crownPosition = Double(currentQueueIndex)
+    }
+
+    private func selectQueueItem(at index: Int) {
+        guard queue.indices.contains(index) else { return }
+        let selected = queue[index]
+        guard selected.id != item.id else { return }
+        item = selected
+        addedToLibrary = false
+        sourceRejected = false
+        manualImportItem = nil
+        message = nil
     }
 
     private func togglePlayback() {
@@ -474,7 +516,7 @@ struct WatchDiscoveryItemActionsV2: View {
         case .success(let text):
             addedToLibrary = true
             message = text
-            onImported()
+            onImported(item.id)
         case .manual(let text):
             message = "\(text) Choose the source manually."
             manualImportItem = item
