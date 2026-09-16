@@ -57,23 +57,30 @@ enum WatchCatalogService {
 
                 case .discovery:
                     let candidate = discoveryCandidate(from: item)
-
-                    let feed = try await WaxloomAPI.discoveryFeed(baseURL: baseURL)
-                    let authoritativeDiscoveryItems = discoveryItems(feed.external.items)
                     let section = item.section ?? "Closest"
-                    let authoritativeShelf = authoritativeDiscoveryItems.filter {
-                        ($0.section ?? "Closest") == section
-                    }
 
+                    // The queue visible on the Watch at tap time is the playback
+                    // contract for this session. Do not silently replace it with a
+                    // newer server feed: that made Next jump to tracks that were
+                    // not visible on the Watch and then disappear after a refresh.
                     let requestedQueue = (request.items ?? [])
-                        .filter { $0.kind == .discovery }
+                        .filter {
+                            $0.kind == .discovery
+                                && ($0.section ?? section) == section
+                        }
                     let queueItems: [WatchCatalogItem]
-                    if authoritativeShelf.contains(where: { $0.id == item.id }) {
-                        queueItems = authoritativeShelf
-                    } else if requestedQueue.contains(where: { $0.id == item.id }) {
+                    if requestedQueue.contains(where: { $0.id == item.id }) {
                         queueItems = requestedQueue
                     } else {
-                        queueItems = [item]
+                        // Fallback only for older clients that did not send their
+                        // visible shelf as part of the play request.
+                        let feed = try await WaxloomAPI.discoveryFeed(baseURL: baseURL)
+                        let authoritativeShelf = discoveryItems(feed.external.items).filter {
+                            ($0.section ?? "Closest") == section
+                        }
+                        queueItems = authoritativeShelf.contains(where: { $0.id == item.id })
+                            ? authoritativeShelf
+                            : [item]
                     }
 
                     let queue = queueItems.map(discoveryCandidate)
@@ -109,7 +116,19 @@ enum WatchCatalogService {
                 )
                 return .success(
                     token: request.token,
-                    title: value > 0 ? "Liked" : value < 0 ? "Less like this" : "Feedback cleared"
+                    title: value > 0 ? "Liked" : value < 0 ? "Less like this" : "Feedback cleared",
+                    value: value
+                )
+
+            case .nowPlayingFeedback:
+                let requested = max(-1, min(1, request.value ?? 0))
+                guard let applied = await player.toggleCurrentTasteFeedback(requested) else {
+                    return .failure(token: request.token, message: "Nothing playing or feedback unavailable")
+                }
+                return .success(
+                    token: request.token,
+                    title: applied > 0 ? "Liked" : applied < 0 ? "Less like this" : "Feedback cleared",
+                    value: applied
                 )
 
             case .badSource:
