@@ -37,6 +37,9 @@ cookies*.txt
 *.sqlite
 *.sqlite3
 
+# Local diagnostics
+_ARTIFACTS/
+
 # Apple local signing / build artifacts
 artifacts/
 DerivedData/
