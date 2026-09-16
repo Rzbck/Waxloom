@@ -6,6 +6,7 @@ enum PlaybackCommand: String, Codable, CaseIterable {
     case previous
     case seekBackward15 = "seek_backward_15"
     case seekForward15 = "seek_forward_15"
+    case stop
 }
 
 enum PlaybackCommandResult: String, Codable {
