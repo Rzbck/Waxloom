@@ -83,7 +83,7 @@ struct WaxloomWatchMessage: Codable {
             revision: snapshot.revision,
             token: token,
             command: command,
-            snapshot: nil
+            snapshot: snapshot
         )
     }
 
@@ -109,11 +109,10 @@ enum WaxloomWatchCodec {
     static let payloadType = "waxloom_player_wire_v1"
     static let payloadDataKey = "data"
 
-    // Playback commands are still immediate interactions. The bounded five-second
-    // TTL exists only to permit one WatchConnectivity wake hint + one correlated
-    // retry when iOS has suspended the companion. Anything later is rejected so
-    // a stale command cannot become a surprising ghost action.
-    static let commandTTL: TimeInterval = 5
+    // Playback commands remain immediate interactions. The snapshot travels with
+    // the command only so an iPhone process woken cold can reconstruct the exact
+    // Discovery state before applying it; delayed ghost commands are still rejected.
+    static let commandTTL: TimeInterval = 2
 
     static func encode(_ message: WaxloomWatchMessage) -> Data? {
         try? JSONEncoder().encode(message)
