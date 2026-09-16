@@ -157,6 +157,47 @@ final class NativePlayerModel: NSObject, ObservableObject {
         seek(to: elapsedSeconds + seconds)
     }
 
+    func stopAndClear() {
+        submitCurrentLibraryScrobble()
+        previewLoadGeneration += 1
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+
+        mode = .idle
+        currentSong = nil
+        currentPreview = nil
+        currentTasteFeedback = 0
+        libraryQueue.removeAll()
+        previewQueue.removeAll()
+        libraryIndex = 0
+        previewIndex = 0
+        elapsedSeconds = 0
+        durationSeconds = 0
+        isPlaying = false
+        errorMessage = nil
+        lastWatchProgressBucket = -1
+        lastQueuePersistBucket = -1
+        lastPreviewProgressTraceID = nil
+        revision += 1
+
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        DiscoverySessionStore.clear()
+
+        if let baseURL {
+            Task {
+                await WaxloomAPI.savePlayQueue(
+                    baseURL: baseURL,
+                    ids: [],
+                    current: nil,
+                    position: 0
+                )
+            }
+        }
+
+        traceClient("player_cleared", detail: audioRouteSummary())
+        publishSnapshot()
+    }
+
     func next() async {
         guard let baseURL else { return }
         switch mode {
