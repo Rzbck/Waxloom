@@ -42,13 +42,54 @@ def main() -> None:
     # route/middleware construction must succeed before an Apple artifact ships.
     from waxloom_api import instrumented
 
-    assert instrumented.PreviewRangeTransport.max_range_bytes == 2 * 1024 * 1024
     assert instrumented.PreviewRangeTransport.chunk_bytes == 64 * 1024
+    assert not hasattr(instrumented.PreviewRangeTransport, "max_range_bytes")
     assert instrumented.QueuePositionCompatibility is not None
     assert instrumented.ClientTraceRequest is not None
 
+    async def check_exact_range(path: Path) -> None:
+        payload = bytes((index % 251 for index in range(8192)))
+        path.write_bytes(payload)
+        messages: list[dict] = []
+        never_disconnect = asyncio.Event()
+
+        async def receive() -> dict:
+            await never_disconnect.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message: dict) -> None:
+            messages.append(message)
+
+        transport = instrumented.PreviewRangeTransport(lambda *_args: None)
+        await transport._send_file(
+            path=path,
+            method="GET",
+            range_value="bytes=100-4095",
+            recording_mbid="yt:range-contract-test",
+            receive=receive,
+            send=send,
+        )
+
+        start = next(message for message in messages if message.get("type") == "http.response.start")
+        assert start["status"] == 206
+        headers = {
+            key.decode("latin-1"): value.decode("latin-1")
+            for key, value in start["headers"]
+        }
+        assert headers["content-range"] == "bytes 100-4095/8192"
+        assert headers["content-length"] == str(4095 - 100 + 1)
+
+        body = b"".join(
+            bytes(message.get("body", b""))
+            for message in messages
+            if message.get("type") == "http.response.body"
+        )
+        assert body == payload[100:4096]
+
     with tempfile.TemporaryDirectory(prefix="waxloom-runtime-hooks-") as raw_root:
         root = Path(raw_root)
+        asyncio.run(check_exact_range(root / "range-test.m4a"))
+
         cache_dir = root / "yt-dlp-cache"
         provider = YouTubeProvider(cache_dir=cache_dir)
         preview_cache = DiscoveryPreviewCache(
