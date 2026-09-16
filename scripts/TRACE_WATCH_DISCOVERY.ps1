@@ -107,7 +107,8 @@ Write-Host ""
 Write-Host "Evidence model:" -ForegroundColor DarkCyan
 Write-Host "  CLIENT component=watch        = event originally recorded on Apple Watch"
 Write-Host "  CLIENT component=watch_bridge = event received/handled by iPhone WCSession"
-Write-Host "  PLAYER                        = AVPlayer event emitted by iPhone"
+Write-Host "  CLIENT component=player       = AVPlayer/audio-session state emitted by iPhone"
+Write-Host "  PLAYER                        = compact playback milestone emitted by iPhone"
 Write-Host "  HTTP                          = request actually received/answered by API"
 Write-Host "  WATCHFLOW                     = server decision/result"
 Write-Host "  RANGE                         = actual preview bytes written by server"
@@ -257,6 +258,7 @@ $queue422 = @($http | Where-Object { $_ -cmatch 'HTTP PUT /api/player/queue -> 4
 
 $watchEvents = @($client | Where-Object { $_ -cmatch 'component=watch\s' })
 $bridgeEvents = @($client | Where-Object { $_ -cmatch 'component=watch_bridge\s' })
+$playerClientEvents = @($client | Where-Object { $_ -cmatch 'component=player\s' })
 $watchCommandAttempts = @($watchEvents | Where-Object { $_ -cmatch 'event=command_attempt\s' })
 $watchCommandReplies = @($watchEvents | Where-Object { $_ -cmatch 'event=command_reply\s' })
 $watchTransportErrors = @($watchEvents | Where-Object { $_ -cmatch 'event=command_transport_error\s' })
@@ -270,6 +272,10 @@ $coldMismatches = @($client | Where-Object { $_ -cmatch 'event=cold_start_(sessi
 $thermalEvents = @($client | Where-Object { $_ -cmatch 'component=app event=thermal_state\s' })
 $sceneEvents = @($client | Where-Object { $_ -cmatch 'component=app event=scene_phase\s' })
 $memoryWarnings = @($client | Where-Object { $_ -cmatch 'component=app event=memory_warning\s' })
+$audioSessionErrors = @($playerClientEvents | Where-Object { $_ -cmatch 'event=(audio_session_error|preview_audio_session)\s' -and $_ -cmatch 'result=error|event=audio_session_error' })
+$playerClientFailures = @($playerClientEvents | Where-Object { $_ -cmatch 'event=preview_item_failed\s' })
+$playerClientNoProgress = @($playerClientEvents | Where-Object { $_ -cmatch 'event=preview_no_progress\s' })
+$playerClientProgress = @($playerClientEvents | Where-Object { $_ -cmatch 'event=preview_progress\s' })
 
 $actualPreviewBytes = [int64]0
 $completedRanges = 0
@@ -294,6 +300,7 @@ $rateEvents = @(
         $category = $null
         if ($line -cmatch '\]\s+PLAYER\s+') { $category = 'PLAYER' }
         elseif ($line -cmatch 'CLIENT component=watch\s') { $category = 'WATCH' }
+        elseif ($line -cmatch 'CLIENT component=player\s') { $category = 'IPHONE_PLAYER' }
         elseif ($line -cmatch '\]\s+CLIENT\s+') { $category = 'CLIENT' }
         elseif ($line -cmatch '\bWATCHFLOW\s+stage=') { $category = 'WATCHFLOW' }
         elseif ($line -cmatch '\]\s+PREVIEW_RANGE_DONE\s+') { $category = 'RANGE_DONE' }
@@ -328,7 +335,7 @@ $errors = @(
         $_ -cmatch ' -> (4\d\d|5\d\d)' -or
         $_ -cmatch 'result=error' -or
         $_ -cmatch 'preview_item_failed|preview_no_progress' -or
-        $_ -cmatch 'event=(command_transport_error|command_timeout|catalog_transport_error)' -or
+        $_ -cmatch 'event=(command_transport_error|command_timeout|catalog_transport_error|audio_session_error)' -or
         $_ -cmatch 'thermal_state detail=''critical''' -or
         $_ -cmatch 'memory_warning'
     }
@@ -361,6 +368,13 @@ PLAYBACK
 Unique previews progressed  : $($playedIDs.Count)
 Unique player failures      : $($failedIDs.Count)
 Preview HTTP 404s           : $($notFoundIDs.Count)
+
+iPHONE PLAYER / AUDIO
+Player CLIENT events        : $($playerClientEvents.Count)
+Player progress events      : $($playerClientProgress.Count)
+Player item failures        : $($playerClientFailures.Count)
+Player no-progress events   : $($playerClientNoProgress.Count)
+Audio-session errors        : $($audioSessionErrors.Count)
 
 FEEDBACK / IMPORT
 Feedback received/stored    : $($feedbackRecv.Count) / $($feedbackStored.Count)
@@ -417,8 +431,8 @@ Write-Host "Raw evidence : $rawPath" -ForegroundColor DarkCyan
 Write-Host "ZIP          : $zipPath" -ForegroundColor Green
 Write-Host ""
 
-if ($notFoundIDs.Count -gt 0 -or $failedIDs.Count -gt 0 -or $importError.Count -gt 0 -or $queue422.Count -gt 0 -or $watchTimeouts.Count -gt 0) {
-    Write-Host "Confirmed user/transport-path failure(s) were captured above." -ForegroundColor Red
+if ($notFoundIDs.Count -gt 0 -or $failedIDs.Count -gt 0 -or $playerClientFailures.Count -gt 0 -or $audioSessionErrors.Count -gt 0 -or $importError.Count -gt 0 -or $queue422.Count -gt 0 -or $watchTimeouts.Count -gt 0) {
+    Write-Host "Confirmed user/transport/audio-path failure(s) were captured above." -ForegroundColor Red
 }
 elseif ($prepareNone.Count -gt 0 -or $downloadError.Count -gt 0 -or $transcodeError.Count -gt 0 -or $quarantine.Count -gt 0) {
     Write-Host "User path passed, but a background preparation problem was captured." -ForegroundColor Yellow
