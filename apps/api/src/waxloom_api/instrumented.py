@@ -72,11 +72,7 @@ _NO_CLOSE_LEASE = _NoCloseLease()
 
 
 class SharedNavidromeClient(NavidromeClient):
-    """Navidrome client with reusable connection pools.
-
-    JSON/OpenSubsonic metadata and binary media use separate pools so a burst of
-    cover artwork can never consume the connections needed by normal API calls.
-    """
+    """Navidrome client with reusable connection pools."""
 
     def __init__(self, base_url: str, username: str, password: str, *, timeout: float = 15.0) -> None:
         super().__init__(base_url, username, password, timeout=timeout)
@@ -173,8 +169,6 @@ def _shared_navidrome_client() -> NavidromeClient:
     return _shared_navidrome
 
 
-# Route functions in waxloom_api.main resolve this global at request time. The
-# discovery/import service factories do too, so one pool serves the full app.
 main_module.navidrome_client = _shared_navidrome_client
 
 
@@ -222,7 +216,7 @@ async def close_shared_navidrome() -> None:
 
 
 class CoverGate:
-    """Bound cover traffic so artwork cannot starve audio playback.""
+    """Bound cover traffic so artwork cannot starve audio playback."""
 
     def __init__(self, app: Any, limit: int = 3) -> None:
         self.app = app
@@ -237,14 +231,9 @@ class CoverGate:
 
 
 class QueuePositionCompatibility:
-    """Normalize legacy iPhone fractional queue positions before Pydantic validation.
-
-    Navidrome's play-queue position is integer seconds. Older Waxloom Apple builds
-    sent a Double every 15 seconds, which produced a silent 422 retry loop. Keep
-    the server tolerant while new clients roll out, and make each normalization
-    visible in WATCHFLOW.
-    """
-
+    # Legacy Apple clients send fractional seconds while the Navidrome queue API
+    # stores integer seconds. Normalize the payload before Pydantic validation so
+    # old builds do not generate a silent HTTP 422 loop every fifteen seconds.
     def __init__(self, app: Any) -> None:
         self.app = app
 
@@ -308,14 +297,10 @@ class QueuePositionCompatibility:
 
 
 class PreviewRangeTransport:
-    """Serve cached Discovery M4A files with bounded, observable byte ranges.
-
-    AVPlayer can issue very broad overlapping range requests. HTTP 206 responses
-    are allowed to satisfy only a subset of a requested range; capping each
-    response prevents one transient player restart from queueing another complete
-    10-20 MB file transfer. The client can request the remaining bytes if needed.
-    """
-
+    # AVPlayer can ask for broad overlapping ranges. A 206 response may legally
+    # satisfy a subset of the requested range, so bound each response and let the
+    # client request subsequent bytes. This prevents transient player restarts
+    # from queueing several complete 10-20 MB transfers at once.
     max_range_bytes = 2 * 1024 * 1024
     chunk_bytes = 64 * 1024
 
@@ -499,13 +484,7 @@ class PreviewRangeTransport:
 
 
 class TimestampAccessLog:
-    """Millisecond request timing for the local development runtime.
-
-    The same sanitized access lines are also persisted to a small rotating file
-    under the local Waxloom state directory so the hidden Scheduled Task remains
-    diagnosable without exposing credentials, request bodies, cookies or query
-    strings.
-    """
+    """Persist sanitized request timing without logging credentials or bodies."""
 
     def __init__(self, app: Any) -> None:
         self.app = app
@@ -546,8 +525,6 @@ class TimestampAccessLog:
             raise
 
 
-# Explicit Discovery range transport, queue compatibility and cover gating sit
-# inside the timing logger so iPhone media/control requests stay observable.
 app = TimestampAccessLog(
     PreviewRangeTransport(
         QueuePositionCompatibility(
