@@ -37,14 +37,6 @@ enum WatchCatalogAction: String, Codable {
     case removeFromPlaylist
     case youtubeSearch
     case youtubeImport
-    case watchTelemetry
-}
-
-struct WatchTelemetryEvent: Codable, Identifiable, Hashable {
-    var id: String = UUID().uuidString
-    var timestamp: TimeInterval = Date().timeIntervalSince1970
-    var event: String
-    var detail: String
 }
 
 struct WatchCatalogItem: Codable, Identifiable, Hashable {
@@ -91,7 +83,6 @@ struct WatchCatalogRequest: Codable {
     var authorized: Bool?
     var item: WatchCatalogItem?
     var items: [WatchCatalogItem]?
-    var telemetry: [WatchTelemetryEvent]?
 }
 
 struct WatchCatalogResponse: Codable {
