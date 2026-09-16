@@ -6,7 +6,7 @@ struct WaxloomWatchApp: App {
 
     var body: some Scene {
         WindowGroup {
-            WatchProductRootView(remote: remote)
+            WatchProductRootShell(remote: remote)
                 .preferredColorScheme(.dark)
         }
     }
