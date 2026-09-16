@@ -27,6 +27,7 @@ struct PlaybackSnapshot: Codable, Equatable {
     var isPlaying: Bool
     var elapsedSeconds: Double
     var durationSeconds: Double
+    var feedback: Int?
 
     static let idle = PlaybackSnapshot(
         sessionID: "idle",
@@ -36,7 +37,8 @@ struct PlaybackSnapshot: Codable, Equatable {
         artworkURL: nil,
         isPlaying: false,
         elapsedSeconds: 0,
-        durationSeconds: 0
+        durationSeconds: 0,
+        feedback: 0
     )
 }
 
