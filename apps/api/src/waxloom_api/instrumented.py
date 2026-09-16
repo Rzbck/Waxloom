@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
 import os
 import tempfile
 import time
 from collections.abc import Mapping
 from datetime import datetime
+from email.utils import formatdate
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -51,6 +54,10 @@ def _log(message: str, *, epoch_ms: int | None = None) -> None:
     line = f"[{_stamp(epoch_ms)}] {message}"
     print(line, flush=True)
     _runtime_logger.info(line)
+
+
+def _clean_trace_value(value: str, limit: int) -> str:
+    return " ".join(value.replace("\r", " ").replace("\n", " ").split())[:limit]
 
 
 class _NoCloseLease:
@@ -188,13 +195,34 @@ async def player_trace(payload: PlayerTraceRequest) -> dict[str, bool]:
     return {"ok": True}
 
 
+class ClientTraceRequest(BaseModel):
+    component: str = Field(min_length=1, max_length=32)
+    event: str = Field(min_length=1, max_length=48)
+    detail: str = Field(default="", max_length=300)
+    client_epoch_ms: int = Field(gt=0)
+
+
+@main_module.app.post("/api/client/trace")
+async def client_trace(payload: ClientTraceRequest) -> dict[str, bool]:
+    received_ms = int(time.time() * 1000)
+    lag_ms = max(0, received_ms - payload.client_epoch_ms)
+    component = _clean_trace_value(payload.component, 32)
+    event = _clean_trace_value(payload.event, 48)
+    detail = _clean_trace_value(payload.detail, 300)
+    _log(
+        f"CLIENT component={component} event={event} detail={detail!r} server-received=+{lag_ms}ms",
+        epoch_ms=payload.client_epoch_ms,
+    )
+    return {"ok": True}
+
+
 @main_module.app.on_event("shutdown")
 async def close_shared_navidrome() -> None:
     await _shared_navidrome.aclose()
 
 
 class CoverGate:
-    """Bound cover traffic so artwork cannot starve audio playback."""
+    """Bound cover traffic so artwork cannot starve audio playback.""
 
     def __init__(self, app: Any, limit: int = 3) -> None:
         self.app = app
@@ -208,14 +236,88 @@ class CoverGate:
         await self.app(scope, receive, send)
 
 
-class PreviewRangeTransport:
-    """Serve cached Discovery M4A files with explicit iOS-safe byte ranges.
+class QueuePositionCompatibility:
+    """Normalize legacy iPhone fractional queue positions before Pydantic validation.
 
-    AVPlayer is stricter than browsers about local media range semantics. This
-    transport forces a stable audio/mp4 content type and exact single-range
-    Content-Range/Content-Length headers while leaving the normal FastAPI route
-    as a fallback for cache misses and errors.
+    Navidrome's play-queue position is integer seconds. Older Waxloom Apple builds
+    sent a Double every 15 seconds, which produced a silent 422 retry loop. Keep
+    the server tolerant while new clients roll out, and make each normalization
+    visible in WATCHFLOW.
     """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        if (
+            scope.get("type") != "http"
+            or str(scope.get("method", "")).upper() != "PUT"
+            or str(scope.get("path", "")) != "/api/player/queue"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        parts: list[bytes] = []
+        while True:
+            message = await receive()
+            if message.get("type") == "http.disconnect":
+                return
+            if message.get("type") != "http.request":
+                continue
+            parts.append(bytes(message.get("body", b"")))
+            if not message.get("more_body", False):
+                break
+
+        body = b"".join(parts)
+        replacement = body
+        try:
+            payload = json.loads(body.decode("utf-8"))
+            position = payload.get("position") if isinstance(payload, dict) else None
+            if isinstance(position, (int, float)) and not isinstance(position, bool):
+                numeric = float(position)
+                if math.isfinite(numeric):
+                    normalized = max(0, int(numeric))
+                    if position != normalized:
+                        payload["position"] = normalized
+                        replacement = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+                        _log(
+                            "WATCHFLOW stage=queue_position decision=normalize_fractional "
+                            f"from={numeric:.3f} to={normalized}"
+                        )
+        except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            replacement = body
+
+        child_scope = dict(scope)
+        headers = []
+        for key, value in scope.get("headers", []):
+            if key.lower() != b"content-length":
+                headers.append((key, value))
+        headers.append((b"content-length", str(len(replacement)).encode("ascii")))
+        child_scope["headers"] = headers
+
+        delivered = False
+
+        async def replay_receive() -> dict[str, Any]:
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": replacement, "more_body": False}
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        await self.app(child_scope, replay_receive, send)
+
+
+class PreviewRangeTransport:
+    """Serve cached Discovery M4A files with bounded, observable byte ranges.
+
+    AVPlayer can issue very broad overlapping range requests. HTTP 206 responses
+    are allowed to satisfy only a subset of a requested range; capping each
+    response prevents one transient player restart from queueing another complete
+    10-20 MB file transfer. The client can request the remaining bytes if needed.
+    """
+
+    max_range_bytes = 2 * 1024 * 1024
+    chunk_bytes = 64 * 1024
 
     def __init__(self, app: Any) -> None:
         self.app = app
@@ -259,7 +361,8 @@ class PreviewRangeTransport:
         recording_mbid: str,
         send: Any,
     ) -> None:
-        size = path.stat().st_size
+        stat = path.stat()
+        size = stat.st_size
         try:
             parsed = self._parse_range(range_value, size)
         except (TypeError, ValueError):
@@ -272,19 +375,28 @@ class PreviewRangeTransport:
             await send({"type": "http.response.body", "body": b"", "more_body": False})
             return
 
+        requested_start = 0
+        requested_end = size - 1
         if parsed is None:
             start, end = 0, size - 1
             status = 200
         else:
-            start, end = parsed
+            requested_start, requested_end = parsed
+            start = requested_start
+            end = min(requested_end, start + self.max_range_bytes - 1)
             status = 206
 
         length = end - start + 1
+        etag = f'"{size:x}-{stat.st_mtime_ns:x}"'.encode("ascii")
+        last_modified = formatdate(stat.st_mtime, usegmt=True).encode("ascii")
         response_headers = [
             (b"content-type", b"audio/mp4"),
             (b"accept-ranges", b"bytes"),
-            (b"cache-control", b"private, max-age=300"),
+            (b"cache-control", b"private, max-age=3600, immutable"),
+            (b"etag", etag),
+            (b"last-modified", last_modified),
             (b"content-length", str(length).encode("ascii")),
+            (b"x-content-type-options", b"nosniff"),
         ]
         if status == 206:
             response_headers.append(
@@ -293,30 +405,62 @@ class PreviewRangeTransport:
 
         safe_range = range_value or "full"
         _log(
-            f"PREVIEW_RANGE recording={recording_mbid} range={safe_range} bytes={start}-{end}/{size}"
+            f"PREVIEW_RANGE recording={recording_mbid} range={safe_range} "
+            f"requested={requested_start}-{requested_end}/{size} served={start}-{end}/{size}"
         )
         await send({"type": "http.response.start", "status": status, "headers": response_headers})
+
+        started = time.perf_counter()
+        sent_bytes = 0
+        completed = method == "HEAD"
+        disconnect_type = "none"
+
         if method == "HEAD":
             await send({"type": "http.response.body", "body": b"", "more_body": False})
-            return
-
-        remaining = length
-        with path.open("rb") as handle:
-            handle.seek(start)
-            while remaining > 0:
-                chunk = handle.read(min(256 * 1024, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                await send(
-                    {
-                        "type": "http.response.body",
-                        "body": chunk,
-                        "more_body": remaining > 0,
-                    }
+        else:
+            remaining = length
+            try:
+                with path.open("rb") as handle:
+                    handle.seek(start)
+                    while remaining > 0:
+                        chunk = handle.read(min(self.chunk_bytes, remaining))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        sent_bytes += len(chunk)
+                        await send(
+                            {
+                                "type": "http.response.body",
+                                "body": chunk,
+                                "more_body": remaining > 0,
+                            }
+                        )
+                        await asyncio.sleep(0)
+                completed = remaining == 0
+                if remaining > 0:
+                    await send({"type": "http.response.body", "body": b"", "more_body": False})
+            except asyncio.CancelledError:
+                disconnect_type = "cancelled"
+                raise
+            except (ConnectionError, OSError, RuntimeError) as exc:
+                disconnect_type = type(exc).__name__
+                completed = False
+            finally:
+                elapsed_ms = (time.perf_counter() - started) * 1000
+                _log(
+                    "PREVIEW_RANGE_DONE "
+                    f"recording={recording_mbid} served={start}-{end}/{size} "
+                    f"sent={sent_bytes} completed={int(completed)} disconnect={disconnect_type} "
+                    f"elapsed_ms={elapsed_ms:.1f}"
                 )
-        if remaining > 0:
-            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+        if method == "HEAD":
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            _log(
+                "PREVIEW_RANGE_DONE "
+                f"recording={recording_mbid} served={start}-{end}/{size} "
+                f"sent=0 completed=1 disconnect=none elapsed_ms={elapsed_ms:.1f}"
+            )
 
     async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -402,6 +546,12 @@ class TimestampAccessLog:
             raise
 
 
-# Explicit Discovery range transport and cover gating sit inside the timing
-# logger so iPhone media requests remain fully observable in the runtime log.
-app = TimestampAccessLog(PreviewRangeTransport(CoverGate(main_module.app, limit=3)))
+# Explicit Discovery range transport, queue compatibility and cover gating sit
+# inside the timing logger so iPhone media/control requests stay observable.
+app = TimestampAccessLog(
+    PreviewRangeTransport(
+        QueuePositionCompatibility(
+            CoverGate(main_module.app, limit=3)
+        )
+    )
+)
