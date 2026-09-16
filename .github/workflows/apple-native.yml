@@ -11,12 +11,30 @@ on:
       - 'fix/apple-*'
     paths:
       - 'apps/apple/**'
+      - 'apps/api/src/waxloom_api/preview_cache.py'
+      - 'apps/api/src/waxloom_api/imports.py'
+      - 'apps/api/src/waxloom_api/providers/youtube.py'
+      - 'apps/api/src/waxloom_api/discovery_runtime_hooks.py'
+      - 'apps/api/src/waxloom_api/discovery_identity_hooks.py'
+      - 'apps/api/src/waxloom_api/discovery_recent_persistence.py'
+      - 'apps/api/src/waxloom_api/__init__.py'
+      - 'scripts/CHECK_DISCOVERY_RUNTIME_HOOKS.py'
+      - 'scripts/TRACE_WATCH_DISCOVERY.ps1'
       - '.github/workflows/apple-native.yml'
       - 'scripts/security-gate.ps1'
       - '.gitignore'
   pull_request:
     paths:
       - 'apps/apple/**'
+      - 'apps/api/src/waxloom_api/preview_cache.py'
+      - 'apps/api/src/waxloom_api/imports.py'
+      - 'apps/api/src/waxloom_api/providers/youtube.py'
+      - 'apps/api/src/waxloom_api/discovery_runtime_hooks.py'
+      - 'apps/api/src/waxloom_api/discovery_identity_hooks.py'
+      - 'apps/api/src/waxloom_api/discovery_recent_persistence.py'
+      - 'apps/api/src/waxloom_api/__init__.py'
+      - 'scripts/CHECK_DISCOVERY_RUNTIME_HOOKS.py'
+      - 'scripts/TRACE_WATCH_DISCOVERY.ps1'
       - '.github/workflows/apple-native.yml'
       - 'scripts/security-gate.ps1'
       - '.gitignore'
@@ -54,6 +72,15 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           xcrun --sdk watchos --show-sdk-version
+      - name: Verify Discovery API runtime hooks
+        shell: bash
+        run: |
+          set -euo pipefail
+          API_VENV="$RUNNER_TEMP/api-check-venv"
+          python3 -m venv "$API_VENV"
+          "$API_VENV/bin/python" -m pip install --disable-pip-version-check -e apps/api
+          "$API_VENV/bin/python" -m compileall -q apps/api/src
+          "$API_VENV/bin/python" scripts/CHECK_DISCOVERY_RUNTIME_HOOKS.py
       - name: Verify native Apple product invariants
         shell: bash
         run: |
