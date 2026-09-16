@@ -12,6 +12,7 @@ final class WatchRemoteModel: NSObject, ObservableObject {
 
     private static let commandReplyTimeout: TimeInterval = 3
     private static let catalogCachePrefix = "waxloom.watch.catalog.cache.v2"
+    private static let discoveryCacheMaxAge: TimeInterval = 10 * 60
 
     private var pendingToken: String?
     private var lastSnapshotTimestamp: TimeInterval = 0
@@ -99,10 +100,10 @@ final class WatchRemoteModel: NSObject, ObservableObject {
             query: query
         )
 
-        // Discovery is intentionally cache-first on Watch. Re-entering the
-        // screen must be instant instead of waking the iPhone and rebuilding
-        // the same feed every time. Explicit refresh/mutations invalidate this
-        // cache so the next load becomes authoritative again.
+        // Discovery is cache-first for fast re-entry, but its lifetime is
+        // intentionally shorter than the server's stale-preview grace window.
+        // This prevents the Watch from presenting a preview that the server has
+        // already retired from both its active and recent rotations.
         if route == .discovery, let cached = cachedCatalogResponse(for: request) {
             rememberPlaybackQueues(cached.items)
             return cached
@@ -392,16 +393,34 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         }
     }
 
+    private func catalogCacheStoredAtKey(_ key: String) -> String {
+        "\(key).storedAt"
+    }
+
     private func invalidateDiscoveryCache() {
         let request = WatchCatalogRequest(action: .load, route: .discovery)
         guard let key = catalogCacheKey(for: request) else { return }
-        UserDefaults.standard.removeObject(forKey: key)
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: key)
+        defaults.removeObject(forKey: catalogCacheStoredAtKey(key))
     }
 
     private func cachedCatalogResponse(for request: WatchCatalogRequest) -> WatchCatalogResponse? {
+        guard let key = catalogCacheKey(for: request) else { return nil }
+
+        let defaults = UserDefaults.standard
+        if request.route == .discovery {
+            let storedAt = defaults.double(forKey: catalogCacheStoredAtKey(key))
+            let age = Date().timeIntervalSince1970 - storedAt
+            guard storedAt > 0, age >= 0, age <= Self.discoveryCacheMaxAge else {
+                defaults.removeObject(forKey: key)
+                defaults.removeObject(forKey: catalogCacheStoredAtKey(key))
+                return nil
+            }
+        }
+
         guard
-            let key = catalogCacheKey(for: request),
-            let data = UserDefaults.standard.data(forKey: key),
+            let data = defaults.data(forKey: key),
             var cached = try? JSONDecoder().decode(WatchCatalogResponse.self, from: data)
         else {
             return nil
@@ -418,7 +437,12 @@ final class WatchRemoteModel: NSObject, ObservableObject {
         else {
             return
         }
-        UserDefaults.standard.set(data, forKey: key)
+
+        let defaults = UserDefaults.standard
+        defaults.set(data, forKey: key)
+        if request.route == .discovery {
+            defaults.set(Date().timeIntervalSince1970, forKey: catalogCacheStoredAtKey(key))
+        }
     }
 }
 
