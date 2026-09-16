@@ -286,6 +286,10 @@ final class NativePlayerModel: NSObject, ObservableObject {
             player.pause()
             isPlaying = false
         }
+        traceClient(
+            "library_item_set",
+            detail: "autoplay=\(autoplay ? 1 : 0) \(audioRouteSummary())"
+        )
         updateNowPlaying()
         publishSnapshot()
         persistQueue()
@@ -322,6 +326,33 @@ final class NativePlayerModel: NSObject, ObservableObject {
         }
     }
 
+    private func traceClient(_ event: String, detail: String = "") {
+        Task {
+            await WaxloomClientTelemetry.shared.emit(
+                component: "player",
+                event: event,
+                detail: detail
+            )
+        }
+    }
+
+    private func audioRouteSummary() -> String {
+        let session = AVAudioSession.sharedInstance()
+        let outputs = session.currentRoute.outputs
+            .map { $0.portType.rawValue }
+            .joined(separator: ",")
+        return "route=\(outputs.isEmpty ? "none" : outputs) volume=\(String(format: "%.2f", session.outputVolume))"
+    }
+
+    private func timeControlSummary() -> String {
+        switch player.timeControlStatus {
+        case .paused: return "paused"
+        case .waitingToPlayAtSpecifiedRate: return "waiting"
+        case .playing: return "playing"
+        @unknown default: return "unknown"
+        }
+    }
+
     private func startPreview(_ candidate: WaxloomDiscoveryCandidate, baseURL: URL) async {
         previewLoadGeneration += 1
         let generation = previewLoadGeneration
@@ -347,7 +378,18 @@ final class NativePlayerModel: NSObject, ObservableObject {
         publishSnapshot()
         tracePreview("preview_tap", candidate: candidate, baseURL: baseURL)
 
-        try? AVAudioSession.sharedInstance().setActive(true)
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            traceClient(
+                "preview_audio_session",
+                detail: "result=ok \(audioRouteSummary())"
+            )
+        } catch {
+            traceClient(
+                "preview_audio_session",
+                detail: "result=error message=\(error.localizedDescription) \(audioRouteSummary())"
+            )
+        }
         guard generation == previewLoadGeneration,
               currentPreview?.recordingMbid == candidate.recordingMbid else { return }
 
@@ -366,6 +408,10 @@ final class NativePlayerModel: NSObject, ObservableObject {
         updateNowPlaying()
         publishSnapshot()
         tracePreview("preview_play_called", candidate: candidate, baseURL: baseURL)
+        traceClient(
+            "preview_play_called",
+            detail: "song=\(candidate.recordingMbid) time_control=\(timeControlSummary()) \(audioRouteSummary())"
+        )
 
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -374,14 +420,26 @@ final class NativePlayerModel: NSObject, ObservableObject {
                   self.currentPreview?.recordingMbid == candidate.recordingMbid,
                   self.elapsedSeconds < 0.05 else { return }
             if item.status == .failed {
+                let nsError = item.error as NSError?
+                let domain = nsError?.domain ?? "none"
+                let code = nsError?.code ?? 0
+                let message = nsError?.localizedDescription ?? "AVPlayer item failed"
                 self.isPlaying = false
-                self.errorMessage = "Discovery preview: \(item.error?.localizedDescription ?? "AVPlayer item failed")"
+                self.errorMessage = "Discovery preview: \(message)"
                 self.revision += 1
                 self.updateNowPlaying()
                 self.publishSnapshot()
                 self.tracePreview("preview_item_failed", candidate: candidate, baseURL: baseURL)
+                self.traceClient(
+                    "preview_item_failed",
+                    detail: "song=\(candidate.recordingMbid) domain=\(domain) code=\(code) message=\(message) time_control=\(self.timeControlSummary()) \(self.audioRouteSummary())"
+                )
             } else {
                 self.tracePreview("preview_no_progress", candidate: candidate, baseURL: baseURL)
+                self.traceClient(
+                    "preview_no_progress",
+                    detail: "song=\(candidate.recordingMbid) item_status=\(item.status.rawValue) time_control=\(self.timeControlSummary()) wait=\(self.player.reasonForWaitingToPlay?.rawValue ?? "none") \(self.audioRouteSummary())"
+                )
             }
         }
     }
@@ -428,8 +486,13 @@ final class NativePlayerModel: NSObject, ObservableObject {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.playback, mode: .default, options: [])
             try session.setActive(true)
+            traceClient("audio_session_ready", detail: audioRouteSummary())
         } catch {
             errorMessage = "Audio session: \(error.localizedDescription)"
+            traceClient(
+                "audio_session_error",
+                detail: "message=\(error.localizedDescription) \(audioRouteSummary())"
+            )
         }
     }
 
@@ -490,6 +553,10 @@ final class NativePlayerModel: NSObject, ObservableObject {
                    let baseURL = self.baseURL {
                     self.lastPreviewProgressTraceID = preview.recordingMbid
                     self.tracePreview("preview_progress", candidate: preview, baseURL: baseURL)
+                    self.traceClient(
+                        "preview_progress",
+                        detail: "song=\(preview.recordingMbid) time_control=\(self.timeControlSummary()) \(self.audioRouteSummary())"
+                    )
                 }
 
                 if self.isPlaying {
