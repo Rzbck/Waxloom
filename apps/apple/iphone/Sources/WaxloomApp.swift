@@ -33,25 +33,26 @@ struct WaxloomApp: App {
                 return .unavailable
             }
 
+            let expectedSessionID = originSnapshot.sessionID
             player.setBaseURL(baseURL)
 
-            if originSnapshot.sessionID.hasPrefix("preview:") {
+            if expectedSessionID.hasPrefix("preview:") {
                 guard
                     let stored = DiscoverySessionStore.load(
-                        expectedSessionID: originSnapshot.sessionID
+                        expectedSessionID: expectedSessionID
                     )
                 else {
                     await WaxloomClientTelemetry.shared.emit(
                         component: "watch_bridge",
                         event: "cold_start_discovery_missing",
-                        detail: "session=\(originSnapshot.sessionID)"
+                        detail: "session=\(expectedSessionID)"
                     )
                     return .sessionMismatch
                 }
 
                 let prefix = "preview:"
                 let currentID = String(
-                    originSnapshot.sessionID.dropFirst(prefix.count)
+                    expectedSessionID.dropFirst(prefix.count)
                 )
                 let items = stored.items
                 guard
@@ -109,7 +110,7 @@ struct WaxloomApp: App {
                 await WaxloomClientTelemetry.shared.emit(
                     component: "watch_bridge",
                     event: "cold_start_discovery_restored",
-                    detail: "command=\(command.rawValue) session=\(originSnapshot.sessionID) items=\(items.count)"
+                    detail: "command=\(command.rawValue) session=\(expectedSessionID) items=\(items.count)"
                 )
                 return .accepted
             }
@@ -128,11 +129,11 @@ struct WaxloomApp: App {
                 restoredSessionID = "idle"
             }
 
-            guard restoredSessionID == originSnapshot.sessionID else {
+            guard restoredSessionID == expectedSessionID else {
                 await WaxloomClientTelemetry.shared.emit(
                     component: "watch_bridge",
                     event: "cold_start_session_mismatch",
-                    detail: "expected=\(originSnapshot.sessionID) restored=\(restoredSessionID)"
+                    detail: "expected=\(expectedSessionID) restored=\(restoredSessionID)"
                 )
                 return .sessionMismatch
             }
