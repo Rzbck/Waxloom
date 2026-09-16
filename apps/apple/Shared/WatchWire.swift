@@ -109,11 +109,11 @@ enum WaxloomWatchCodec {
     static let payloadType = "waxloom_player_wire_v1"
     static let payloadDataKey = "data"
 
-    // Playback commands are meaningful only as immediate interactions. A command
-    // delivered after this window is rejected on the phone, preventing a late
-    // message from becoming a surprising "ghost" action after the Watch UI has
-    // already recovered from a transport timeout.
-    static let commandTTL: TimeInterval = 2
+    // Playback commands are still immediate interactions. The bounded five-second
+    // TTL exists only to permit one WatchConnectivity wake hint + one correlated
+    // retry when iOS has suspended the companion. Anything later is rejected so
+    // a stale command cannot become a surprising ghost action.
+    static let commandTTL: TimeInterval = 5
 
     static func encode(_ message: WaxloomWatchMessage) -> Data? {
         try? JSONEncoder().encode(message)
