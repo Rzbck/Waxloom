@@ -6,14 +6,13 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
     @Published private(set) var watchInstalled = false
 
     var commandHandler: ((PlaybackCommand) -> PlaybackCommandResult)?
-    var coldStartCommandHandler: (@MainActor (PlaybackCommand, String) async -> PlaybackCommandResult)?
+    var coldStartCommandHandler: (@MainActor (PlaybackCommand, PlaybackSnapshot) async -> PlaybackCommandResult)?
     var catalogHandler: (@MainActor (WatchCatalogRequest) async -> WatchCatalogResponse)?
     var telemetryHandler: ((String, String, String) -> Void)?
 
     private var currentSnapshot = PlaybackSnapshot.idle
     private var recentCommandResults: [String: (timestamp: TimeInterval, result: PlaybackCommandResult)] = [:]
 
-    private static let wakeType = "waxloom_wake_v1"
     private static let recentCommandTTL: TimeInterval = 30
 
     override init() {
@@ -108,7 +107,18 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
                         "command_cold_start",
                         detail: "command=\(command.rawValue) session=\(message.sessionID)"
                     )
-                    result = await self.coldStartCommandHandler?(command, message.sessionID) ?? .unavailable
+                    let origin = message.snapshot ?? PlaybackSnapshot(
+                        sessionID: message.sessionID,
+                        revision: message.revision,
+                        title: "",
+                        artist: "",
+                        artworkURL: nil,
+                        isPlaying: false,
+                        elapsedSeconds: 0,
+                        durationSeconds: 0,
+                        feedback: nil
+                    )
+                    result = await self.coldStartCommandHandler?(command, origin) ?? .unavailable
                 } else {
                     result = self.commandHandler?(command) ?? .unavailable
                     if result == .accepted, command == .next || command == .previous {
@@ -159,6 +169,10 @@ final class PhoneWatchBridge: NSObject, ObservableObject {
                 replyHandler(payload)
             }
             return
+        }
+
+        if request.action == .play, request.item?.kind == .discovery {
+            DiscoverySessionStore.save(request: request)
         }
 
         trace(
@@ -246,20 +260,6 @@ extension PhoneWatchBridge: WCSessionDelegate {
 
         trace("message_unsupported")
         replyHandler(["ok": false])
-    }
-
-    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        guard userInfo["type"] as? String == Self.wakeType else {
-            trace("user_info_ignored")
-            return
-        }
-        let reason = userInfo["reason"] as? String ?? "unknown"
-        let token = userInfo["token"] as? String ?? "none"
-        trace(
-            "wake_hint_received",
-            detail: "reason=\(reason) token=\(String(token.prefix(12)))"
-        )
-        session.activate()
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {
