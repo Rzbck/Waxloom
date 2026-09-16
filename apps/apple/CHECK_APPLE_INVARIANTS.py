@@ -31,6 +31,7 @@ shared_wire = read("Shared/WatchWire.swift")
 catalog_wire = read("Shared/WatchCatalogWire.swift")
 phone_bridge = read("iphone/Sources/WatchBridge.swift")
 watch_remote = read("watch/Sources/WatchRemoteModel.swift")
+watch_feedback = read("watch/Sources/WatchNowPlayingFeedback.swift")
 watch_views = read("watch/Sources/WatchProductViews.swift")
 watch_discovery_v2 = read("watch/Sources/WatchDiscoveryV2.swift")
 connection = read("iphone/Sources/ConnectionModel.swift")
@@ -83,6 +84,7 @@ require(shared_wire, "sessionID: String", "Watch session identity")
 require(shared_wire, "revision: Int64", "Watch authority revision")
 require(shared_wire, "seekBackward15", "Watch seek backward")
 require(shared_wire, "seekForward15", "Watch seek forward")
+require(shared_wire, "var feedback: Int?", "Watch snapshot carries Now Playing taste feedback")
 
 # Latest playback state is delivered only as application context. Do not duplicate
 # the same state through live sendMessage, which creates cross-channel reordering.
@@ -114,13 +116,14 @@ forbid(watch_remote, "DispatchQueue.main.asyncAfter(deadline: .now() + WaxloomWa
 require(catalog_wire, 'payloadType = "waxloom_catalog_wire_v1"', "Watch catalog protocol")
 require(catalog_wire, "requestTTL: TimeInterval = 20", "Watch catalog request expiry")
 for action in (
-    "load", "play", "seek", "toggleStar", "discoveryFeedback", "badSource", "refreshDiscovery",
+    "load", "play", "seek", "toggleStar", "discoveryFeedback", "nowPlayingFeedback", "badSource", "refreshDiscovery",
     "createPlaylist", "deletePlaylist", "addToPlaylist", "removeFromPlaylist",
     "youtubeSearch", "youtubeImport",
 ):
     require(catalog_wire, f"case {action}", f"Watch catalog action {action}")
 require(catalog_wire, "var position: Double?", "Watch catalog seek position")
 require(catalog_wire, "var items: [WatchCatalogItem]?", "Watch catalog playback queue")
+require(catalog_wire, "var value: Int?", "Watch catalog response feedback value")
 
 require(phone_bridge, "WatchCatalogCodec.request", "Watch catalog request decode")
 require(watch_remote, "sendMessage(payload)", "Immediate Watch catalog gateway")
@@ -136,6 +139,8 @@ require(watch_remote, "func seek(to position: Double)", "Watch seek API")
 require(watch_remote, "func setBadSource", "Watch reversible bad-source action")
 require(watch_remote, "if route == .discovery, let cached = cachedCatalogResponse(for: request)", "Watch Discovery opens cache-first")
 require(watch_remote, "invalidateDiscoveryCache()", "Watch Discovery explicit cache invalidation")
+require(watch_feedback, "func nowPlayingFeedback", "Watch Now Playing taste feedback request")
+require(watch_feedback, "action: .nowPlayingFeedback", "Watch feedback uses catalog gateway")
 for forbidden_transport in ("transferUserInfo", "transferFile"):
     forbid(watch_remote, forbidden_transport, "Watch mutation transport")
 
@@ -156,6 +161,9 @@ forbid(watch_views, "Slider(", "Undesired Watch Now Playing scrubber")
 forbid(watch_views, 'WatchMenuTile(title: "Manual"', "Legacy Watch Manual browse tile")
 require(watch_views, "remote.send(.seekBackward15)", "Watch keeps minus-15 control")
 require(watch_views, "remote.send(.seekForward15)", "Watch keeps plus-15 control")
+require(watch_views, "remote.nowPlayingFeedback(value)", "Watch Now Playing global taste controls")
+require(watch_views, 'feedback == 1 ? "heart.fill" : "heart"', "Watch Now Playing like icon")
+require(watch_views, 'feedback == -1 ? "hand.thumbsdown.fill" : "hand.thumbsdown"', "Watch Now Playing dislike icon")
 require(watch_views, '@AppStorage("waxloom.authorizedMediaImports.v1")', "Watch persistent import authorization")
 require(watch_views, "beginQuickImport(item)", "Watch Discovery one-tap import")
 require(watch_views, "sources.items.max", "Watch automatic best-source selection")
@@ -177,6 +185,10 @@ require(watch_discovery_v2, 'currentFeedback == -1 ? "hand.thumbsdown.fill" : "h
 require(watch_discovery_v2, "remote.playDiscovery(item, queue: queue)", "Watch Discovery shelf playback queue")
 require(watch_discovery_v2, "remote.refreshDiscovery()", "Watch Discovery refresh UI")
 require(watch_discovery_v2, "remote.setBadSource(item, rejected: next)", "Watch Discovery bad-source undo UI")
+require(watch_discovery_v2, ".digitalCrownRotation(", "Watch Discovery Digital Crown queue navigation")
+require(watch_discovery_v2, "selectQueueItem(at:", "Watch Discovery crown selects queue item")
+require(watch_discovery_v2, 'Text("CROWN \\(currentQueueIndex + 1)/\\(queue.count)")', "Watch Discovery crown position indicator")
+require(watch_discovery_v2, ".tabViewStyle(.page)", "Watch Discovery swipeable shelf pages")
 
 # iPhone product surface and media semantics.
 for feature in (
@@ -207,6 +219,9 @@ require(player, "let item = AVPlayerItem(url: url)", "Discovery preview direct c
 require(player, "player.playImmediately(atRate: 1.0)", "Discovery preview immediate start")
 require(player, 'tracePreview("preview_play_called"', "Discovery preview native playback trace")
 require(player, "previewLoadGeneration", "Discovery preview stale-load rejection")
+require(player, "func toggleCurrentTasteFeedback", "Native player global taste feedback")
+require(player, '"navidrome:\\(song.id)"', "Library tracks get stable taste identity without MBID")
+require(player, "feedback: currentTasteFeedback", "Player publishes Watch feedback state")
 forbid(player, "WaxloomAPI.youtubePreview(", "Discovery preview click-time source resolution")
 forbid(player, "await player.seek(to: .zero)", "Blocking Discovery seek before playback")
 forbid(player, "asset.load(.isPlayable)", "Blocking Discovery isPlayable preload")
@@ -230,7 +245,11 @@ require(api_client, "value: persistedValue", "Bad-source encoded feedback value"
 # Discovery v2 service semantics.
 require(catalog_service, "case .refreshDiscovery:", "Watch service Discovery refresh")
 require(catalog_service, "case .seek:", "Watch service seek")
+require(catalog_service, "case .nowPlayingFeedback:", "Watch service Now Playing taste feedback")
+require(catalog_service, "await player.toggleCurrentTasteFeedback(requested)", "Watch service delegates global feedback to player")
 require(catalog_service, "request.items", "Watch service queue transport")
+require(catalog_service, "if requestedQueue.contains(where: { $0.id == item.id })", "Watch visible Discovery queue wins at play time")
+require(catalog_service, "queueItems = requestedQueue", "Watch Discovery queue is frozen from visible shelf")
 require(catalog_service, 'mapSection("Closest", closest)', "Watch service Closest shelf")
 require(catalog_service, 'mapSection("Underground", underground)', "Watch service Underground shelf")
 require(catalog_service, 'mapSection("Deep cuts", deep)', "Watch service Deep cuts shelf")
