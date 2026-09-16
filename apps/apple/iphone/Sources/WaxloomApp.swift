@@ -177,7 +177,74 @@ struct WaxloomApp: App {
         }
 
         bridge.catalogHandler = { request in
-            await WatchCatalogService.handle(
+            if request.action == .nowPlayingFeedback {
+                let desired = max(-1, min(1, request.value ?? 0))
+
+                let actualSessionID: String
+                if let preview = player.currentPreview {
+                    actualSessionID = "preview:\(preview.recordingMbid)"
+                } else if let song = player.currentSong {
+                    actualSessionID = "song:\(song.id)"
+                } else {
+                    actualSessionID = "idle"
+                }
+
+                if let expectedSessionID = request.id,
+                   expectedSessionID != actualSessionID {
+                    return .failure(
+                        token: request.token,
+                        message: "Now Playing changed before feedback was applied"
+                    )
+                }
+
+                // Discovery preview feedback exposes its current value on the
+                // candidate. Avoid invoking the legacy toggle path at all when
+                // the requested final state is already applied. This makes a
+                // replayed WatchConnectivity request idempotent.
+                if player.mode == .preview,
+                   (player.currentPreview?.feedback ?? 0) == desired {
+                    return .success(
+                        token: request.token,
+                        title: desired > 0 ? "Liked" : desired < 0 ? "Less like this" : "Feedback cleared",
+                        value: desired
+                    )
+                }
+
+                guard var applied = await player.toggleCurrentTasteFeedback(desired) else {
+                    return .failure(
+                        token: request.token,
+                        message: "Nothing playing or feedback unavailable"
+                    )
+                }
+
+                // NativePlayer's historical API toggles when the requested value
+                // is already active. Converge to the exact requested state before
+                // replying so retries cannot leave Like/Dislike inverted.
+                if applied != desired {
+                    guard let corrected = await player.toggleCurrentTasteFeedback(desired) else {
+                        return .failure(
+                            token: request.token,
+                            message: "Feedback could not reach the requested state"
+                        )
+                    }
+                    applied = corrected
+                }
+
+                guard applied == desired else {
+                    return .failure(
+                        token: request.token,
+                        message: "Feedback state mismatch"
+                    )
+                }
+
+                return .success(
+                    token: request.token,
+                    title: applied > 0 ? "Liked" : applied < 0 ? "Less like this" : "Feedback cleared",
+                    value: applied
+                )
+            }
+
+            return await WatchCatalogService.handle(
                 request,
                 connection: connection,
                 player: player
