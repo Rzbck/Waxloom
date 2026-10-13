@@ -168,10 +168,10 @@ def _write_tags(path: Path, artist: str, title: str) -> None:
             audio.add_tags()
         audio["artist"] = [artist]
         audio["title"] = [title]
-        audio["album"] = ["Singles"]
+        audio.pop("album", None)
         audio.save()
     except Exception:
-        # The Artist/Singles folder and Artist - Title filename remain a useful
+        # The artist/title filename remains a useful
         # Navidrome fallback even when the source container cannot be tagged.
         return
 
@@ -508,7 +508,7 @@ class YouTubeProvider:
             "-metadata",
             f"title={title}",
             "-metadata",
-            "album=Singles",
+            "album=",
             str(temporary),
         ]
 

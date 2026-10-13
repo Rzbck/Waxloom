@@ -151,6 +151,7 @@ export default function App() {
 
   const [homeAlbums, setHomeAlbums] = useState<Album[]>([]);
   const [homeSongs, setHomeSongs] = useState<Song[]>([]);
+  const [recentSongs, setRecentSongs] = useState<Song[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
   const [albumMode, setAlbumMode] = useState("newest");
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -175,6 +176,27 @@ export default function App() {
       .catch(() => setNavidromeHealth({ status: "unavailable", message: "Navidrome health check failed." }));
     void loadHome();
     void loadPlaylists(false);
+  }, []);
+
+  // External imports (Shazam/Waxloom) refresh automatically on desktop and phone.
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void api.recentSongs(24)
+        .then((res) => { if (active) setRecentSongs(res.items); })
+        .catch(() => { /* Album view remains usable if read-only index is absent. */ });
+    };
+    refresh();
+    const ticker = window.setInterval(refresh, 45_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      active = false;
+      window.clearInterval(ticker);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, []);
 
   async function run<T>(work: () => Promise<T>, apply: (value: T) => void) {
@@ -501,7 +523,13 @@ export default function App() {
             </section>
 
             <section>
-              <div className="section-toolbar"><div><p className="eyebrow">Recently added</p><h2>New in your library</h2></div><button className="secondary-action" type="button" onClick={() => navigate("albums")}>All albums →</button></div>
+              <div className="section-toolbar"><div><p className="eyebrow">Recently imported tracks</p><h2>New songs in your library</h2></div><button className="secondary-action" type="button" onClick={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}>Refresh</button></div>
+              {recentSongs.length > 0 ? (
+                <SongTable songs={recentSongs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
+              ) : <p className="muted">New tracks are indexed by Navidrome; new albums appear below.</p>}
+            </section>
+            <section>
+              <div className="section-toolbar"><div><p className="eyebrow">Recently added albums</p><h2>New albums</h2></div><button className="secondary-action" type="button" onClick={() => navigate("albums")}>All albums →</button></div>
               {renderAlbumGrid(homeAlbums)}
             </section>
 

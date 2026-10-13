@@ -17,6 +17,7 @@ from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feed import DiscoveryFeedEngine
 from waxloom_api.imports import ImportService
 from waxloom_api.preview_cache import DiscoveryPreviewCache
+from waxloom_api.recent_tracks import get_newest_songs
 from waxloom_api.providers.audiomuse import AudioMuseClient
 from waxloom_api.providers.listenbrainz import ListenBrainzLabsClient
 from waxloom_api.providers.navidrome import NavidromeClient, NavidromeError
@@ -250,6 +251,17 @@ async def albums(
 async def artists() -> dict[str, object]:
     require_navidrome()
     items = await call_navidrome(navidrome_client().get_artists())
+    return {"items": items, "count": len(items)}
+
+
+@app.get("/api/library/recent-tracks")
+def recent_tracks(size: int = Query(default=24, ge=1, le=100)) -> dict[str, object]:
+    """Recently indexed songs, never release-date sorted albums."""
+    require_navidrome()
+    try:
+        items = get_newest_songs(limit=size)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Navidrome index unavailable.") from exc
     return {"items": items, "count": len(items)}
 
 

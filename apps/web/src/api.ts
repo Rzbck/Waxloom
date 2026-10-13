@@ -197,6 +197,7 @@ export const api = {
   albums: (type = "newest", size = 80, offset = 0) => loadAlbumsCached(type, size, offset),
   artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
+  recentSongs: (size = 24) => request<ListResponse<Song>>(`/api/library/recent-tracks?size=${size}`, { cache: "no-store" }),
   album: (id: string) => loadAlbumDetailCached(id),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
   song: (id: string) => request<Song>(`/api/songs/${encodeURIComponent(id)}`),

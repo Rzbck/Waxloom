@@ -17,7 +17,8 @@ type TasteEntry = {
 };
 
 type TasteState = Record<string, TasteEntry>;
-type ShelfKey = "closest" | "underground" | "deep";
+type ShelfKey = "main";
+type DiscoveryMode = "for_you" | "surprise" | "rare";
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
 const TASTE_KEY = "waxloom.discovery.taste.v1";
@@ -211,8 +212,8 @@ function DiscoveryTrackCard({
         disabled={importing}
         onClick={() => onQuickAdd(candidate)}
         title={importing ? "Adding to library…" : "Add to library"}
-        aria-label={`Add ${candidate.title} to library`}
-      >+</button>
+        aria-label={`Download ${candidate.title} into music library`}
+      >↓</button>
       <button
         className={currentFeedback === 1 ? "taste-chip taste-chip-like taste-chip-active" : "taste-chip taste-chip-like"}
         type="button"
@@ -323,7 +324,9 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const [importing, setImporting] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
-  const [shelfPages, setShelfPages] = useState<Record<ShelfKey, number>>({ closest: 0, underground: 0, deep: 0 });
+  const [shelfPages, setShelfPages] = useState<Record<ShelfKey, number>>({ main: 0 });
+  const [mode, setMode] = useState<DiscoveryMode>("for_you");
+  const [shuffleTurn, setShuffleTurn] = useState(0);
 
   async function readFeed() {
     try {
@@ -358,118 +361,29 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     };
   }, []);
 
+  // A single coherent feed: the recommendation algorithm remains advanced,
+  // while its source-specific internal 'shelves' are no longer shown to users.
   const rails = useMemo(() => {
     const ranked = activeCandidates(bundle?.external.items ?? [], taste);
-    const used = new Set<string>();
-
-    const listenbrainz = ranked.filter(
-      (candidate) => candidate.source === "listenbrainz",
-    );
-    const catalogue = ranked.filter(
-      (candidate) => candidate.source === "musicbrainz_catalog",
-    );
-    const otherMetadata = ranked.filter(
-      (candidate) =>
-        candidate.source !== "youtube_dig"
-        && candidate.source !== "listenbrainz"
-        && candidate.source !== "musicbrainz_catalog",
-    );
-
-    // Deep cuts gets catalogue first, then a bounded reserve of
-    // farther / rarer ListenBrainz candidates.
-    const deepListenbrainz = [...listenbrainz].sort((a, b) => {
-      const aDepth =
-        a.underground * 0.65
-        + Math.max(0, 1 - a.rank) * 0.35;
-
-      const bDepth =
-        b.underground * 0.65
-        + Math.max(0, 1 - b.rank) * 0.35;
-
-      return bDepth - aDepth;
-    });
-
-    const proportionalReserve =
-      listenbrainz.length < 2
-        ? 0
-        : Math.max(
-            1,
-            Math.floor(listenbrainz.length * 0.35),
-          );
-
-    const catalogueShortfall =
-      Math.max(0, 6 - catalogue.length);
-
-    const deepFallbackQuota =
-      Math.min(
-        6,
-        catalogueShortfall,
-        proportionalReserve,
-      );
-
-    const deepFallback =
-      deepListenbrainz.slice(0, deepFallbackQuota);
-
-    const deep = fillShelf(
-      catalogue,
-      deepFallback,
-      used,
-    );
-
-    const closestPrimary =
-      [...listenbrainz, ...otherMetadata]
-        .filter(
-          (candidate) =>
-            !used.has(candidate.recording_mbid),
-        )
-        .sort((a, b) => b.rank - a.rank);
-
-    const closest = fillShelf(
-      closestPrimary,
-      closestPrimary,
-      used,
-    );
-
-    const youtubeDigPrimary = [...ranked]
-      .filter(
-        (candidate) =>
-          candidate.source === "youtube_dig",
-      )
-      .sort(
-        (a, b) =>
-          (b.underground + b.rank * 0.25)
-          - (a.underground + a.rank * 0.25),
-      );
-
-    const rareMetadataFallback = [...listenbrainz]
-      .filter(
-        (candidate) =>
-          !used.has(candidate.recording_mbid)
-          && candidate.underground >= 0.82,
-      )
-      .sort(
-        (a, b) =>
-          (b.underground + b.rank * 0.15)
-          - (a.underground + a.rank * 0.15),
-      );
-
-    const underground = fillShelf(
-      youtubeDigPrimary,
-      rareMetadataFallback,
-      used,
-      28,
-    );
-
-    return {
-      closest,
-      underground,
-      deep,
-      totalTracks: ranked.length,
-    };
-  }, [bundle, taste]);
+    const ordered = [...ranked];
+    if (mode === "rare") {
+      ordered.sort((a, b) => (b.underground + b.rank * 0.18) - (a.underground + a.rank * 0.18));
+    } else if (mode === "surprise") {
+      const signature = (candidate: DiscoveryCandidate) => {
+        const text = `${candidate.recording_mbid}:${shuffleTurn}:${bundle?.rotation_id ?? 0}`;
+        let hash = 2166136261;
+        for (let index = 0; index < text.length; index += 1) {
+          hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
+        }
+        return hash >>> 0;
+      };
+      ordered.sort((a, b) => signature(a) - signature(b));
+    }
+    return { main: diversify(ordered, 2), totalTracks: ranked.length };
+  }, [bundle, taste, mode, shuffleTurn]);
 
   useEffect(() => {
-    setShelfPages({ closest: 0, underground: 0, deep: 0 });
+    setShelfPages({ main: 0 });
   }, [bundle?.rotation_id, bundle?.generated_at]);
 
   useEffect(() => {
@@ -478,7 +392,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
     const seen = new Set<string>();
     const ordered: DiscoveryCandidate[] = [];
-    for (const candidate of [...rails.closest, ...rails.underground, ...rails.deep, ...source]) {
+    for (const candidate of [...rails.main, ...source]) {
       if (seen.has(candidate.recording_mbid)) continue;
       seen.add(candidate.recording_mbid);
       ordered.push(candidate);
@@ -611,7 +525,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
         result.status === "already_local"
           ? "Already in your local library — no duplicate was downloaded."
           : result.status === "imported"
-            ? `Added to your library: ${result.relative_path ?? `${candidate.artist} / Singles`}.`
+            ? `Added to your library: ${result.relative_path ?? `${candidate.artist} / unknown release`}.`
             : `Downloaded to your library: ${result.relative_path ?? `${candidate.artist} / Singles`}. Navidrome is still indexing it.`,
       );
     } catch (caught) {
@@ -635,33 +549,27 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       <section className="panel discovery-profile-panel discovery-profile-compact">
         <div className="section-toolbar">
           <div>
-            <p className="eyebrow">Always-on Discovery · outside your library</p>
-            <h2>Your feed is ready before you arrive.</h2>
-            <p className="muted">Track-first recommendations, diversified across artists. Preview sources warm quietly in the background.</p>
+            <p className="eyebrow">Discovery · music outside your library</p>
+            <h2>Find something new.</h2>
+            <p className="muted">Listen, like, skip or download a track into your library.</p>
           </div>
-          <button className="secondary-action" type="button" onClick={() => void requestBackgroundRefresh()}>Refresh in background</button>
+          <button className="secondary-action" type="button" onClick={() => void requestBackgroundRefresh()}>
+            Find fresh tracks
+          </button>
         </div>
-
         <div className="discovery-feed-status">
           <span className={`feed-dot feed-dot-${feedStatus}`} />
-          <strong>{feedStatus === "ready" ? "Feed ready" : feedStatus === "refreshing" ? "Refreshing behind the scenes" : "Preparing feed in background"}</strong>
+          <strong>{feedStatus === "ready" ? "Ready" : feedStatus === "refreshing" ? "Updating music…" : "Preparing music…"}</strong>
           <span>{formatFeedTime(bundle?.generated_at)}</span>
-          {bundle?.external.pool_count ? <span>{bundle.external.pool_count} candidates in pool</span> : null}
-          {bundle?.rotation_seconds ? <span>rotates every {Math.round(bundle.rotation_seconds / 60)} min</span> : null}
-          {(tasteLikes + tasteLess) > 0 && <span>{tasteLikes} liked · {tasteLess} less</span>}
+          {bundle?.rotation_seconds ? <span>New mix every {Math.round(bundle.rotation_seconds / 60)} min</span> : null}
         </div>
-
-        {bundle?.profile && (
-          <div className="profile-stat-grid profile-stat-grid-library">
-            <div><strong>{bundle.profile.library_tracks}</strong><span>library tracks</span></div>
-            <div><strong>{bundle.profile.library_albums}</strong><span>albums</span></div>
-            <div><strong>{bundle.profile.library_artists}</strong><span>artists</span></div>
-            <div><strong>{bundle.profile.library_genres}</strong><span>genres</span></div>
-            <div><strong>{bundle.profile.representative_seeds}</strong><span>smart anchors</span></div>
-          </div>
-        )}
-
-        {!bundle && <div className="discovery-building discovery-building-passive">First feed is being prepared by Waxloom in the background. You can leave Discovery; it will continue working.</div>}
+        <div className="discovery-mode-controls" role="group" aria-label="Discovery mood">
+          <button className={mode === "for_you" ? "secondary-action discovery-mode-active" : "secondary-action"} onClick={() => setMode("for_you")} type="button">For you</button>
+          <button className={mode === "surprise" ? "secondary-action discovery-mode-active" : "secondary-action"} onClick={() => { setMode("surprise"); setShuffleTurn((n) => n + 1); }} type="button">Surprise me</button>
+          <button className={mode === "rare" ? "secondary-action discovery-mode-active" : "secondary-action"} onClick={() => setMode("rare")} type="button">Rare finds</button>
+          <button className="secondary-action" onClick={() => { setShuffleTurn((n) => n + 1); setShelfPages({ main: 0 }); setMode("surprise"); }} type="button">Another mix ↻</button>
+        </div>
+        {!bundle && <div className="discovery-building discovery-building-passive">Preparing the first discoveries. You can leave this page.</div>}
         {error && <div className="state-card state-card-error">{error}</div>}
         {notice && <div className="state-card state-card-success">{notice}</div>}
       </section>
@@ -669,43 +577,11 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       {bundle && (
         <>
           <DiscoveryShelf
-            eyebrow={`Best matches · ${rails.totalTracks} tracks in this rotation`}
-            title="Closest to your collection"
-            items={rails.closest}
-            page={shelfPages.closest}
-            onNextPage={() => nextShelfPage("closest")}
-            currentPreviewMbid={currentPreviewMbid}
-            playing={player.playing}
-            importingMbid={importing}
-            rejectingMbid={rejecting}
-            taste={taste}
-            onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={(candidate) => void addToLibrary(candidate)}
-            onFeedback={updateFeedback}
-            onBadSource={(candidate) => void rejectBadSource(candidate)}
-          />
-          <DiscoveryShelf
-            eyebrow="YouTube dig · music-verified · low exposure / high engagement"
-            title="More underground"
-            items={rails.underground}
-            page={shelfPages.underground}
-            onNextPage={() => nextShelfPage("underground")}
-            currentPreviewMbid={currentPreviewMbid}
-            playing={player.playing}
-            importingMbid={importing}
-            rejectingMbid={rejecting}
-            taste={taste}
-            onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={(candidate) => void addToLibrary(candidate)}
-            onFeedback={updateFeedback}
-            onBadSource={(candidate) => void rejectBadSource(candidate)}
-          />
-          <DiscoveryShelf
-            eyebrow="Catalogue · farther matches"
-            title="Deep cuts"
-            items={rails.deep}
-            page={shelfPages.deep}
-            onNextPage={() => nextShelfPage("deep")}
+            eyebrow={`${rails.totalTracks} available tracks`}
+            title={mode === "for_you" ? "For you" : mode === "rare" ? "Rare finds" : "Your mix"}
+            items={rails.main}
+            page={shelfPages.main}
+            onNextPage={() => nextShelfPage("main")}
             currentPreviewMbid={currentPreviewMbid}
             playing={player.playing}
             importingMbid={importing}
