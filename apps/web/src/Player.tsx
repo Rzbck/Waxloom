@@ -10,6 +10,7 @@ import {
 } from "react";
 
 import { api } from "./api";
+import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
 import type { PlaylistSummary, PreviewTrack, Song } from "./types";
 
 type RepeatMode = "off" | "all" | "one";
@@ -63,6 +64,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [shuffle, setShuffle] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
+  const closeMobilePlayer = useCallback(() => setMobileExpanded(false), []);
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
   const [playerPlaylists, setPlayerPlaylists] = useState<PlaylistSummary[]>([]);
   const [playlistQuery, setPlaylistQuery] = useState("");
@@ -602,6 +604,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [queue, currentSong, currentPreview, activeIndex, playing, playSongs, playNow, addToQueue, playPreviewTracks],
   );
 
+  const jumpToIndex = (targetIndex: number) => {
+    if (targetIndex < 0) return;
+    if (mode === "navidrome") {
+      const song = queue[targetIndex];
+      if (!song) return;
+      startLocalPlayback(song, "queue");
+      setCurrentIndex(targetIndex);
+      return;
+    }
+    const preview = previewQueue[targetIndex];
+    if (!preview) return;
+    const audio = audioRef.current;
+    previewStartAtZeroRef.current = true;
+    audio?.pause();
+    if (audio) {
+      try { audio.currentTime = 0; } catch { /* Metadata not yet loaded. */ }
+    }
+    setCurrentTime(0);
+    setDuration(preview.duration ?? 0);
+    setPreviewIndex(targetIndex);
+    setPlaying(true);
+  };
+
   const activeQueue = mode === "preview" ? previewQueue : queue;
 
   // Standard iOS lock-screen controls. Web Media Session cannot expose
@@ -609,6 +634,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!("mediaSession" in navigator) || (!currentSong && !currentPreview)) return;
     const session = navigator.mediaSession;
+    if (typeof MediaMetadata === "undefined") return;
     session.metadata = new MediaMetadata({
       title: activeTitle,
       artist: activeArtist,
@@ -630,6 +656,24 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }
     };
   }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id, next, previous]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+  }, [playing]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState
+        || !Number.isFinite(duration) || duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.min(Math.max(currentTime, 0), duration),
+      });
+    } catch { /* Older Safari versions may not accept position updates. */ }
+  }, [currentTime, duration]);
+
 
 
   return (
@@ -657,6 +701,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }}
         onTimeUpdate={onTimeUpdate}
         onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
         onEnded={() => {
           submitScrobble();
           next();
@@ -672,7 +717,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       {(currentSong || currentPreview) && (
         <>
           {queueOpen && (
-            <aside className="queue-drawer" aria-label="Play queue">
+            <aside className={`queue-drawer ${mobileExpanded ? "waxloom-queue-sheet" : ""}`} aria-label="Play queue">
               <div className="queue-drawer-head">
                 <div>
                   <p className="eyebrow">{mode === "preview" ? "Discovery preview queue" : "Navidrome play queue"}</p>
@@ -691,30 +736,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       type="button"
                       key={`${item.id}-${index}`}
                       onClick={() => {
-                        if (mode === "preview") {
-                          if (index === previewIndex) {
-                            togglePlayback();
-                            return;
-                          }
-                          const audio = audioRef.current;
-                          previewStartAtZeroRef.current = true;
-                          audio?.pause();
-                          if (audio) {
-                            try {
-                              audio.currentTime = 0;
-                            } catch {
-                              // loadedmetadata performs the hard reset.
-                            }
-                          }
-                          setCurrentTime(0);
-                          setDuration((item as PreviewTrack).duration ?? 0);
-                          setPreviewIndex(index);
-                          setPlaying(true);
+                        if (index === activeIndex) {
+                          togglePlayback();
                           return;
                         }
-                        const song = item as Song;
-                        startLocalPlayback(song, "queue");
-                        setCurrentIndex(index);
+                        jumpToIndex(index);
                       }}
                     >
                       <span>{index + 1}</span>
@@ -728,7 +754,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           )}
 
           {playlistPickerOpen && (
-            <aside ref={playlistMenuRef} className="player-playlist-picker" aria-label="Choose a playlist">
+            <aside ref={playlistMenuRef} className={`player-playlist-picker ${mobileExpanded ? "waxloom-playlist-sheet" : ""}`} aria-label="Choose a playlist">
               <strong>Add “{currentSong?.title}” to a playlist</strong>
               <input type="search" value={playlistQuery} autoFocus
                 onChange={(event) => setPlaylistQuery(event.target.value)}
@@ -746,9 +772,31 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 && <small>Refine your search to see more playlists.</small>}
             </aside>
           )}
-          <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""} ${mobileExpanded ? "player-mobile-expanded" : ""}`}>
-            <button className="mobile-player-expand" type="button" onClick={() => setMobileExpanded((value) => !value)} aria-label={mobileExpanded ? "Minimize player" : "Open full-screen player"}>{mobileExpanded ? "⌄ Minimize" : "⌃ Now playing"}</button>
-            {mobileExpanded && <div className="mobile-player-art">{currentSong?.coverArt ? <img src={api.coverUrl(currentSong.coverArt, 600)} alt="" /> : <span>♫</span>}</div>}
+          <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""}`}>
+            <div className="waxloom-mobile-mini">
+              <button className="waxloom-mobile-mini-info" type="button"
+                onClick={() => setMobileExpanded(true)}
+                aria-label={`Open full-screen player for ${activeTitle}`}>
+                <span className="waxloom-mobile-mini-cover">
+                  {currentSong?.coverArt
+                    ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" />
+                    : <PlayerIcon name="music" size={25} />}
+                </span>
+                <span className="waxloom-mobile-mini-copy">
+                  <MarqueeText value={activeTitle} className="waxloom-mobile-mini-title" />
+                  <span className="waxloom-mobile-mini-artist">{activeArtist}</span>
+                </span>
+                <span className="waxloom-mobile-mini-chevron"><PlayerIcon name="chevron-down" size={22} /></span>
+              </button>
+              <button className="waxloom-mobile-mini-play" type="button" onClick={togglePlayback}
+                disabled={mode === "preview" && Boolean(previewResolving)}
+                aria-label={playing ? "Pause" : "Play"}>
+                <PlayerIcon name={playing ? "pause" : "play"} size={24} />
+              </button>
+              <button className="waxloom-mobile-mini-next" type="button" onClick={next} aria-label="Next track">
+                <PlayerIcon name="next" size={22} />
+              </button>
+            </div>
             <div className="player-track">
               <div className="player-cover">
                 {currentSong?.coverArt ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" /> : <span>{mode === "preview" ? "◎" : "♪"}</span>}
@@ -780,21 +828,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               {previewError && <small className="player-preview-error">{previewError}</small>}
             </div>
 
-            {mobileExpanded && <section className="mobile-player-up-next" aria-label="Up next">
-              <strong>Up next</strong>
-              {activeQueue.slice(activeIndex + 1, activeIndex + 5).map((song, offset) => (
-                <button key={song.id + "-" + offset} type="button" onClick={() => {
-                  const targetIndex = activeIndex + offset + 1;
-                  if (mode === "navidrome") {
-                    startLocalPlayback(song as Song, "queue");
-                    setCurrentIndex(targetIndex);
-                  } else {
-                    setPreviewIndex(targetIndex);
-                    setPlaying(true);
-                  }
-                }}><span>{song.title}</span><small>{song.artist}</small></button>
-              ))}
-            </section>}
             <div className="player-tools">
               <button className={playerStarred && currentSong ? "icon-button player-quick-action is-favorite" : "icon-button player-quick-action"}
                 type="button" onClick={() => void toggleCurrentFavorite()}
@@ -814,6 +847,42 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               {playerActionMessage && <small className="player-action-tip" role="status">{playerActionMessage}</small>}
             </div>
           </footer>
+          <MobilePlayerPanel
+            open={mobileExpanded}
+            onClose={closeMobilePlayer}
+            title={activeTitle}
+            artist={activeArtist}
+            album={currentSong?.album}
+            cover={currentSong?.coverArt ? api.coverUrl(currentSong.coverArt, 600) : undefined}
+            isPreview={mode === "preview"}
+            playing={playing}
+            resolving={Boolean(previewResolving)}
+            currentTime={currentTime}
+            duration={duration}
+            queue={activeQueue.map((song) => ({
+              id: song.id, title: song.title ?? "Unknown title",
+              artist: song.artist ?? "Unknown artist", duration: song.duration,
+            }))}
+            index={activeIndex}
+            shuffle={shuffle}
+            repeat={repeat}
+            isFavorite={playerStarred}
+            busy={playerActionBusy}
+            feedback={playerActionMessage}
+            playbackError={previewError}
+            suspended={playlistPickerOpen || queueOpen}
+            onPlayPause={togglePlayback}
+            onPrevious={previous}
+            onNext={next}
+            onSeek={seek}
+            onShuffle={() => setShuffle((value) => !value)}
+            onRepeat={cycleRepeat}
+            onFavorite={() => void toggleCurrentFavorite()}
+            onPlaylist={() => void openPlayerPlaylists()}
+            onMix={() => void instantMixFromPlaying()}
+            onQueue={() => setQueueOpen(true)}
+            onQueueItem={jumpToIndex}
+          />
         </>
       )}
     </PlayerContext.Provider>

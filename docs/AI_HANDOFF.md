@@ -1,5 +1,14 @@
 # Waxloom AI handoff
 
+## 2026-10-13 — mobile UI rebuild / visual QA
+
+- Dedicated `MobilePlayerPanel.tsx` and `MobileNavigation.tsx` replace the improvised full-screen extension of desktop `Player.tsx`. These use scoped `mobile-shell.css` loaded last. Removed dead `mobile-player-v1.css`.
+- Phone: 68px mini-player, enlarged colored controls, touch-friendly visible scrubber, scrolling overlong titles with reduced-motion preference, full queue layering over fullscreen player, Escape/focus and scroll-lock, phone song-row actions on their own line. Desktop dock remains unchanged.
+- Root fix (PC + mobile): `.app-shell-with-player` already reserves the player/footer height (and bottom navigation on mobile). `player-clearance-v7.css` formerly added a duplicate 148px desktop / ~150px mobile, leaving huge blank strips. It now consistently leaves only 28px inside `.content`. Browser measured a 24px gap above the mini dock at mobile page end; automated QA also asserts desktop clearance.
+- Added `apps/web/scripts/mobile-smoke.mjs` (`npm run qa:mobile`). Runs against localhost QA web `:8092` through disposable headless Chromium `:9242`, intercepts **all** API mutations and supplies synthetic queue. Covers 320/375/390/430 portraits, desktop 1440, controls, menu, popup layering, scrolling last row and no horizontal overflow. Test must pass before subsequent mobile UI changes.
+- More detailed findings and reproducible QA documented in `docs/MOBILE_UI_QA_2026-10-13.md`. Physical iOS Home Screen media controls still require direct device confirmation; Chromium is not a substitute.
+- Keep original desktop behavior and prior Docker image tags as rollback, do not merge PR #15 without explicit request.
+
 ## 2026-10-13 15:00 — Waxloom Safari version and mix/menu fixes
 
 - **Production URL, not native app:** Safari via `https://<tailnet-magicdns-host>:8445/`; Docker nginx localhost `:8091` and Tailscale serve `:8445` return the same content-hashed JS. iPhone Safari stale UI was possible because nginx had no `Cache-Control` on SPA index. The production bind-mounted nginx.conf now emits `no-store, no-cache, must-revalidate, max-age=0` for index and SPA routes; `/assets/` is immutable because assets have content-hashed filenames. Nginx reloaded without restarting either service. Actual iPhone Safari tab still needs user validation; open a URL with a fresh query to bypass an existing cached tab.
@@ -71,11 +80,4 @@ AudioMuse still supplies sonic neighbours for Waxloom's indexed local-library se
 
 - Local syntax compilation was performed while authoring the Python changes.
 - `scripts/CHECK_DISCOVERY_ENGINE.py` is added as a blocking Windows build invariant and checks: functional weighting, no archive age penalty, fresh/archive/evergreen query coexistence, taste-query influence, and import-vs-Like separation/cross-service reload.
-- Public repository security and Windows build gates must pass on the draft PR before this branch is considered a test candidate.
-- Apple CI is not expected to run because no Apple source/project path is changed.
-
-## User validation after CI
-
-Use a dedicated worktree for this branch, update to the exact candidate SHA, restart the Waxloom server, request a fresh Discovery refresh, then compare the same `/api/discovery/feed` result through web and iPhone. Check that old gems still appear while `youtube_dig_eras` and the visible Underground lane now include current/recent material when suitable candidates exist. Like/Less/import behavior should continue to affect both clients through the shared server feed.
-
-Do not merge this branch to `main` without explicit owner authorization. Rollback baseline remains published `main` at `8387eba39fb905b42cc8ce74cc3d85205d64dda5`.
+- Public repository security and Windows build gates must p

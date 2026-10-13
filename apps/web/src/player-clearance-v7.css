@@ -1,18 +1,8 @@
-/* Keep the last Discovery/library rows fully scrollable above the fixed player.
-   :has() covers both Navidrome tracks and Discovery preview mode without relying
-   on App.tsx knowing which player mode is currently active. */
-
+/* Scroll clearance for Waxloom's fixed player.
+   The app shell already reserves the entire dock height:
+   96px on desktop and the mini-player + navigation on mobile.
+   A second full-sized .content clearance created 150px+ blank regions
+   after the last track. Leave only a touch of visual breathing room. */
 body:has(.player-dock) .content {
-  padding-bottom: 148px !important;
-}
-
-@media (max-width: 820px) {
-  body:has(.player-dock) .content {
-    padding-bottom: calc(
-      var(--mobile-player-h, 66px)
-      + var(--mobile-nav-h, 58px)
-      + env(safe-area-inset-bottom)
-      + 30px
-    ) !important;
-  }
+  padding-bottom: 28px !important;
 }

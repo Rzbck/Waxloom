@@ -1,8 +1,9 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "./api";
 import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
+import { MobileNavigation } from "./MobileNavigation";
 import { DownloadTray } from "./downloadQueue";
 import { usePlayer } from "./Player";
 import type {
@@ -76,7 +77,7 @@ function SongTable({ songs, starOverrides, onToggleStar, onAddPlaylist, onRemove
             >
               ▶
             </button>
-            <button className="track-title-button" type="button" onClick={() => player.playSongs(songs, index)}>
+            <button className="track-title-button" type="button" title={song.title ?? "Unknown title"} onClick={() => player.playSongs(songs, index)}>
               {song.title ?? "Unknown title"}
             </button>
             <span title={song.artist ?? "Unknown artist"}>{song.artist ?? "Unknown artist"}</span>
@@ -394,6 +395,7 @@ export default function App() {
   }
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
   const navItems: Array<{ id: View; label: string }> = [
     { id: "home", label: "Home" },
     { id: "albums", label: "Albums" },
@@ -465,15 +467,13 @@ export default function App() {
         </div>
       </aside>
 
-      {mobileMenuOpen && (
-        <div className="mobile-menu-overlay" role="dialog" aria-modal="true" aria-label="Waxloom navigation">
-          <div className="mobile-menu-heading"><strong>Waxloom</strong><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Close menu">✕</button></div>
-          <nav aria-label="Mobile sections">{navItems.map((item) => (
-            <button key={item.id} type="button" className={view === item.id ? "mobile-menu-active" : ""}
-              onClick={() => { navigate(item.id); setMobileMenuOpen(false); }}>{item.label}<span>→</span></button>
-          ))}</nav>
-        </div>
-      )}
+      <MobileNavigation
+        open={mobileMenuOpen}
+        current={view}
+        items={navItems}
+        onClose={closeMobileMenu}
+        onNavigate={(id) => { navigate(id); closeMobileMenu(); }}
+      />
       <section className="content">
         <header className="topbar">
           <div className="topbar-title">
