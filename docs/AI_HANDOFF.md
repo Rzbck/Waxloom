@@ -1,5 +1,17 @@
 # Waxloom AI handoff
 
+## 2026-10-13 active production tranche
+
+- Development branch: `fix/discovery-library-pipeline-20261013` (GitHub PR #15, draft, **not merged to main**).
+- Deployed via Docker Compose with separate web/API images from the new branch; older production image tags and compose snapshot preserved for rollback.
+- Tailscale-only endpoint: HTTPS port 8445 via nginx to the Waxloom API. The current mobile experience is a responsive web app; native iPhone/Watch sources are not an installed client.
+- New Discovery: a single feed, optional For you / Surprise me / Rare finds sorting, user-triggered library download, 20-minute source-wise recommendation rotation.
+- Imports: transient previews remain outside the library; actual import stages off-library, tags known releases, omits fake Singles tags, publishes atomically with no overwrite.
+- Navidrome database mounted read-only into Docker for `/api/library/recent-tracks`; refreshes in web when app is visible. Full scan fallback if selective scan misses a new artist folder.
+- Validation: Docker service healthy, web and HTTPS status 200, recent-track API 200, both local and Tailscale HTTP audio Range 206 byte-for-byte identical, Python tests, TypeScript build, security and Discovery invariant checks.
+- **Open validation**: Safari on physical iPhone; at least one user-authorized real Discovery import; 11 pre-existing old Singles-folder files (including 6 WebM) require manual per-item source/metadata review, not blind deletion.
+- Rollback instructions: `docs/DISCOVERY_LIBRARY_PIPELINE_20261013.md`; local Docker backups are outside the GitHub repo.
+
 ## Published baseline
 
 - Repository: `Rzbck/Waxloom`

@@ -54,3 +54,51 @@ def test_identical_import_reuses_existing(tmp_path: Path) -> None:
     source = _audio(tmp_path / "staging" / "Song.mp3", b"c")
     assert _move_to_album(source, library_root=root, artist="Band", album="") == existing
     assert existing.exists()
+
+
+@pytest.mark.asyncio
+async def test_authorized_import_publishes_and_indexes_without_a_fake_album(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end service with fake remote providers, no Internet or user files."""
+    from waxloom_api.imports import ImportService
+
+    class FakeNavidrome:
+        scans: list[bool] = []
+        async def search(self, query: str, count: int = 20) -> dict:
+            if self.scans:
+                return {"songs": [{"id": "local-123", "artist": "New Artist", "title": "New Track"}]}
+            return {"songs": []}
+        async def start_scan(self, full_scan: bool = False) -> None:
+            self.scans.append(full_scan)
+
+    class FakeYoutube:
+        def download_selected(self, *, artist: str, title: str, source_url: str, output_root: Path) -> Path:
+            assert "youtube.com" in source_url
+            file = output_root / artist / "Singles" / f"{artist} - {title}.m4a"
+            return _audio(file, b"x")
+        def prepare_library_audio(self, path: Path, *, artist: str, title: str) -> Path:
+            return path
+
+    # Fake binary does not contain mutagen tags; the rest of the import pipeline
+    # is exercised with controlled deterministic data.
+    monkeypatch.setattr("waxloom_api.imports.MutagenFile", lambda *_args, **_kwargs: None)
+
+    service = ImportService(
+        navidrome=FakeNavidrome(),
+        youtube=FakeYoutube(),
+        library_root=str(tmp_path / "music"),
+        state_dir=tmp_path / "state",
+    )
+    result = await service.import_youtube(
+        artist="New Artist",
+        title="New Track",
+        source_url="https://www.youtube.com/watch?v=example",
+    )
+    assert result["status"] == "imported"
+    assert result["relative_path"] == "New Artist/New Artist - New Track.m4a" or (
+        Path(result["relative_path"]).parts == ("New Artist", "New Artist - New Track.m4a")
+    )
+    assert (tmp_path / "music" / "New Artist" / "New Artist - New Track.m4a").exists()
+    assert not (tmp_path / "music" / "New Artist" / "Singles").exists()
+    assert list((tmp_path / "state").glob("waxloom-import-*")) == []
