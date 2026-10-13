@@ -393,6 +393,7 @@ export default function App() {
     if (next === "favorites") void loadFavorites();
   }
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navItems: Array<{ id: View; label: string }> = [
     { id: "home", label: "Home" },
     { id: "albums", label: "Albums" },
@@ -448,12 +449,13 @@ export default function App() {
               className={`nav-item ${view === item.id ? "nav-item-active" : ""}`}
               key={item.id}
               type="button"
-              onClick={() => navigate(item.id)}
+              onClick={() => { navigate(item.id); setMobileMenuOpen(false); }}
             >
               <span>{item.label}</span>
             </button>
           ))}
         </nav>
+        <button className="mobile-menu-toggle" type="button" aria-label="Open navigation menu" aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)}>☰ Menu</button>
         <div className="sidebar-status">
           <span className={navidromeHealth?.status === "ok" ? "dot dot-on" : "dot"} />
           <div>
@@ -463,6 +465,15 @@ export default function App() {
         </div>
       </aside>
 
+      {mobileMenuOpen && (
+        <div className="mobile-menu-overlay" role="dialog" aria-modal="true" aria-label="Waxloom navigation">
+          <div className="mobile-menu-heading"><strong>Waxloom</strong><button type="button" onClick={() => setMobileMenuOpen(false)} aria-label="Close menu">✕</button></div>
+          <nav aria-label="Mobile sections">{navItems.map((item) => (
+            <button key={item.id} type="button" className={view === item.id ? "mobile-menu-active" : ""}
+              onClick={() => { navigate(item.id); setMobileMenuOpen(false); }}>{item.label}<span>→</span></button>
+          ))}</nav>
+        </div>
+      )}
       <section className="content">
         <header className="topbar">
           <div className="topbar-title">

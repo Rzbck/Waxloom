@@ -62,6 +62,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [shuffle, setShuffle] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
   const [playerPlaylists, setPlayerPlaylists] = useState<PlaylistSummary[]>([]);
   const [playlistQuery, setPlaylistQuery] = useState("");
@@ -603,6 +604,34 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const activeQueue = mode === "preview" ? previewQueue : queue;
 
+  // Standard iOS lock-screen controls. Web Media Session cannot expose
+  // arbitrary Favorite/Playlist/Instant Mix buttons in Apple's lock-screen UI.
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || (!currentSong && !currentPreview)) return;
+    const session = navigator.mediaSession;
+    session.metadata = new MediaMetadata({
+      title: activeTitle,
+      artist: activeArtist,
+      album: currentSong?.album ?? "",
+      artwork: currentSong?.coverArt ? [{ src: api.coverUrl(currentSong.coverArt, 600), sizes: "600x600" }] : [],
+    });
+    const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+      ["nexttrack", () => next()],
+      ["previoustrack", () => previous()],
+      ["play", () => { void audioRef.current?.play(); }],
+      ["pause", () => { audioRef.current?.pause(); }],
+    ];
+    for (const [action, handler] of actions) {
+      try { session.setActionHandler(action, handler); } catch { /* Unsupported iOS action. */ }
+    }
+    return () => {
+      for (const [action] of actions) {
+        try { session.setActionHandler(action, null); } catch { /* Unsupported. */ }
+      }
+    };
+  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id, next, previous]);
+
+
   return (
     <PlayerContext.Provider value={contextValue}>
       {children}
@@ -717,7 +746,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 && <small>Refine your search to see more playlists.</small>}
             </aside>
           )}
-          <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""}`}>
+          <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""} ${mobileExpanded ? "player-mobile-expanded" : ""}`}>
+            <button className="mobile-player-expand" type="button" onClick={() => setMobileExpanded((value) => !value)} aria-label={mobileExpanded ? "Minimize player" : "Open full-screen player"}>{mobileExpanded ? "⌄ Minimize" : "⌃ Now playing"}</button>
+            {mobileExpanded && <div className="mobile-player-art">{currentSong?.coverArt ? <img src={api.coverUrl(currentSong.coverArt, 600)} alt="" /> : <span>♫</span>}</div>}
             <div className="player-track">
               <div className="player-cover">
                 {currentSong?.coverArt ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" /> : <span>{mode === "preview" ? "◎" : "♪"}</span>}
@@ -749,6 +780,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               {previewError && <small className="player-preview-error">{previewError}</small>}
             </div>
 
+            {mobileExpanded && <section className="mobile-player-up-next" aria-label="Up next">
+              <strong>Up next</strong>
+              {activeQueue.slice(activeIndex + 1, activeIndex + 5).map((song, offset) => (
+                <button key={song.id + "-" + offset} type="button" onClick={() => {
+                  const targetIndex = activeIndex + offset + 1;
+                  if (mode === "navidrome") {
+                    startLocalPlayback(song as Song, "queue");
+                    setCurrentIndex(targetIndex);
+                  } else {
+                    setPreviewIndex(targetIndex);
+                    setPlaying(true);
+                  }
+                }}><span>{song.title}</span><small>{song.artist}</small></button>
+              ))}
+            </section>}
             <div className="player-tools">
               <button className={playerStarred && currentSong ? "icon-button player-quick-action is-favorite" : "icon-button player-quick-action"}
                 type="button" onClick={() => void toggleCurrentFavorite()}
