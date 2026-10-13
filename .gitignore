@@ -18,6 +18,7 @@ build/
 # Node / frontend
 node_modules/
 apps/web/dist/
+apps/web/tsconfig.tsbuildinfo
 .vite/
 
 # IDE / OS

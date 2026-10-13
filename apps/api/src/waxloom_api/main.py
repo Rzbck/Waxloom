@@ -16,12 +16,13 @@ from waxloom_api import __version__
 from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feed import DiscoveryFeedEngine
 from waxloom_api.imports import ImportService
+from waxloom_api.mix_fallback import library_mix
 from waxloom_api.preview_cache import DiscoveryPreviewCache
-from waxloom_api.recent_tracks import get_newest_songs
 from waxloom_api.providers.audiomuse import AudioMuseClient
 from waxloom_api.providers.listenbrainz import ListenBrainzLabsClient
 from waxloom_api.providers.navidrome import NavidromeClient, NavidromeError
 from waxloom_api.providers.youtube import YouTubeProvider
+from waxloom_api.recent_tracks import get_newest_songs
 from waxloom_api.settings import settings
 
 app = FastAPI(
@@ -356,11 +357,21 @@ async def save_play_queue(payload: PlayQueueRequest) -> dict[str, object]:
 @app.get("/api/discovery/local-similar/{song_id}")
 async def local_similar(song_id: str, count: int = Query(default=40, ge=1, le=200)) -> dict[str, object]:
     require_navidrome()
+    # Not every Navidrome song has been vectorized by AudioMuse. In particular
+    # newly imported music returns AudioMuse 404. Use a clearly labeled library
+    # mix instead of leaving Instant Mix broken for that track.
     try:
         items = await discovery_service().local_similar(song_id, count=count)
-    except (httpx.HTTPError, RuntimeError) as exc:
-        raise HTTPException(status_code=502, detail=f"AudioMuse similarity failed: {exc}") from exc
-    return {"items": items, "count": len(items)}
+        if items:
+            return {"items": items, "count": len(items), "source": "audiomuse"}
+    except (httpx.HTTPError, RuntimeError, ValueError):
+        pass
+
+    try:
+        items = await library_mix(navidrome_client(), song_id, count=count)
+    except (httpx.HTTPError, RuntimeError, ValueError, NavidromeError) as exc:
+        raise HTTPException(status_code=502, detail="Local music mix unavailable.") from exc
+    return {"items": items, "count": len(items), "source": "library_fallback"}
 
 
 @app.post("/api/discovery/external")

@@ -249,11 +249,8 @@ function DiscoveryShelf({
   if (items.length === 0) return <p className="muted">Preparing musical discoveries…</p>;
   return (
     <section className="discovery-cover-shelf" aria-label="All Discovery recommendations">
-      <div className="discovery-cover-grid" role="region" aria-label="Swipe sideways or use mouse wheel to explore every track"
-        tabIndex={0} onWheel={(event) => {
-          const node = event.currentTarget;
-          if (node.scrollWidth > node.clientWidth) node.scrollLeft += event.deltaY + event.deltaX;
-        }}>
+      <div className="discovery-cover-grid" role="region" aria-label="All available tracks, organized as a responsive album grid"
+        tabIndex={0}>
         {items.map((candidate) => (
           <DiscoveryTrackCard
             key={candidate.recording_mbid} candidate={candidate}

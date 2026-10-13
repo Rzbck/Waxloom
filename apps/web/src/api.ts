@@ -239,7 +239,7 @@ export const api = {
     body: JSON.stringify({ ids, current, position }),
   }),
 
-  localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack>>(
+  localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack> & { source?: "audiomuse" | "library_fallback" }>(
     `/api/discovery/local-similar/${encodeURIComponent(songId)}?count=${count}`,
   ),
   discover: (seedSongIds: string[], undergroundWeight = 0.75, resultCount = 50) => request<DiscoveryResponse>("/api/discovery/external", {

@@ -64,6 +64,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queueOpen, setQueueOpen] = useState(false);
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
   const [playerPlaylists, setPlayerPlaylists] = useState<PlaylistSummary[]>([]);
+  const [playlistQuery, setPlaylistQuery] = useState("");
+  const playlistMenuRef = useRef<HTMLElement | null>(null);
+  const playlistButtonRef = useRef<HTMLButtonElement | null>(null);
   const [playerStarred, setPlayerStarred] = useState(false);
   const [playerActionBusy, setPlayerActionBusy] = useState(false);
   const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
@@ -74,6 +77,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setPlayerStarred(Boolean(currentSong?.starred));
     setPlaylistPickerOpen(false);
+    setPlaylistQuery("");
     setPlayerActionMessage(null);
   }, [currentSong?.id, currentPreview?.id]);
 
@@ -500,6 +504,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     try {
       const response = await api.playlists();
       setPlayerPlaylists(response.items);
+      setPlaylistQuery("");
       setPlaylistPickerOpen(true);
       setPlayerActionMessage(null);
     } catch (error) {
@@ -508,6 +513,26 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setPlayerActionBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!playlistPickerOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      const node = event.target as Node;
+      if (playlistMenuRef.current?.contains(node) || playlistButtonRef.current?.contains(node)) return;
+      setPlaylistPickerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setPlaylistPickerOpen(false);
+      playlistButtonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [playlistPickerOpen]);
 
   async function addCurrentToPlaylist(playlist: PlaylistSummary) {
     if (!currentSong || playerActionBusy) return;
@@ -531,13 +556,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const response = await api.localSimilar(currentSong.id, 24);
       const similar: Song[] = response.items
         .filter((song) => song.id && song.id !== currentSong.id)
-        .map((song) => ({ id: song.id, title: song.title, artist: song.artist, album: song.album }));
+        .map((song) => ({ ...song, id: song.id, title: song.title, artist: song.artist, album: song.album }));
       if (!similar.length) {
         setPlayerActionMessage("No similar local tracks available yet");
         return;
       }
       playSongs([currentSong, ...similar], 0);
-      setPlayerActionMessage(`Instant mix — ${similar.length} similar tracks`);
+      setPlayerActionMessage(response.source === "library_fallback"
+        ? `Library mix — ${similar.length} tracks (AudioMuse not indexed yet)`
+        : `Instant mix — ${similar.length} similar tracks`);
     } catch (error) {
       setPlayerActionMessage(error instanceof Error ? error.message : "Instant mix unavailable");
     } finally {
@@ -658,13 +685,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           )}
 
           {playlistPickerOpen && (
-            <aside className="player-playlist-picker" aria-label="Add playing track to playlist">
-              <strong>Add “{currentSong?.title}” to playlist</strong>
-              {playerPlaylists.length ? playerPlaylists.map((playlist) => (
-                <button key={playlist.id} type="button" disabled={playerActionBusy}
-                  onClick={() => void addCurrentToPlaylist(playlist)}>{playlist.name}</button>
-              )) : <span className="player-action-tip">Create a playlist from the Playlists tab first.</span>}
-              <button type="button" onClick={() => setPlaylistPickerOpen(false)}>Close</button>
+            <aside ref={playlistMenuRef} className="player-playlist-picker" aria-label="Choose a playlist">
+              <strong>Add “{currentSong?.title}” to a playlist</strong>
+              <input type="search" value={playlistQuery} autoFocus
+                onChange={(event) => setPlaylistQuery(event.target.value)}
+                placeholder="Find a playlist…" aria-label="Find a playlist" />
+              <div className="player-playlist-options">
+                {playerPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistQuery.toLowerCase()))
+                  .slice(0, 12).map((playlist) => (
+                  <button key={playlist.id} type="button" disabled={playerActionBusy}
+                    onClick={() => void addCurrentToPlaylist(playlist)}>{playlist.name}</button>
+                ))}
+              </div>
+              {playerPlaylists.length === 0 && <span className="player-action-tip">No playlists yet. Create one from the Playlists tab.</span>}
+              {playerPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistQuery.toLowerCase())).length > 12
+                && <small>Refine your search to see more playlists.</small>}
             </aside>
           )}
           <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""}`}>
@@ -704,7 +739,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 type="button" onClick={() => void toggleCurrentFavorite()}
                 title={currentSong ? (playerStarred ? "Remove from favorites" : "Add playing song to favorites") : "Download Discovery preview to library first"}
                 aria-label="Favorite playing song" disabled={!currentSong || playerActionBusy}>♥</button>
-              <button className="icon-button player-quick-action" type="button"
+              <button ref={playlistButtonRef} className="icon-button player-quick-action" type="button"
                 onClick={() => void openPlayerPlaylists()} disabled={!currentSong || playerActionBusy}
                 title={currentSong ? "Add playing song to playlist" : "Download Discovery preview to library first"}
                 aria-label="Add playing song to playlist">＋</button>
