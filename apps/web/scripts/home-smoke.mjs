@@ -124,21 +124,38 @@ try {
 
   const moved = await evalJs(`(() => {
     const rack=document.querySelector(".waxloom-vinyl-rack");
-    const first=document.querySelector(".waxloom-vinyl-sleeve");
-    const old=first?.style.getPropertyValue("--waxloom-vinyl-lift");
     rack.scrollLeft += 250;
     rack.dispatchEvent(new Event("scroll", {bubbles: true}));
-    return {old,newLeft:rack.scrollLeft};
+    return {newLeft:rack.scrollLeft};
   })()`);
   await wait(300);
   const afterSwipe = await evalJs(measures);
   const motion = await evalJs(`(() => {
-    const card=document.querySelector(".waxloom-vinyl-sleeve");
-    return {firstLift:card?.style.getPropertyValue("--waxloom-vinyl-lift"),firstTilt:card?.style.getPropertyValue("--waxloom-vinyl-tilt")};
+    const rack=document.querySelector(".waxloom-vinyl-rack");
+    const card=rack?.querySelector(".waxloom-vinyl-sleeve");
+    const style=card&&getComputedStyle(card);
+    const button=card?.querySelector(".waxloom-vinyl-play");
+    const cover=card?.querySelector(".waxloom-vinyl-face");
+    const br=button?.getBoundingClientRect();
+    const cr=cover?.getBoundingClientRect();
+    return {
+      transform:style?.transform,
+      snap:getComputedStyle(rack).scrollSnapType,
+      bannerCount:document.querySelectorAll(".waxloom-vinyl-crate-front").length,
+      coverWidth:cr?.width,
+      playLeft:br?.left,
+      coverLeft:cr?.left,
+      coverRight:cr?.right,
+    };
   })()`);
   assert(afterSwipe.rackLeft > portrait.rackLeft + 100, "Horizontal swipe did not move covers");
   assert(afterSwipe.activeRecord !== portrait.activeRecord, "Record counter did not advance");
-  assert(motion.firstLift !== moved.old, "Vinyl sleeve does not rise/sink on scroll");
+  assert(motion.transform === "none" && motion.snap === "none",
+    "Moving vinyl art must stay untransformed and free of scroll snapping");
+  assert(motion.bannerCount === 0, "Old WAXLOOM RECORDS strip must be removed from DOM");
+  assert(motion.coverWidth === 162, "Album cover should keep its exact square width while scrolling");
+  assert(motion.playLeft >= motion.coverLeft + 10 && motion.playLeft < motion.coverRight - 40,
+    "Play button should be on the uncovered side of the album sleeve");
   await rpc("Page.captureScreenshot", { format: "jpeg", quality: 72, captureBeyondViewport: false })
     .then(({ data }) => import("node:fs").then(({ writeFileSync }) => writeFileSync("C:/Users/DataC0re/AppData/Local/Temp/waxloom-home-swipe.jpg", Buffer.from(data, "base64"))));
 
@@ -160,7 +177,7 @@ try {
     const data = await evalJs(measures);
     assert(data.home, `${label}: home hidden`);
     assert(data.pageWidth <= data.viewport[0], `${label}: horizontal overflow`);
-    assert(data.crateHeight >= 260 && data.crateHeight <= 280, `${label}: crate size wrong`);
+    assert(data.crateHeight >= 245 && data.crateHeight <= 265, `${label}: crate size wrong`);
     assert(data.pageHeight < 1700, `${label}: unnecessarily long home`);
     if (label === "small" || label === "tablet") {
       const path = `C:/Users/DataC0re/AppData/Local/Temp/waxloom-home-${label}.jpg`;

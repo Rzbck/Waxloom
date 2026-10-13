@@ -1,5 +1,13 @@
 # Waxloom AI handoff
 
+## 2026-10-13 — Remove obstructing vinyl bar and eliminate fast-swipe vibration
+
+- User observed the `WAXLOOM / RECORDS` strip hiding actual album sleeves, hard iOS Safari vibration when swiping several covers quickly, and misaligned album artwork. The reproducible geometry probe `apps/web/scripts/vinyl-motion-probe.mjs` measured **25.37px extra screen movement** for the same album image during normal scroll in the previous image. The cause was a rotating/vertically translating `waxloom-vinyl-sleeve` **inside** a native horizontal scroll-snap container; nested artwork repainted at changing angles during momentum. Optimizing/restricting that animation did not fix it.
+- **Fix:** removed the entire bar DOM and front-overlay CSS across Home/Albums/Favorites/Search/Artist/Discovery; disabled scroll snap and all per-frame cover transforms, tilt, filter, and compositor hint churn. Only the selected record's border changes *after* scrolling settles. Cached center positions are used to update the title and counter at idle, not while moving. Cover image size is a fixed square. Native swipe momentum and both horizontal/vertical touch gestures remain.
+- Compacted crate heights now that there is no bar; placed the album Play button on the exposed left side of overlapping sleeves (previously the adjacent sleeve hid the right side). Visual stage captures confirm legible full square covers. Headless 390x844 screenshot comparisons and 320px Discovery button-clickability checked.
+- **Measured after:** 0px image position drift in the identical scripted 0–900px swipe sequence (previous: 25.37px); `qa:vinyl` asserts 0 transformed album sleeves, 0 bars, no snapping, fixed width, tappable Play and no footer overlap. All 3 browser suites (`qa:home`, `qa:mobile`, `qa:vinyl`) run on an isolated Docker test container with real Navidrome GETs and intercepted writes. The user must confirm actual iPhone Safari momentum; Brave emulation alone cannot prove real-device frame rates.
+- Rollback retains prior Docker image. Preserve all other app functionality, avoid adding front overlays or scroll-snap/continuous transforms back without physical iOS tests.
+
 ## 2026-10-13 — Restored smooth touch scrolling for shared vinyl bins
 
 - Phone owner reported visible jitter and less fluid side swipes after the shared rack commit `7c82c0c`. Comparison with the formerly smooth `ac3ce2f` showed 29px to 54px travel increase, removal of compositor promotion, full per-frame `offsetLeft` reads/writes over every album, and `touch-action:pan-x` blocking page vertical gestures.

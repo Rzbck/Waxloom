@@ -39,40 +39,20 @@
     min-width: 0;
   }
   .waxloom-vinyl-crate {
-    /* The front is an opaque wall: the sleeves travel behind it as they sink.
-       Leave their captions and playback action readable when raised. */
+    /* A record-bin surface WITHOUT an overlay obscuring the cover artwork. */
     background:
       radial-gradient(ellipse 85% 100% at 50% -25%, rgba(167, 117, 201, .21), transparent 62%),
       linear-gradient(180deg, #2a2032 0%, #15101c 60%, #241a2c 100%);
   }
   .waxloom-vinyl-sleeve {
-    /* Large record libraries must not promote every sleeve to a GPU layer. */
+    /* Never animate scrolling covers or rasterized album images. */
+    transform: none !important;
+    filter: none !important;
     will-change: auto !important;
-    transition-duration: 90ms;
-  }
-  /* Promote just the sleeves entering the viewport, ahead of their arrival.
-     Safari's compositor can then keep them smooth during native momentum. */
-  .waxloom-vinyl-sleeve[data-nearby="true"] {
-    will-change: transform !important;
-  }
-  .waxloom-vinyl-crate-front {
-    height: 33px;
-    bottom: 80px;
-    z-index: 45;
-    border-top: 2px solid #9b78a9;
-    background: linear-gradient(180deg, #624a6a 0%, #3d2a47 42%, #221a2c 100%);
-    box-shadow: 0 8px 20px rgba(0,0,0,.7), inset 0 1px rgba(255,255,255,.15);
+    transition: none !important;
   }
   /* Add a pronounced front shadow; no buttons are covered because the
      translucent/shadow layer does not receive pointer events. */
-  .waxloom-vinyl-crate-front::after {
-    content: "";
-    position: absolute;
-    left: 0; right: 0; top: 100%;
-    height: 12px;
-    background: linear-gradient(180deg, rgba(10,7,14,.65), transparent);
-    pointer-events: none;
-  }
   .waxloom-vinyl-display--album {
     padding-top: 1px;
     margin-bottom: 5px;
@@ -139,7 +119,7 @@
     font-size: 10px;
   }
   .waxloom-vinyl-display--album .waxloom-vinyl-crate {
-    height: 275px;
+    height: 258px;
   }
 
   /* Discovery cards are real music suggestions, not library album records.
@@ -149,7 +129,7 @@
     padding: 5px 0 10px;
   }
   .waxloom-discovery-vinyl .waxloom-vinyl-crate {
-    height: 332px;
+    height: 300px;
   }
   .waxloom-discovery-vinyl .waxloom-vinyl-rack {
     padding-top: 22px;
@@ -212,7 +192,6 @@
   .waxloom-discovery-vinyl .discovery-cover-like { color: #a0d3b5; }
   .waxloom-discovery-vinyl .discovery-cover-less { color: #ef9cab; }
   .waxloom-discovery-vinyl .discovery-cover-download { color: #dab2ff; }
-  .waxloom-discovery-vinyl .waxloom-vinyl-crate-front { bottom: 125px; }
   .waxloom-discovery-vinyl .waxloom-vinyl-controls {
     margin-top: 2px;
   }
@@ -231,10 +210,8 @@
 }
 
 @media (max-width: 355px) {
-  .waxloom-vinyl-display--album .waxloom-vinyl-crate { height: 265px; }
-  .waxloom-vinyl-display--album .waxloom-vinyl-crate-front { bottom: 76px; }
-  .waxloom-discovery-vinyl .waxloom-vinyl-crate { height: 307px; }
-  .waxloom-discovery-vinyl .waxloom-vinyl-crate-front { bottom: 118px; }
+  .waxloom-vinyl-display--album .waxloom-vinyl-crate { height: 251px; }
+  .waxloom-discovery-vinyl .waxloom-vinyl-crate { height: 292px; }
   .waxloom-discovery-vinyl .discovery-cover-art { width: 155px; }
 }
 

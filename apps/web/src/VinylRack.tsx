@@ -22,109 +22,64 @@ export function VinylRack({
   records?: { title: string; artist?: string }[];
 }) {
   const rackRef = useRef<HTMLDivElement>(null);
-  const frameRef = useRef<number | null>(null);
-  const idleLabelRef = useRef<number | null>(null);
-  const selectedIndexRef = useRef(0);
+  const scrollIdleRef = useRef<number | null>(null);
   const geometryRef = useRef<{
     sleeves: HTMLElement[];
     centers: number[];
     width: number;
   } | null>(null);
-  const nearbyRef = useRef<Set<number>>(new Set());
+  const selectedIndexRef = useRef(0);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const id = useId();
 
-  const updateSleeves = useCallback(() => {
+  const commitSelection = useCallback(() => {
     const rack = rackRef.current;
     const geometry = geometryRef.current;
-    if (!rack || !geometry?.sleeves.length) return;
+    if (!rack || !geometry?.centers.length) return;
 
-    // Crucially, reading the scroll offset does not measure 40-120 cards.
-    // Offset positions and rack width are cached until the actual layout resizes.
-    const visibleCenter = rack.scrollLeft + geometry.width / 2;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const motionRange = Math.max(geometry.width * .75, 155);
-    // Promote sleeves well *before* they enter the viewport; only a handful
-    // receive compositor layers, never every record in a 40-album batch.
-    const nearbyRange = geometry.width / 2 + 340;
+    const viewportCenter = rack.scrollLeft + geometry.width / 2;
     let nearest = 0;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-    const nearby = new Set<number>();
-
+    let closestDistance = Number.POSITIVE_INFINITY;
     for (let index = 0; index < geometry.centers.length; index += 1) {
-      const delta = geometry.centers[index] - visibleCenter;
-      const distance = Math.abs(delta);
-      if (distance < nearestDistance) {
+      const distance = Math.abs(geometry.centers[index] - viewportCenter);
+      if (distance < closestDistance) {
         nearest = index;
-        nearestDistance = distance;
+        closestDistance = distance;
       }
-      if (distance <= nearbyRange) nearby.add(index);
     }
-
-    for (const previous of nearbyRef.current) {
-      if (nearby.has(previous)) continue;
-      const sleeve = geometry.sleeves[previous];
-      if (!sleeve) continue;
-      sleeve.style.removeProperty("--waxloom-vinyl-lift");
-      sleeve.style.removeProperty("--waxloom-vinyl-tilt");
-      sleeve.style.removeProperty("z-index");
-      delete sleeve.dataset.nearby;
-      delete sleeve.dataset.centered;
-    }
-
-    for (const index of nearby) {
-      const sleeve = geometry.sleeves[index];
-      if (!sleeve) continue;
-      sleeve.dataset.nearby = "true";
-      if (reducedMotion) {
-        sleeve.style.removeProperty("--waxloom-vinyl-lift");
-        sleeve.style.removeProperty("--waxloom-vinyl-tilt");
-        sleeve.style.removeProperty("z-index");
-        delete sleeve.dataset.centered;
-        continue;
-      }
-      const delta = geometry.centers[index] - visibleCenter;
-      const normalized = Math.min(1, Math.abs(delta) / motionRange);
-      const tilt = Math.max(-7, Math.min(7, delta / 36));
-      // Restored to the original subtle 29px travel (not the new 54px bounce).
-      sleeve.style.setProperty("--waxloom-vinyl-lift", `${(-18 + normalized * 29).toFixed(1)}px`);
-      sleeve.style.setProperty("--waxloom-vinyl-tilt", `${tilt.toFixed(2)}deg`);
-      sleeve.style.zIndex = String(20 - Math.round(normalized * 12));
-      if (index === nearest) sleeve.dataset.centered = "true";
-      else delete sleeve.dataset.centered;
-    }
-
-    nearbyRef.current = nearby;
-
-    if (selectedIndexRef.current !== nearest) {
-      selectedIndexRef.current = nearest;
-      // Updating React on every scroll frame was needlessly redrawing the
-      // selected title and counter while Safari is scrolling the artwork.
-      if (idleLabelRef.current !== null) window.clearTimeout(idleLabelRef.current);
-      idleLabelRef.current = window.setTimeout(() => {
-        idleLabelRef.current = null;
-        setSelectedIndex(selectedIndexRef.current);
-      }, 110);
-    }
+    const previous = selectedIndexRef.current;
+    if (previous !== nearest) geometry.sleeves[previous]?.removeAttribute("data-centered");
+    geometry.sleeves[nearest]?.setAttribute("data-centered", "true");
+    selectedIndexRef.current = nearest;
+    setSelectedIndex((current) => current === nearest ? current : nearest);
   }, []);
 
   const onScroll = useCallback((_event: UIEvent<HTMLDivElement>) => {
-    if (frameRef.current !== null) return;
-    frameRef.current = requestAnimationFrame(() => {
-      frameRef.current = null;
-      updateSleeves();
-    });
-  }, [updateSleeves]);
+    const rack = rackRef.current;
+    if (!rack) return;
+
+    // On Safari, scroll snapping and per-frame transforms on *scrolling*
+    // elements made the artwork itself shake up to 25 px during fast swipes.
+    // Leave every cover in its fixed layout position while scrolling.
+    if (rack.dataset.scrolling !== "true") {
+      rack.dataset.scrolling = "true";
+      geometryRef.current?.sleeves[selectedIndexRef.current]?.removeAttribute("data-centered");
+    }
+    if (scrollIdleRef.current !== null) window.clearTimeout(scrollIdleRef.current);
+    scrollIdleRef.current = window.setTimeout(() => {
+      scrollIdleRef.current = null;
+      delete rack.dataset.scrolling;
+      commitSelection();
+    }, 150);
+  }, [commitSelection]);
 
   useEffect(() => {
     const rack = rackRef.current;
     if (!rack) return;
-
     rack.scrollLeft = 0;
     selectedIndexRef.current = 0;
     setSelectedIndex(0);
-    // Measuring once per layout change is much cheaper than measuring every
-    // sleeve in every scroll callback, especially in Mobile Safari.
+
     const measure = () => {
       const sleeves = Array.from(rack.querySelectorAll<HTMLElement>(".waxloom-vinyl-sleeve"));
       geometryRef.current = {
@@ -132,29 +87,24 @@ export function VinylRack({
         centers: sleeves.map((sleeve) => sleeve.offsetLeft + sleeve.offsetWidth / 2),
         width: rack.clientWidth,
       };
-      nearbyRef.current = new Set();
-      updateSleeves();
+      if (rack.dataset.scrolling !== "true") commitSelection();
     };
-    const firstFrame = requestAnimationFrame(measure);
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
-      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-      frameRef.current = requestAnimationFrame(() => {
-        frameRef.current = null;
-        measure();
-      });
-    }) : null;
+
+    const frame = requestAnimationFrame(measure);
+    // A genuine container resize is the only time we reread layout.
+    const observer = typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(measure)
+      : null;
     observer?.observe(rack);
+
     return () => {
+      cancelAnimationFrame(frame);
       observer?.disconnect();
-      cancelAnimationFrame(firstFrame);
-      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-      if (idleLabelRef.current !== null) window.clearTimeout(idleLabelRef.current);
-      frameRef.current = null;
-      idleLabelRef.current = null;
+      if (scrollIdleRef.current !== null) window.clearTimeout(scrollIdleRef.current);
+      scrollIdleRef.current = null;
       geometryRef.current = null;
-      nearbyRef.current.clear();
     };
-  }, [count, contentKey, updateSleeves]);
+  }, [count, contentKey, commitSelection]);
 
   function shift(delta: -1 | 1) {
     const rack = rackRef.current;
@@ -175,11 +125,6 @@ export function VinylRack({
         <div id={id} className="waxloom-vinyl-rack" ref={rackRef} onScroll={onScroll}
           tabIndex={0} role="region" aria-label={label}>
           {children}
-        </div>
-        <div className="waxloom-vinyl-crate-front" aria-hidden="true">
-          <span className="waxloom-vinyl-crate-rivet" />
-          <span>WAXLOOM / RECORDS</span>
-          <span className="waxloom-vinyl-crate-rivet" />
         </div>
       </div>
       <div className="waxloom-vinyl-controls">

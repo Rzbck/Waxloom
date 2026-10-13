@@ -77,7 +77,7 @@
   .waxloom-vinyl-crate {
     position: relative;
     width: 100%;
-    height: 277px;
+    height: 258px;
     min-height: 0;
     isolation: isolate;
     overflow: hidden;
@@ -95,12 +95,13 @@
     width: 100%;
     height: 100%;
     box-sizing: border-box;
-    padding: 29px max(14px, calc(50% - 81px)) 0;
+    padding: 24px max(14px, calc(50% - 81px)) 0;
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
+    /* Scroll position belongs to Safari's compositor, without snap fighting momentum. */
+    scroll-snap-type: none;
     scroll-padding-inline: max(14px, calc(50% - 81px));
     scrollbar-width: none;
     touch-action: pan-x pan-y;
@@ -114,16 +115,17 @@
     width: 162px;
     min-width: 162px;
     margin-right: -17px;
-    transform-origin: 50% 100%;
-    transform: translate3d(0, var(--waxloom-vinyl-lift, 11px), 0) rotate(var(--waxloom-vinyl-tilt, 0deg));
-    transition: transform 90ms ease-out, filter 140ms ease-out;
-    will-change: transform;
-    scroll-snap-align: center;
+    /* Absolutely no rotation, lift or filter on the moving scroll element.
+       Otherwise WebKit moves the artwork twice and causes fast-swipe jitter. */
+    scroll-snap-align: none;
     contain: layout style;
-    filter: brightness(.84) saturate(.9);
+    transform: none !important;
+    filter: none !important;
+    will-change: auto !important;
   }
-  .waxloom-vinyl-sleeve[data-centered="true"] {
-    filter: brightness(1.09) saturate(1.06);
+  .waxloom-vinyl-sleeve[data-centered="true"] .waxloom-vinyl-face {
+    border-color: #bc94cd;
+    box-shadow: 0 0 0 1px rgba(191,142,220,.35), 3px 5px 10px rgba(0,0,0,.52);
   }
   .waxloom-vinyl-face {
     display: block;
@@ -171,7 +173,10 @@
   .waxloom-vinyl-play {
     position: absolute;
     top: 113px;
-    right: 9px;
+    /* The next sleeve slightly overlaps the right edge of this one.
+       Keep the play control on the clear left side instead. */
+    left: 23px;
+    right: auto;
     display: grid;
     place-items: center;
     width: 38px;
@@ -206,35 +211,6 @@
   }
   .waxloom-vinyl-label strong { color: #f4eafa; font-size: 12px; font-weight: 750; }
   .waxloom-vinyl-label small { color: #c2b2ce; font-size: 10px; }
-  .waxloom-vinyl-crate-front {
-    position: absolute;
-    z-index: 45;
-    left: 0;
-    right: 0;
-    bottom: 85px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    height: 28px;
-    padding: 0 15px;
-    border-top: 1px solid #886b93;
-    border-bottom: 2px solid #120f18;
-    background: linear-gradient(180deg, #57405f 0%, #34283f 45%, #211b29 100%);
-    box-shadow: 0 4px 8px rgba(0,0,0,.5), inset 0 1px rgba(255,255,255,.08);
-    color: rgba(210,188,221,.63);
-    font-size: 8px;
-    font-weight: 850;
-    letter-spacing: .22em;
-    pointer-events: none;
-  }
-  .waxloom-vinyl-crate-rivet {
-    display: block;
-    width: 5px;
-    height: 5px;
-    border-radius: 50%;
-    background: #88718c;
-    box-shadow: inset 0 1px 2px #1b1423;
-  }
   .waxloom-vinyl-controls {
     display: flex;
     align-items: center;
@@ -388,13 +364,12 @@
 @media (max-width: 355px) {
   .waxloom-mobile-home { gap: 15px; }
   .waxloom-mobile-home-section-head h2 { font-size: 21px !important; }
-  .waxloom-vinyl-crate { height: 265px; }
-  .waxloom-vinyl-crate-front { bottom: 76px; }
+  .waxloom-vinyl-crate { height: 251px; }
   .waxloom-vinyl-drag-hint { display: none; }
   .waxloom-vinyl-controls { justify-content: space-between; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .waxloom-vinyl-sleeve { transition: none !important; transform: none !important; filter: none !important; }
+  .waxloom-vinyl-sleeve { transition: none !important; }
   .waxloom-vinyl-rack, .waxloom-home-track-rail { scroll-behavior: auto !important; }
 }

@@ -168,39 +168,66 @@ try {
   assert(albums.vinylGroups === 3, "120 Albums should be split into three manageable record bins");
   assert(Boolean(albums.selectedLabel), "Selected album title must be readable under the bin");
   assert(albums.albumRackScroll > albums.albumRackWidth + 90, "Albums should be horizontally swipeable");
-  // Regression test for the reported iPhone jitter: only sleeves close to
-  // the visible viewport may be animated; old gentle movement is <=29px.
+  // Regression for the real iPhone vibration: native horizontal scrolling
+  // must NOT transform/rotate the images, and the old WAXLOOM RECORDS overlay
+  // must never obscure album covers or their playback controls.
   const smoothness = await evaluate(`(async () => {
     const rack=document.querySelector('.waxloom-album-vinyl .waxloom-vinyl-rack');
     const counter=document.querySelector('.waxloom-album-vinyl .waxloom-vinyl-count');
+    const first=rack.querySelector('.waxloom-vinyl-sleeve');
+    const image=first.querySelector('.waxloom-vinyl-face img');
+    const cover=first.querySelector('.waxloom-vinyl-face');
+    const play=first.querySelector('.waxloom-vinyl-play');
     const before=counter?.textContent?.trim();
-    rack.scrollLeft += 295;
-    rack.dispatchEvent(new Event('scroll',{bubbles:true}));
-    await new Promise((resolve)=>setTimeout(resolve,260));
+    const coverRect=cover.getBoundingClientRect();
+    const playRect=play.getBoundingClientRect();
+    const hit=document.elementFromPoint(playRect.left+playRect.width/2,playRect.top+playRect.height/2);
+    const playTappable=(hit===play||play.contains(hit));
+    const points=[];
+    for (const target of [0,15,45,90,160,255,330,480,690,900]) {
+      rack.scrollLeft=target;
+      rack.dispatchEvent(new Event('scroll',{bubbles:true}));
+      await new Promise((resolve)=>setTimeout(resolve,35));
+      const bounds=image?.getBoundingClientRect();
+      points.push({
+        scroll:rack.scrollLeft,
+        x:bounds?.left,
+        width:bounds?.width,
+      });
+    }
+    await new Promise((resolve)=>setTimeout(resolve,240));
+    const base=points[0].x+points[0].scroll;
+    const maxShift=Math.max(...points.map((point)=>Math.abs(point.x+point.scroll-base)));
     const sleeves=[...rack.querySelectorAll('.waxloom-vinyl-sleeve')];
-    const near=sleeves.filter((s)=>s.dataset.nearby==='true');
-    const distances=near.map((s)=>Number.parseFloat(s.style.getPropertyValue('--waxloom-vinyl-lift'))).filter(Number.isFinite);
     return {
       total:sleeves.length,
-      animated:near.length,
-      maxLift:Math.max(...distances),
-      minLift:Math.min(...distances),
-      gpuReady:near.every((s)=>getComputedStyle(s).willChange.includes('transform')),
+      transformCount:sleeves.filter((item)=>getComputedStyle(item).transform!=='none').length,
+      snap:getComputedStyle(rack).scrollSnapType,
       touchAction:getComputedStyle(rack).touchAction,
-      counterBefore:before,
-      counterAfter:counter?.textContent?.trim(),
+      bannerCount:document.querySelectorAll('.waxloom-vinyl-crate-front').length,
+      maxShift, widths:points.map((point)=>point.width),
+      playTappable,
+      playPosition:playRect.left-coverRect.left,
+      before,
+      after:counter?.textContent?.trim(),
       left:rack.scrollLeft,
     };
   })()`);
-  assert(smoothness.animated > 0 && smoothness.animated <= 12,
-    `Vinyl scroll animates ${smoothness.animated} of ${smoothness.total} sleeves; expected only nearby covers`);
-  assert(smoothness.minLift >= -18.5 && smoothness.maxLift <= 11.5,
-    `Vinyl movement exceeds old smooth 29px range (${smoothness.minLift} to ${smoothness.maxLift})`);
-  assert(smoothness.gpuReady, "Visible sleeves must be promoted to compositor layers before entering viewport");
+  assert(smoothness.transformCount === 0,
+    `No scrolling sleeve can be transformed (${smoothness.transformCount}/${smoothness.total} still moving)`);
+  assert(smoothness.snap === 'none', 'Scroll snapping must not fight Safari momentum');
+  assert(smoothness.maxShift < 0.7,
+    `Album image judders ${smoothness.maxShift}px instead of moving only with scroll`);
+  assert(smoothness.widths.every((width)=>Math.abs(width-158)<0.8),
+    'Album image dimensions must stay fixed even across many records');
+  assert(smoothness.bannerCount === 0,
+    'WAXLOOM RECORDS banner must be fully removed on every record bin');
+  assert(smoothness.playTappable && smoothness.playPosition > 16 && smoothness.playPosition < 65,
+    'Album play button must be accessible on the exposed side of the sleeve');
   assert(smoothness.touchAction.includes('pan-x') && smoothness.touchAction.includes('pan-y'),
-    "Vinyl scroll must preserve native horizontal and vertical touch gestures");
-  assert(smoothness.left >= 200 && smoothness.counterBefore !== smoothness.counterAfter,
-    "Vinyl inertia should advance the record index without losing active label");
+    'Native vertical and horizontal swiping must remain enabled');
+  assert(smoothness.left >= 800 && smoothness.before !== smoothness.after,
+    'Fast swipe must move through several albums and update the selected record counter');
   await scrollEnd();
   const albumsEnd = await evaluate(metrics);
   const albumsGap = checkEnd(albumsEnd, albumsEnd.albumBottom, "Albums/no player");
