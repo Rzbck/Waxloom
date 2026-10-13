@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
+import { VinylRack } from "./VinylRack";
 
 import { api } from "./api";
 import { usePlayer } from "./Player";
@@ -247,20 +248,31 @@ function DiscoveryShelf({
   onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
   if (items.length === 0) return <p className="muted">Preparing musical discoveries…</p>;
+  const renderTrack = (candidate: DiscoveryCandidate) => (
+    <DiscoveryTrackCard
+      key={candidate.recording_mbid} candidate={candidate}
+      currentPreviewMbid={currentPreviewMbid} playing={playing}
+      phase={downloadPhase(candidate.recording_mbid)}
+      rejecting={rejectingMbid === candidate.recording_mbid} taste={taste}
+      onPlay={(track) => onPlayQueue(items, track)}
+      onQuickAdd={onQuickAdd} onFeedback={onFeedback} onBadSource={onBadSource}
+    />
+  );
   return (
     <section className="discovery-cover-shelf" aria-label="All Discovery recommendations">
-      <div className="discovery-cover-grid" role="region" aria-label="All available tracks, organized as a responsive album grid"
-        tabIndex={0}>
-        {items.map((candidate) => (
-          <DiscoveryTrackCard
-            key={candidate.recording_mbid} candidate={candidate}
-            currentPreviewMbid={currentPreviewMbid} playing={playing}
-            phase={downloadPhase(candidate.recording_mbid)}
-            rejecting={rejectingMbid === candidate.recording_mbid} taste={taste}
-            onPlay={(track) => onPlayQueue(items, track)}
-            onQuickAdd={onQuickAdd} onFeedback={onFeedback} onBadSource={onBadSource}
-          />
-        ))}
+      <div className="waxloom-discovery-vinyl">
+        <VinylRack count={items.length} contentKey={items[0]?.recording_mbid} label="Discover tracks in the vinyl crate" variant="discovery"
+          records={items.map((item) => ({title:item.title, artist:item.artist}))}>
+          {items.map((candidate) => (
+            <div key={candidate.recording_mbid} className="waxloom-vinyl-sleeve waxloom-vinyl-sleeve--discovery">
+              {renderTrack(candidate)}
+            </div>
+          ))}
+        </VinylRack>
+      </div>
+      <div className="discovery-cover-grid discovery-cover-grid-desktop" role="region"
+        aria-label="All available tracks, organized as a responsive album grid" tabIndex={0}>
+        {items.map(renderTrack)}
       </div>
     </section>
   );

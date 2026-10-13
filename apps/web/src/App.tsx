@@ -5,6 +5,7 @@ import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
 import { MobileNavigation } from "./MobileNavigation";
 import { MobileHome } from "./MobileHome";
+import { VinylAlbums } from "./VinylRack";
 import { DownloadTray } from "./downloadQueue";
 import { usePlayer } from "./Player";
 import type {
@@ -415,11 +416,20 @@ export default function App() {
 
   function renderAlbumGrid(items: Album[]) {
     return (
-      <div className="media-grid">
-        {items.map((album) => (
-          <AlbumCard key={album.id} album={album} onOpen={() => void openAlbum(album)} onPlay={() => void playAlbum(album)} />
-        ))}
-      </div>
+      <>
+        {items.length > 0 && <div className="waxloom-album-vinyl">
+          <VinylAlbums albums={items} batchSize={40}
+            label="Album covers. Swipe through the record bin."
+            onOpenAlbum={(album) => void openAlbum(album)}
+            onPlayAlbum={(album) => void playAlbum(album)}
+          />
+        </div>}
+        <div className="media-grid waxloom-album-grid-desktop">
+          {items.map((album) => (
+            <AlbumCard key={album.id} album={album} onOpen={() => void openAlbum(album)} onPlay={() => void playAlbum(album)} />
+          ))}
+        </div>
+      </>
     );
   }
 

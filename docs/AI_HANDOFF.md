@@ -1,5 +1,13 @@
 # Waxloom AI handoff
 
+## 2026-10-13 — Shared Vinyl racks and fixed mobile Menu clearance
+
+- Root cause of phone menu overlap: when there was no active player, normal Waxloom pages did not reserve the fixed Menu's height. The mobile shell now reserves it; with music, nav + mini-player reserve remains, and Discovery uses its own viewport fit.
+- Extracted the Home-only record shelf into reusable `VinylRack.tsx`: used in Home, Albums, Favorite albums, Search albums, artist album lists and Discovery suggestions. Album browser groups 120 records into three separate 40-record bins, preserving desktop album grids. Discovery keeps its distinct download / feedback controls.
+- Front lip is deeper, off-center sleeves sink further; selected album/track title and artist appear below the bin. Motion respects reduced-motion and coalesces scroll callbacks per frame.
+- Added staged browser `qa:vinyl` with read-only synthetic player covering album/search/artist/discovery/favorites and menu clearance, besides `qa:home` and `qa:mobile`. Full details: `docs/VINYL_RACKS_MOBILE_LAYOUT_20261013.md`.
+- Keep rollback image tags and draft PR #15; physical iOS Safari swipe still needs device confirmation.
+
 ## 2026-10-13 — mobile Home vinyl crate
 
 - Replaced *only mobile Home* stacked track tables with a short, artwork-first `MobileHome.tsx`: 18-cover tactile record crate with rAF-driven sleeve lift/tilt and a native side-scroll, plus a one-row `Fresh tracks` horizontal shelf of 14 recent songs.
