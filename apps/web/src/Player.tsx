@@ -67,6 +67,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [playlistQuery, setPlaylistQuery] = useState("");
   const playlistMenuRef = useRef<HTMLElement | null>(null);
   const playlistButtonRef = useRef<HTMLButtonElement | null>(null);
+  const playlistRequestRef = useRef(0);
   const [playerStarred, setPlayerStarred] = useState(false);
   const [playerActionBusy, setPlayerActionBusy] = useState(false);
   const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
@@ -76,6 +77,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const currentPreview = mode === "preview" && previewIndex >= 0 ? previewQueue[previewIndex] ?? null : null;
   useEffect(() => {
     setPlayerStarred(Boolean(currentSong?.starred));
+    playlistRequestRef.current += 1;
     setPlaylistPickerOpen(false);
     setPlaylistQuery("");
     setPlayerActionMessage(null);
@@ -498,17 +500,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
 
   async function openPlayerPlaylists() {
-    if (!currentSong || playerActionBusy) return;
-    if (playlistPickerOpen) { setPlaylistPickerOpen(false); return; }
+    if (!currentSong) return;
+    if (playlistPickerOpen) {
+      playlistRequestRef.current += 1;
+      setPlaylistPickerOpen(false);
+      return;
+    }
+    const requestId = ++playlistRequestRef.current;
+    setPlaylistQuery("");
+    setPlaylistPickerOpen(true); // Never wait for the network to open the menu.
+    setPlayerActionMessage(null);
     setPlayerActionBusy(true);
     try {
       const response = await api.playlists();
-      setPlayerPlaylists(response.items);
-      setPlaylistQuery("");
-      setPlaylistPickerOpen(true);
-      setPlayerActionMessage(null);
+      if (playlistRequestRef.current === requestId) {
+        setPlayerPlaylists(response.items);
+      }
     } catch (error) {
-      setPlayerActionMessage(error instanceof Error ? error.message : "Could not load playlists");
+      if (playlistRequestRef.current === requestId) {
+        setPlaylistPickerOpen(false);
+        setPlayerActionMessage(error instanceof Error ? error.message : "Could not load playlists");
+      }
     } finally {
       setPlayerActionBusy(false);
     }
@@ -519,10 +531,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const closeOutside = (event: PointerEvent) => {
       const node = event.target as Node;
       if (playlistMenuRef.current?.contains(node) || playlistButtonRef.current?.contains(node)) return;
+      playlistRequestRef.current += 1;
       setPlaylistPickerOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
+      playlistRequestRef.current += 1;
       setPlaylistPickerOpen(false);
       playlistButtonRef.current?.focus();
     };
@@ -697,7 +711,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                     onClick={() => void addCurrentToPlaylist(playlist)}>{playlist.name}</button>
                 ))}
               </div>
-              {playerPlaylists.length === 0 && <span className="player-action-tip">No playlists yet. Create one from the Playlists tab.</span>}
+              {playerActionBusy && playerPlaylists.length === 0 && <span className="player-action-tip">Loading playlists…</span>}
+              {!playerActionBusy && playerPlaylists.length === 0 && <span className="player-action-tip">No playlists yet. Create one from the Playlists tab.</span>}
               {playerPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistQuery.toLowerCase())).length > 12
                 && <small>Refine your search to see more playlists.</small>}
             </aside>
