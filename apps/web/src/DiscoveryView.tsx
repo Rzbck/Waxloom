@@ -270,10 +270,6 @@ function DiscoveryShelf({
           ))}
         </VinylRack>
       </div>
-      <div className="discovery-cover-grid discovery-cover-grid-desktop" role="region"
-        aria-label="All available tracks, organized as a responsive album grid" tabIndex={0}>
-        {items.map(renderTrack)}
-      </div>
     </section>
   );
 }

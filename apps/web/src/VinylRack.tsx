@@ -17,7 +17,7 @@ export function VinylRack({
   children: ReactNode;
   count: number;
   label: string;
-  variant?: "album" | "discovery";
+  variant?: "album" | "discovery" | "track" | "artist" | "playlist";
   contentKey?: string;
   records?: { title: string; artist?: string }[];
 }) {
@@ -29,6 +29,7 @@ export function VinylRack({
     width: number;
   } | null>(null);
   const selectedIndexRef = useRef(0);
+  const previousContentKeyRef = useRef(contentKey);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const id = useId();
 
@@ -37,7 +38,8 @@ export function VinylRack({
     const geometry = geometryRef.current;
     if (!rack || !geometry?.centers.length) return;
 
-    const viewportCenter = rack.scrollLeft + geometry.width / 2;
+    const desktop = window.matchMedia("(min-width: 821px)").matches;
+    const viewportCenter = rack.scrollLeft + (desktop ? 92 : geometry.width / 2);
     let nearest = 0;
     let closestDistance = Number.POSITIVE_INFINITY;
     for (let index = 0; index < geometry.centers.length; index += 1) {
@@ -76,9 +78,14 @@ export function VinylRack({
   useEffect(() => {
     const rack = rackRef.current;
     if (!rack) return;
-    rack.scrollLeft = 0;
-    selectedIndexRef.current = 0;
-    setSelectedIndex(0);
+    // When "Show next tracks" extends a rack, keep the user's scroll
+    // position. Reset only when a genuinely different collection appears.
+    if (previousContentKeyRef.current !== contentKey) {
+      rack.scrollLeft = 0;
+      selectedIndexRef.current = 0;
+      setSelectedIndex(0);
+    }
+    previousContentKeyRef.current = contentKey;
 
     const measure = () => {
       const sleeves = Array.from(rack.querySelectorAll<HTMLElement>(".waxloom-vinyl-sleeve"));
@@ -138,8 +145,8 @@ export function VinylRack({
           </div>
         ) : <span className="waxloom-vinyl-drag-hint">Swipe through the records</span>}
         <div className="waxloom-vinyl-arrows">
-          <button type="button" onClick={() => shift(-1)} aria-label="Previous record">←</button>
-          <button type="button" onClick={() => shift(1)} aria-label="Next record">→</button>
+          <button type="button" onClick={() => shift(-1)} aria-label="Previous record">&larr;</button>
+          <button type="button" onClick={() => shift(1)} aria-label="Next record">&rarr;</button>
         </div>
       </div>
     </div>

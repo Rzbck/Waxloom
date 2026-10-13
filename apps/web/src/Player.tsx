@@ -22,7 +22,7 @@ type PlayerContextValue = {
   currentPreview: PreviewTrack | null;
   currentIndex: number;
   playing: boolean;
-  playSongs: (songs: Song[], startIndex?: number) => void;
+  playSongs: (songs: Song[], startIndex?: number, options?: { ordered?: boolean }) => void;
   playNow: (song: Song) => void;
   addToQueue: (song: Song) => void;
   playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number) => void;
@@ -46,6 +46,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrobbledRef = useRef<string | null>(null);
   const localSongIdRef = useRef<string | null>(null);
+  const explicitQueueRef = useRef(false);
   const previewStartAtZeroRef = useRef(false);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
@@ -125,6 +126,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     void api
       .playQueue()
       .then((saved) => {
+        // An explicit selection beats a slow saved-queue response on first load.
+        if (explicitQueueRef.current) return;
         const entries = saved.entry ?? [];
         if (entries.length === 0) return;
         setQueue(entries);
@@ -269,17 +272,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id);
   }, [queue, currentSong?.id, mode]);
 
-  const playSongs = useCallback((songs: Song[], startIndex = 0) => {
+  const playSongs = useCallback((songs: Song[], startIndex = 0, options?: { ordered?: boolean }) => {
     if (songs.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, songs.length - 1));
     const song = songs[safeIndex];
     if (!song) return;
 
-    startLocalPlayback(song);
+    // Home's chronological New tracks list needs a deterministic Next,
+    // even after the user previously enabled Shuffle or Repeat one.
+    if (options?.ordered) {
+      setShuffle(false);
+      setRepeat("off");
+    }
+    explicitQueueRef.current = true;
     setMode("navidrome");
-    setQueue(songs);
+    setQueue([...songs]);
     setCurrentIndex(safeIndex);
+    setCurrentTime(0);
     setPreviewError(null);
+    startLocalPlayback(song);
   }, [startLocalPlayback]);
 
   const playPreviewTracks = useCallback((tracks: PreviewTrack[], startIndex = 0) => {
@@ -339,6 +350,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playNow = useCallback((song: Song) => playSongs([song], 0), [playSongs]);
 
   const addToQueue = useCallback((song: Song) => {
+    explicitQueueRef.current = true;
     setQueue((current) => {
       if (current.length === 0) {
         setCurrentIndex(0);

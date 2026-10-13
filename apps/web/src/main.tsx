@@ -28,6 +28,7 @@ import "./discovery-fit.css";
 import "./mobile-shell.css";
 import "./mobile-home.css";
 import "./mobile-vinyl-system.css";
+import "./vinyl-unified.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

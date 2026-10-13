@@ -98,7 +98,11 @@ const metrics = `(() => {
     vinylGroups:document.querySelectorAll('.waxloom-album-vinyl .waxloom-vinyl-group').length,
     selectedLabel:select('.waxloom-album-vinyl .waxloom-vinyl-selected strong')?.textContent,
     homeBottom:rect('.waxloom-home-explore')?.bottom,
-    lastRow:([...document.querySelectorAll('.track-list .track-row:not(.track-row-header)')].at(-1)?.getBoundingClientRect().bottom),
+    lastRow:(()=>{
+      const collection=[...document.querySelectorAll('.waxloom-song-vinyl')].filter((el)=>el.getClientRects().length>0).at(-1);
+      const last=collection?.querySelector('.waxloom-vinyl-load-more') || collection?.querySelector('.waxloom-vinyl-controls');
+      return last?.getBoundingClientRect().bottom;
+    })(),
     discoveryActions:rect('.waxloom-discovery-vinyl .discovery-cover-actions'),
     counterHeight:rect('.waxloom-discovery-vinyl .waxloom-vinyl-count')?.height,
     downloadTapAvailable:(()=>{
@@ -189,10 +193,13 @@ try {
       rack.dispatchEvent(new Event('scroll',{bubbles:true}));
       await new Promise((resolve)=>setTimeout(resolve,35));
       const bounds=image?.getBoundingClientRect();
+      const record=getComputedStyle(first,'::before');
       points.push({
         scroll:rack.scrollLeft,
         x:bounds?.left,
         width:bounds?.width,
+        recordTransform:record.transform,
+        recordAnimation:record.animationName,
       });
     }
     await new Promise((resolve)=>setTimeout(resolve,240));
@@ -206,6 +213,9 @@ try {
       touchAction:getComputedStyle(rack).touchAction,
       bannerCount:document.querySelectorAll('.waxloom-vinyl-crate-front').length,
       maxShift, widths:points.map((point)=>point.width),
+      viewTimelineSupported:CSS.supports('animation-timeline: view(inline)'),
+      discAnimation:points[0].recordAnimation,
+      discFrames:points.map((point)=>point.recordTransform),
       playTappable,
       playPosition:playRect.left-coverRect.left,
       before,
@@ -216,6 +226,10 @@ try {
   assert(smoothness.transformCount === 0,
     `No scrolling sleeve can be transformed (${smoothness.transformCount}/${smoothness.total} still moving)`);
   assert(smoothness.snap === 'none', 'Scroll snapping must not fight Safari momentum');
+  assert(!smoothness.viewTimelineSupported || (
+    smoothness.discAnimation==='waxloom-disc-emerge' &&
+    new Set(smoothness.discFrames.slice(0,7)).size>1
+  ), 'The vinyl record itself should rise and sink as sleeves cross the native scroll viewport');
   assert(smoothness.maxShift < 0.7,
     `Album image judders ${smoothness.maxShift}px instead of moving only with scroll`);
   assert(smoothness.widths.every((width)=>Math.abs(width-158)<0.8),
@@ -256,7 +270,7 @@ try {
   const search = await evaluate(metrics);
   assert(search.currentTitle?.startsWith("Search"), "Search should navigate to results");
   assert(search.vinylAlbums && !search.gridAlbums, "Search album results must use vinyl crate");
-  const artistOpened = await evaluate("(()=>{const a=[...document.querySelectorAll('.artist-grid .artist-card')].find(x=>x.textContent?.includes('Kid Francescoli'));a?.click();return !!a})()");
+  const artistOpened = await evaluate("(()=>{const a=[...document.querySelectorAll('.waxloom-vinyl-display--artist .waxloom-entity-face')].find(x=>x.getAttribute('aria-label')?.includes('Kid Francescoli'));a?.click();return !!a})()");
   assert(artistOpened, "Search should show an artist that can be opened");
   await sleep(1100);
   const artist = await evaluate(metrics);
@@ -297,7 +311,7 @@ try {
   await rpc("Emulation.setDeviceMetricsOverride", { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await sleep(360);
   const desktop = await evaluate(metrics);
-  assert(!desktop.vinylAlbums && desktop.gridAlbums, "PC must keep the usual album grid");
+  assert(desktop.vinylAlbums && !desktop.gridAlbums, "PC should use the same vinyl rack as iPhone");
   assert(!desktop.overflow, "Desktop has global horizontal overflow");
   await saveScreenshot("desktop");
 

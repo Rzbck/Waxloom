@@ -1,5 +1,14 @@
 # Waxloom AI handoff
 
+## 2026-10-13 — Vinyl parity / Next regression audit (continuation)
+
+- Audit after production `cba23e4` requested by owner: no more static cover slider, true vinyl-bin visual without jitter, **Next must follow newly added songs**, consistent PC/iPhone behavior, no remaining ugly artist/playlist/song list cards.
+- Root fixes in `Player.tsx` and `App.tsx`: chronological Fresh tracks use ordered queue, reset old Shuffle/Repeat One and protect explicit playback from late initial saved-queue response. Measured in browser: Alter Ego → Hometown, Opal → Alter Ego after Repeat One + Shuffle toggles, PC and phone.
+- Unified `VinylRack` on PC/phone via `VinylSongs.tsx`, `VinylEntities.tsx`, and `vinyl-unified.css`: albums, artists, playlists, album details, playlist songs, favorites, search, discovery. Artwork never receives per-scroll JS transforms. Edge slots and independently composited record behind sleeves restore physical vinyl motion, with CSS scroll timeline progressive enhancement and reduced-motion fallback. Removed duplicate hidden album and Discovery React trees.
+- QA scripts updated `qa:home`, `qa:mobile`, `qa:vinyl` to new shared DOM; new comprehensive `qa:parity` with 320/375/390/430/768/812 landscape/1440 viewports and non-mutating playlist actions, saved-queue race + modes. Chrome headless is not real Safari hardware QA.
+- **Read complete audit and validation steps:** `docs/WAXLOOM_VINYL_PARITY_AUDIT_20261013.md`.
+- Keep branch and draft PR #15; do not merge to main or modify existing tracks. Save old Docker tags and Compose for rollback.
+
 ## 2026-10-13 — Remove obstructing vinyl bar and eliminate fast-swipe vibration
 
 - User observed the `WAXLOOM / RECORDS` strip hiding actual album sleeves, hard iOS Safari vibration when swiping several covers quickly, and misaligned album artwork. The reproducible geometry probe `apps/web/scripts/vinyl-motion-probe.mjs` measured **25.37px extra screen movement** for the same album image during normal scroll in the previous image. The cause was a rotating/vertically translating `waxloom-vinyl-sleeve` **inside** a native horizontal scroll-snap container; nested artwork repainted at changing angles during momentum. Optimizing/restricting that animation did not fix it.

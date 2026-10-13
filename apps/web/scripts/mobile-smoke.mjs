@@ -111,8 +111,10 @@ const geometry = `(() => {
     lastRow:(()=>{
       const mobileHomeEnd = document.querySelector(".waxloom-home-explore");
       if (mobileHomeEnd?.getClientRects().length) return mobileHomeEnd.getBoundingClientRect().bottom;
-      const row = [...document.querySelectorAll('.track-list .track-row:not(.track-row-header)')].at(-1);
-      return row?.getBoundingClientRect().bottom;
+      const rows=[...document.querySelectorAll('.waxloom-song-vinyl')].filter((item)=>item.getClientRects().length>0);
+      const shelf=rows.at(-1);
+      const end=shelf?.querySelector('.waxloom-vinyl-load-more') || shelf?.querySelector('.waxloom-vinyl-controls');
+      return end?.getBoundingClientRect().bottom;
     })(),
   };
 })()`;

@@ -95,7 +95,7 @@ const measures = `(() => {
     tracksWidth:songs?.clientWidth,tracksScrollWidth:songs?.scrollWidth,
     activeRecord:query(".waxloom-vinyl-count")?.textContent?.trim(),
     focusedCover:query('.waxloom-vinyl-sleeve[data-centered="true"] .waxloom-vinyl-face')?.getBoundingClientRect().left,
-    oldHomeTracks:shown(".waxloom-home-desktop .track-list"),
+    oldHomeTracks:shown(".waxloom-home-desktop .waxloom-vinyl-display--track"),
     miniHeight:query(".player-dock")?.getBoundingClientRect().height,
     miniTop:query(".player-dock")?.getBoundingClientRect().top,
     endCardBottom:query(".waxloom-home-explore")?.getBoundingClientRect().bottom,
@@ -201,7 +201,7 @@ try {
   await wait(300);
   const desktop = await evalJs(measures);
   assert(!desktop.home && desktop.desktopHome, "Desktop original Home must remain visible");
-  assert(desktop.oldHomeTracks, "Desktop original song list is missing");
+  assert(desktop.oldHomeTracks, "Desktop shared vinyl song collection is missing");
   assert(desktop.pageWidth <= 1440, "Desktop page horizontal overflow");
   const { data:desktopShot } = await rpc("Page.captureScreenshot", { format: "jpeg", quality: 65, captureBeyondViewport: false });
   const { writeFileSync } = await import("node:fs");

@@ -6,6 +6,8 @@ import { ImportsView } from "./ImportsView";
 import { MobileNavigation } from "./MobileNavigation";
 import { MobileHome } from "./MobileHome";
 import { VinylAlbums } from "./VinylRack";
+import { VinylSongs } from "./VinylSongs";
+import { VinylArtists, VinylPlaylists } from "./VinylEntities";
 import { DownloadTray } from "./downloadQueue";
 import { usePlayer } from "./Player";
 import type {
@@ -52,97 +54,14 @@ type SongTableProps = {
   onToggleStar: (song: Song) => void;
   onAddPlaylist: (song: Song) => void;
   onRemove?: (index: number) => void;
+  ordered?: boolean;
 };
 
-function SongTable({ songs, starOverrides, onToggleStar, onAddPlaylist, onRemove }: SongTableProps) {
-  const player = usePlayer();
-
-  return (
-    <div className="track-list" role="table" aria-label="Songs">
-      <div className="track-row track-row-header" role="row">
-        <span>#</span>
-        <span>Title</span>
-        <span>Artist</span>
-        <span>Album</span>
-        <span>Time</span>
-        <span>Actions</span>
-      </div>
-      {songs.map((song, index) => {
-        const starred = starOverrides[song.id] ?? Boolean(song.starred);
-        return (
-          <div className="track-row" role="row" key={`${song.id}-${index}`}>
-            <button
-              className="track-play"
-              type="button"
-              onClick={() => player.playSongs(songs, index)}
-              aria-label={`Play ${song.title ?? "song"}`}
-            >
-              ▶
-            </button>
-            <button className="track-title-button" type="button" title={song.title ?? "Unknown title"} onClick={() => player.playSongs(songs, index)}>
-              {song.title ?? "Unknown title"}
-            </button>
-            <span title={song.artist ?? "Unknown artist"}>{song.artist ?? "Unknown artist"}</span>
-            <span title={song.album ?? "Unknown album"}>{song.album ?? "Unknown album"}</span>
-            <span>{formatDuration(song.duration)}</span>
-            <div className="row-actions">
-              <button
-                className={starred ? "mini-action mini-action-active" : "mini-action"}
-                type="button"
-                onClick={() => onToggleStar(song)}
-                title={starred ? "Remove favorite" : "Favorite"}
-              >
-                ★
-              </button>
-              <button className="mini-action" type="button" onClick={() => player.addToQueue(song)} title="Add to queue">
-                +Q
-              </button>
-              <button className="mini-action" type="button" onClick={() => onAddPlaylist(song)} title="Add to playlist">
-                +P
-              </button>
-              {onRemove && (
-                <button className="mini-action mini-action-danger" type="button" onClick={() => onRemove(index)} title="Remove from playlist">
-                  ×
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })}
-      {songs.length === 0 && <div className="empty-state">No songs.</div>}
-    </div>
-  );
+/* One artwork-led track presentation on phone and desktop; no legacy tables. */
+function SongTable(props: SongTableProps) {
+  return <VinylSongs {...props} />;
 }
 
-function AlbumCard({ album, onOpen, onPlay }: { album: Album; onOpen: () => void; onPlay: () => void }) {
-  return (
-    <article className="media-card">
-      <button className="media-cover-button" type="button" onClick={onOpen}>
-        <div className="media-cover">
-          {album.coverArt ? <img src={api.coverUrl(album.coverArt, 360)} alt="" loading="lazy" /> : <span>◫</span>}
-          <span className="cover-play" onClick={(event) => { event.stopPropagation(); onPlay(); }}>▶</span>
-        </div>
-      </button>
-      <button className="media-copy" type="button" onClick={onOpen}>
-        <strong>{itemName(album)}</strong>
-        <span>{album.artist ?? "Unknown artist"}</span>
-        <small>{[album.year, album.genre].filter(Boolean).join(" · ") || `${album.songCount ?? 0} tracks`}</small>
-      </button>
-    </article>
-  );
-}
-
-function ArtistCard({ artist, onOpen }: { artist: Artist; onOpen: () => void }) {
-  return (
-    <button className="artist-card" type="button" onClick={onOpen}>
-      <div className="artist-avatar">
-        {artist.coverArt ? <img src={api.coverUrl(artist.coverArt, 260)} alt="" loading="lazy" /> : <span>{artist.name.slice(0, 1).toUpperCase()}</span>}
-      </div>
-      <strong>{artist.name}</strong>
-      <span>{artist.albumCount ?? 0} albums</span>
-    </button>
-  );
-}
 
 export default function App() {
   const player = usePlayer();
@@ -415,21 +334,15 @@ export default function App() {
   }, [view, searchQuery]);
 
   function renderAlbumGrid(items: Album[]) {
+    if (!items.length) return <p className="muted">No albums in this collection.</p>;
     return (
-      <>
-        {items.length > 0 && <div className="waxloom-album-vinyl">
-          <VinylAlbums albums={items} batchSize={40}
-            label="Album covers. Swipe through the record bin."
-            onOpenAlbum={(album) => void openAlbum(album)}
-            onPlayAlbum={(album) => void playAlbum(album)}
-          />
-        </div>}
-        <div className="media-grid waxloom-album-grid-desktop">
-          {items.map((album) => (
-            <AlbumCard key={album.id} album={album} onOpen={() => void openAlbum(album)} onPlay={() => void playAlbum(album)} />
-          ))}
-        </div>
-      </>
+      <div className="waxloom-album-vinyl">
+        <VinylAlbums albums={items} batchSize={40}
+          label="Album covers. Swipe through the record bin."
+          onOpenAlbum={(album) => void openAlbum(album)}
+          onPlayAlbum={(album) => void playAlbum(album)}
+        />
+      </div>
     );
   }
 
@@ -534,7 +447,7 @@ export default function App() {
             <MobileHome albums={homeAlbums} recent={recentSongs}
               onOpenAlbum={(album) => void openAlbum(album)}
               onPlayAlbum={(album) => void playAlbum(album)}
-              onPlayRecent={(index) => player.playSongs(recentSongs, index)}
+              onPlayRecent={(index) => player.playSongs(recentSongs, index, { ordered: true })}
               onBrowseAlbums={() => navigate("albums")}
               onRefreshRecent={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}
             />
@@ -542,7 +455,7 @@ export default function App() {
             <section>
               <div className="section-toolbar"><div><p className="eyebrow">Recently imported tracks</p><h2>New songs in your library</h2></div><button className="secondary-action" type="button" onClick={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}>Refresh</button></div>
               {recentSongs.length > 0 ? (
-                <SongTable songs={recentSongs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
+                <SongTable songs={recentSongs} ordered starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
               ) : <p className="muted">New tracks are indexed by Navidrome; new albums appear below.</p>}
             </section>
             <section>
@@ -600,7 +513,7 @@ export default function App() {
                 {renderAlbumGrid(selectedArtist.album ?? [])}
               </>
             ) : (
-              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome library</p><h2>Artists</h2><p className="muted">{artists.length} artists</p></div><button className="secondary-action" type="button" onClick={() => void loadArtists()}>Refresh</button></div><div className="artist-grid">{artists.map((artist) => <ArtistCard key={artist.id} artist={artist} onOpen={() => void openArtist(artist)} />)}</div></>
+              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome library</p><h2>Artists</h2><p className="muted">{artists.length} artists</p></div><button className="secondary-action" type="button" onClick={() => void loadArtists()}>Refresh</button></div><VinylArtists artists={artists} onOpen={(artist) => void openArtist(artist)} /></>
             )}
           </div>
         )}
@@ -614,7 +527,7 @@ export default function App() {
                 <SongTable songs={selectedPlaylist.entry ?? []} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} onRemove={(index) => void removePlaylistSong(index)} />
               </>
             ) : (
-              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome</p><h2>Your playlists</h2><p className="muted">{playlists.length} playlists</p></div><div className="button-row"><button className="secondary-action" type="button" onClick={() => void loadPlaylists()}>Refresh</button><button className="primary-action" type="button" onClick={() => void createPlaylist()}>+ New playlist</button></div></div><div className="playlist-grid">{playlists.map((playlist) => <button className="playlist-card" type="button" key={playlist.id} onClick={() => void openPlaylist(playlist)}><div className="playlist-card-art">{playlist.name.slice(0, 1).toUpperCase()}</div><div className="playlist-card-copy"><strong>{playlist.name}</strong><span>{playlist.songCount ?? 0} tracks · {formatDuration(playlist.duration)}</span></div><span>→</span></button>)}</div></>
+              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome</p><h2>Your playlists</h2><p className="muted">{playlists.length} playlists</p></div><div className="button-row"><button className="secondary-action" type="button" onClick={() => void loadPlaylists()}>Refresh</button><button className="primary-action" type="button" onClick={() => void createPlaylist()}>+ New playlist</button></div></div><VinylPlaylists playlists={playlists} onOpen={(playlist) => void openPlaylist(playlist)} /></>
             )}
           </div>
         )}
@@ -622,14 +535,14 @@ export default function App() {
         {view === "favorites" && (
           <div className="workspace-stack">
             <div className="section-toolbar"><div><p className="eyebrow">Navidrome starred</p><h2>Favorites</h2></div><button className="secondary-action" type="button" onClick={() => void loadFavorites()}>Refresh</button></div>
-            {favorites && <><section><h3>Artists</h3><div className="artist-grid compact-grid">{favorites.artists.map((artist) => <ArtistCard key={artist.id} artist={artist} onOpen={() => void openArtist(artist)} />)}</div></section><section><h3>Albums</h3>{renderAlbumGrid(favorites.albums)}</section><section><div className="section-toolbar"><h3>Tracks</h3><button className="secondary-action" type="button" onClick={() => player.playSongs(favorites.songs, 0)} disabled={favorites.songs.length === 0}>▶ Play favorites</button></div><SongTable songs={favorites.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
+            {favorites && <><section><h3>Artists</h3><VinylArtists artists={favorites.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums</h3>{renderAlbumGrid(favorites.albums)}</section><section><div className="section-toolbar"><h3>Tracks</h3><button className="secondary-action" type="button" onClick={() => player.playSongs(favorites.songs, 0)} disabled={favorites.songs.length === 0}>▶ Play favorites</button></div><SongTable songs={favorites.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
           </div>
         )}
 
         {view === "search" && (
           <div className="workspace-stack">
             {!searchResults && <div className="state-card">Use the search box above to search your whole Navidrome library.</div>}
-            {searchResults && <><section><h3>Artists <span className="muted-count">{searchResults.artists.length}</span></h3><div className="artist-grid compact-grid">{searchResults.artists.map((artist) => <ArtistCard key={artist.id} artist={artist} onOpen={() => void openArtist(artist)} />)}</div></section><section><h3>Albums <span className="muted-count">{searchResults.albums.length}</span></h3>{renderAlbumGrid(searchResults.albums)}</section><section><div className="section-toolbar"><h3>Tracks <span className="muted-count">{searchResults.songs.length}</span></h3><button className="secondary-action" type="button" onClick={() => player.playSongs(searchResults.songs, 0)} disabled={searchResults.songs.length === 0}>▶ Play results</button></div><SongTable songs={searchResults.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
+            {searchResults && <><section><h3>Artists <span className="muted-count">{searchResults.artists.length}</span></h3><VinylArtists artists={searchResults.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums <span className="muted-count">{searchResults.albums.length}</span></h3>{renderAlbumGrid(searchResults.albums)}</section><section><div className="section-toolbar"><h3>Tracks <span className="muted-count">{searchResults.songs.length}</span></h3><button className="secondary-action" type="button" onClick={() => player.playSongs(searchResults.songs, 0)} disabled={searchResults.songs.length === 0}>▶ Play results</button></div><SongTable songs={searchResults.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
           </div>
         )}
 

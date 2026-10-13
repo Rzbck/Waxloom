@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "qa:mobile": "node scripts/mobile-smoke.mjs",
     "qa:home": "node scripts/home-smoke.mjs",
-    "qa:vinyl": "node scripts/vinyl-everywhere-smoke.mjs"
+    "qa:vinyl": "node scripts/vinyl-everywhere-smoke.mjs",
+    "qa:parity": "node scripts/parity-qa.mjs"
   },
   "dependencies": {
     "react": "19.3.0",
