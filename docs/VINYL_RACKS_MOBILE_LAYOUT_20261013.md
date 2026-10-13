@@ -16,3 +16,7 @@
 - `npm run qa:vinyl`: isolated browser test (localhost 8094, DevTools 9243) covering **Home, Albums, selected album detail, Favorites, Search, artist album detail, Discovery and desktop**, at 320/390/1440 widths. Validates menu clearance with and without synthetic player, all vinyl sections, no page horizontal overflow, title visibility and 40-album batches. Backend writes are intercepted and mocked; synthetic queue, no music files or real playlists altered.
 - Source index HTML is `no-store` so iOS PWA Safari can fetch the updated version on returning to the foreground; actual iOS touch behavior still requires owner validation.
 - Keep old Docker image tags and Compose snapshot for rollback; do not merge PR #15 to main without user request.
+
+## Follow-up — motion smoothness (13 October 2026)
+
+After shared racks were deployed, iPhone reported jitter. The per-frame style update had been applied to all 40 records, the lift range was increased 29 to 54px, and the CSS compositor hint was removed. The controller now caches geometry, updates only a handful of near-viewport sleeves (6 of 40 in QA), restores the 29px rise/sink, debounces React index/label updates, and keeps compositor hints for only the nearby sleeves. The scroller again allows both pan-x and pan-y. The `qa:vinyl` test asserts all these motion limits and mobile behavior; genuine iPhone momentum still needs user confirmation.

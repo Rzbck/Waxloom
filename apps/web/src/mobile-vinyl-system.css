@@ -46,10 +46,15 @@
       linear-gradient(180deg, #2a2032 0%, #15101c 60%, #241a2c 100%);
   }
   .waxloom-vinyl-sleeve {
-    will-change: auto !important; /* 120 covers must not each consume a GPU layer */
+    /* Large record libraries must not promote every sleeve to a GPU layer. */
+    will-change: auto !important;
     transition-duration: 90ms;
   }
-  .waxloom-vinyl-sleeve[data-centered="true"] { will-change: transform; }
+  /* Promote just the sleeves entering the viewport, ahead of their arrival.
+     Safari's compositor can then keep them smooth during native momentum. */
+  .waxloom-vinyl-sleeve[data-nearby="true"] {
+    will-change: transform !important;
+  }
   .waxloom-vinyl-crate-front {
     height: 33px;
     bottom: 80px;
@@ -218,7 +223,8 @@
   }
   .waxloom-album-vinyl .waxloom-vinyl-rack,
   .waxloom-discovery-vinyl .waxloom-vinyl-rack {
-    touch-action: pan-x;
+    /* Keep native horizontal inertia AND allow vertical page gestures. */
+    touch-action: pan-x pan-y;
   }
   .waxloom-album-vinyl .waxloom-vinyl-controls,
   .waxloom-discovery-vinyl .waxloom-vinyl-controls { padding-bottom: 1px; }

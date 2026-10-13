@@ -23,42 +23,89 @@ export function VinylRack({
 }) {
   const rackRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);
+  const idleLabelRef = useRef<number | null>(null);
+  const selectedIndexRef = useRef(0);
+  const geometryRef = useRef<{
+    sleeves: HTMLElement[];
+    centers: number[];
+    width: number;
+  } | null>(null);
+  const nearbyRef = useRef<Set<number>>(new Set());
   const [selectedIndex, setSelectedIndex] = useState(0);
   const id = useId();
 
   const updateSleeves = useCallback(() => {
     const rack = rackRef.current;
-    if (!rack) return;
-    const center = rack.scrollLeft + rack.clientWidth / 2;
-    const sleeves = rack.querySelectorAll<HTMLElement>(".waxloom-vinyl-sleeve");
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let closest = 0;
-    let closestDistance = Number.POSITIVE_INFINITY;
+    const geometry = geometryRef.current;
+    if (!rack || !geometry?.sleeves.length) return;
 
-    // Batch layout reads before transform writes to avoid per-sleeve reflows.
-    const sleeveCenters = Array.from(sleeves, (sleeve) => sleeve.offsetLeft + sleeve.offsetWidth / 2);
-    sleeves.forEach((sleeve, index) => {
-      const sleeveCenter = sleeveCenters[index];
-      const signedDistance = sleeveCenter - center;
-      const absDistance = Math.abs(signedDistance);
-      if (absDistance < closestDistance) {
-        closest = index;
-        closestDistance = absDistance;
+    // Crucially, reading the scroll offset does not measure 40-120 cards.
+    // Offset positions and rack width are cached until the actual layout resizes.
+    const visibleCenter = rack.scrollLeft + geometry.width / 2;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const motionRange = Math.max(geometry.width * .75, 155);
+    // Promote sleeves well *before* they enter the viewport; only a handful
+    // receive compositor layers, never every record in a 40-album batch.
+    const nearbyRange = geometry.width / 2 + 340;
+    let nearest = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    const nearby = new Set<number>();
+
+    for (let index = 0; index < geometry.centers.length; index += 1) {
+      const delta = geometry.centers[index] - visibleCenter;
+      const distance = Math.abs(delta);
+      if (distance < nearestDistance) {
+        nearest = index;
+        nearestDistance = distance;
       }
+      if (distance <= nearbyRange) nearby.add(index);
+    }
+
+    for (const previous of nearbyRef.current) {
+      if (nearby.has(previous)) continue;
+      const sleeve = geometry.sleeves[previous];
+      if (!sleeve) continue;
+      sleeve.style.removeProperty("--waxloom-vinyl-lift");
+      sleeve.style.removeProperty("--waxloom-vinyl-tilt");
+      sleeve.style.removeProperty("z-index");
+      delete sleeve.dataset.nearby;
+      delete sleeve.dataset.centered;
+    }
+
+    for (const index of nearby) {
+      const sleeve = geometry.sleeves[index];
+      if (!sleeve) continue;
+      sleeve.dataset.nearby = "true";
       if (reducedMotion) {
         sleeve.style.removeProperty("--waxloom-vinyl-lift");
         sleeve.style.removeProperty("--waxloom-vinyl-tilt");
         sleeve.style.removeProperty("z-index");
-        return;
+        delete sleeve.dataset.centered;
+        continue;
       }
-      const normalized = Math.min(1, absDistance / Math.max(rack.clientWidth * 0.75, 155));
-      const tilt = Math.max(-7, Math.min(7, signedDistance / 36));
-      sleeve.style.setProperty("--waxloom-vinyl-lift", `${Math.round(-26 + normalized * 54)}px`);
+      const delta = geometry.centers[index] - visibleCenter;
+      const normalized = Math.min(1, Math.abs(delta) / motionRange);
+      const tilt = Math.max(-7, Math.min(7, delta / 36));
+      // Restored to the original subtle 29px travel (not the new 54px bounce).
+      sleeve.style.setProperty("--waxloom-vinyl-lift", `${(-18 + normalized * 29).toFixed(1)}px`);
       sleeve.style.setProperty("--waxloom-vinyl-tilt", `${tilt.toFixed(2)}deg`);
       sleeve.style.zIndex = String(20 - Math.round(normalized * 12));
-      sleeve.dataset.centered = normalized < 0.35 ? "true" : "false";
-    });
-    setSelectedIndex((previous) => previous === closest ? previous : closest);
+      if (index === nearest) sleeve.dataset.centered = "true";
+      else delete sleeve.dataset.centered;
+    }
+
+    nearbyRef.current = nearby;
+
+    if (selectedIndexRef.current !== nearest) {
+      selectedIndexRef.current = nearest;
+      // Updating React on every scroll frame was needlessly redrawing the
+      // selected title and counter while Safari is scrolling the artwork.
+      if (idleLabelRef.current !== null) window.clearTimeout(idleLabelRef.current);
+      idleLabelRef.current = window.setTimeout(() => {
+        idleLabelRef.current = null;
+        setSelectedIndex(selectedIndexRef.current);
+      }, 110);
+    }
   }, []);
 
   const onScroll = useCallback((_event: UIEvent<HTMLDivElement>) => {
@@ -72,16 +119,40 @@ export function VinylRack({
   useEffect(() => {
     const rack = rackRef.current;
     if (!rack) return;
+
     rack.scrollLeft = 0;
+    selectedIndexRef.current = 0;
     setSelectedIndex(0);
-    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateSleeves) : null;
+    // Measuring once per layout change is much cheaper than measuring every
+    // sleeve in every scroll callback, especially in Mobile Safari.
+    const measure = () => {
+      const sleeves = Array.from(rack.querySelectorAll<HTMLElement>(".waxloom-vinyl-sleeve"));
+      geometryRef.current = {
+        sleeves,
+        centers: sleeves.map((sleeve) => sleeve.offsetLeft + sleeve.offsetWidth / 2),
+        width: rack.clientWidth,
+      };
+      nearbyRef.current = new Set();
+      updateSleeves();
+    };
+    const firstFrame = requestAnimationFrame(measure);
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null;
+        measure();
+      });
+    }) : null;
     observer?.observe(rack);
-    const first = requestAnimationFrame(updateSleeves);
     return () => {
       observer?.disconnect();
-      cancelAnimationFrame(first);
+      cancelAnimationFrame(firstFrame);
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      if (idleLabelRef.current !== null) window.clearTimeout(idleLabelRef.current);
       frameRef.current = null;
+      idleLabelRef.current = null;
+      geometryRef.current = null;
+      nearbyRef.current.clear();
     };
   }, [count, contentKey, updateSleeves]);
 

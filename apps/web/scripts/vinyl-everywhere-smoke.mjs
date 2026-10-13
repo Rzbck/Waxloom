@@ -168,6 +168,39 @@ try {
   assert(albums.vinylGroups === 3, "120 Albums should be split into three manageable record bins");
   assert(Boolean(albums.selectedLabel), "Selected album title must be readable under the bin");
   assert(albums.albumRackScroll > albums.albumRackWidth + 90, "Albums should be horizontally swipeable");
+  // Regression test for the reported iPhone jitter: only sleeves close to
+  // the visible viewport may be animated; old gentle movement is <=29px.
+  const smoothness = await evaluate(`(async () => {
+    const rack=document.querySelector('.waxloom-album-vinyl .waxloom-vinyl-rack');
+    const counter=document.querySelector('.waxloom-album-vinyl .waxloom-vinyl-count');
+    const before=counter?.textContent?.trim();
+    rack.scrollLeft += 295;
+    rack.dispatchEvent(new Event('scroll',{bubbles:true}));
+    await new Promise((resolve)=>setTimeout(resolve,260));
+    const sleeves=[...rack.querySelectorAll('.waxloom-vinyl-sleeve')];
+    const near=sleeves.filter((s)=>s.dataset.nearby==='true');
+    const distances=near.map((s)=>Number.parseFloat(s.style.getPropertyValue('--waxloom-vinyl-lift'))).filter(Number.isFinite);
+    return {
+      total:sleeves.length,
+      animated:near.length,
+      maxLift:Math.max(...distances),
+      minLift:Math.min(...distances),
+      gpuReady:near.every((s)=>getComputedStyle(s).willChange.includes('transform')),
+      touchAction:getComputedStyle(rack).touchAction,
+      counterBefore:before,
+      counterAfter:counter?.textContent?.trim(),
+      left:rack.scrollLeft,
+    };
+  })()`);
+  assert(smoothness.animated > 0 && smoothness.animated <= 12,
+    `Vinyl scroll animates ${smoothness.animated} of ${smoothness.total} sleeves; expected only nearby covers`);
+  assert(smoothness.minLift >= -18.5 && smoothness.maxLift <= 11.5,
+    `Vinyl movement exceeds old smooth 29px range (${smoothness.minLift} to ${smoothness.maxLift})`);
+  assert(smoothness.gpuReady, "Visible sleeves must be promoted to compositor layers before entering viewport");
+  assert(smoothness.touchAction.includes('pan-x') && smoothness.touchAction.includes('pan-y'),
+    "Vinyl scroll must preserve native horizontal and vertical touch gestures");
+  assert(smoothness.left >= 200 && smoothness.counterBefore !== smoothness.counterAfter,
+    "Vinyl inertia should advance the record index without losing active label");
   await scrollEnd();
   const albumsEnd = await evaluate(metrics);
   const albumsGap = checkEnd(albumsEnd, albumsEnd.albumBottom, "Albums/no player");
@@ -242,7 +275,7 @@ try {
   await saveScreenshot("desktop");
 
   assert(errors.length === 0, `Unexpected JS runtime errors: ${errors.join("; ")}`);
-  console.log(JSON.stringify({passed:failures.length===0,failures,errors,writesIntercepted,homeGap,albumsGap,albumDetailGap,favoritesGap,playingHomeGap,playingAlbumsGap,home,albums,favorites,search,artist,discovery,narrow,desktop},null,2));
+  console.log(JSON.stringify({passed:failures.length===0,failures,errors,writesIntercepted,homeGap,albumsGap,albumDetailGap,favoritesGap,playingHomeGap,playingAlbumsGap,smoothness,home,albums,favorites,search,artist,discovery,narrow,desktop},null,2));
 } finally {
   socket.close();
 }

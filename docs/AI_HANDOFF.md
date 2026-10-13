@@ -1,5 +1,12 @@
 # Waxloom AI handoff
 
+## 2026-10-13 — Restored smooth touch scrolling for shared vinyl bins
+
+- Phone owner reported visible jitter and less fluid side swipes after the shared rack commit `7c82c0c`. Comparison with the formerly smooth `ac3ce2f` showed 29px to 54px travel increase, removal of compositor promotion, full per-frame `offsetLeft` reads/writes over every album, and `touch-action:pan-x` blocking page vertical gestures.
+- Targeted fixes in `VinylRack.tsx` and `mobile-vinyl-system.css`: original 29px lift/tilt envelope restored; cache sleeve positions and viewport width after actual layout changes only; animate only sleeves in/near viewport and promote them early with `data-nearby` while limiting the number of composited sleeves; record counter/title state updates after 110ms scroll idle rather than per scroll frame; restore `pan-x pan-y` and native momentum. Other routes, footer clearance, desktop, and vinyl visuals remain unchanged.
+- Added performance-regression assertions to `qa:vinyl`: a 40-record bin should update <=12 sleeve transforms (actual: 6), movement confined to [-18,+11]px, nearby compositor promotion, native two-axis touch, index advances. Continue `qa:home`, `qa:mobile`, TypeScript build, Python tests and security before deployment.
+- Actual Safari Home Screen shortcut on user's iPhone cannot be measured from headless Brave; request tactile confirmation without pretending it was directly tested.
+
 ## 2026-10-13 — Shared Vinyl racks and fixed mobile Menu clearance
 
 - Root cause of phone menu overlap: when there was no active player, normal Waxloom pages did not reserve the fixed Menu's height. The mobile shell now reserves it; with music, nav + mini-player reserve remains, and Discovery uses its own viewport fit.
