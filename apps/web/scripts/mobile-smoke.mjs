@@ -15,7 +15,7 @@
 const base = process.env.WAXLOOM_QA_URL || "http://127.0.0.1:8092/";
 const debuggerUrl = process.env.WAXLOOM_QA_CDP || "http://127.0.0.1:9242/json";
 const root = new URL(base);
-if (!["localhost", "127.0.0.1"].includes(root.hostname) || root.port !== "8092") {
+if (!["localhost", "127.0.0.1"].includes(root.hostname) || !["8092", "8094"].includes(root.port)) {
   throw Error("Safety: UI smoke is restricted to the isolated QA web port 8092.");
 }
 if (typeof WebSocket === "undefined") throw Error("Use Node.js 22+ with built-in WebSocket.");
@@ -108,8 +108,12 @@ const geometry = `(() => {
     transport:[...document.querySelectorAll('.waxloom-mobile-player-transport button')].map((x)=>x.getBoundingClientRect().width),
     queue:document.querySelectorAll('.waxloom-next-item').length,
     menuDisplay:find('.mobile-menu-toggle') ? getComputedStyle(find('.mobile-menu-toggle')).display : 'none',
-    lastRow:(()=>{const row=[...document.querySelectorAll('.track-list .track-row:not(.track-row-header)')].at(-1);
-      return row?.getBoundingClientRect().bottom;})(),
+    lastRow:(()=>{
+      const mobileHomeEnd = document.querySelector(".waxloom-home-explore");
+      if (mobileHomeEnd?.getClientRects().length) return mobileHomeEnd.getBoundingClientRect().bottom;
+      const row = [...document.querySelectorAll('.track-list .track-row:not(.track-row-header)')].at(-1);
+      return row?.getBoundingClientRect().bottom;
+    })(),
   };
 })()`;
 

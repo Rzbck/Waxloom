@@ -1,5 +1,13 @@
 # Waxloom AI handoff
 
+## 2026-10-13 — mobile Home vinyl crate
+
+- Replaced *only mobile Home* stacked track tables with a short, artwork-first `MobileHome.tsx`: 18-cover tactile record crate with rAF-driven sleeve lift/tilt and a native side-scroll, plus a one-row `Fresh tracks` horizontal shelf of 14 recent songs.
+- Covers, album opening and album play use real Navidrome IDs. Recent songs have `albumId` but not `coverArt`; Navidrome `getCoverArt` accepts album IDs. Use that fallback for actual album artwork rather than a blank placeholder. No backend changes.
+- Desktop still renders its original Home sections; vinyl CSS is scoped to max-width 820px. Motion respects `prefers-reduced-motion`; no external animation package or third-party assets.
+- Dedicated non-destructive browser QA `npm run qa:home` runs on isolated localhost 8094 + disposable CDP 9243. Legacy `qa:mobile` updated to recognize the new Home bottom-card clearance and accept isolated QA port 8094. All writes blocked, real music playback avoided.
+- Full procedures and iOS-specific limits: `docs/MOBILE_HOME_VINYL_2026-10-13.md`. Retain old web Docker tag for rollback; do not merge draft PR #15 without request.
+
 ## 2026-10-13 — mobile UI rebuild / visual QA
 
 - Dedicated `MobilePlayerPanel.tsx` and `MobileNavigation.tsx` replace the improvised full-screen extension of desktop `Player.tsx`. These use scoped `mobile-shell.css` loaded last. Removed dead `mobile-player-v1.css`.

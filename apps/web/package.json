@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "qa:mobile": "node scripts/mobile-smoke.mjs"
+    "qa:mobile": "node scripts/mobile-smoke.mjs",
+    "qa:home": "node scripts/home-smoke.mjs"
   },
   "dependencies": {
     "react": "19.3.0",

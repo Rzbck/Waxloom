@@ -26,6 +26,7 @@ import "./sidebar-fixed-v8.css";
 import "./discovery-bad-source-v9.css";
 import "./discovery-fit.css";
 import "./mobile-shell.css";
+import "./mobile-home.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

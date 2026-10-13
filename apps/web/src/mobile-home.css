@@ -1,0 +1,400 @@
+/* Waxloom mobile Home: record-bin / swipeable recent music. Desktop stays intact. */
+.waxloom-mobile-home { display: none; }
+.waxloom-home-desktop { display: contents; }
+
+@media (max-width: 820px) {
+  /* Quiet the generic title so the covers, not a giant slogan, lead Home. */
+  .app-shell-home .topbar-title .eyebrow { display: none !important; }
+  .app-shell-home .topbar-title h1 {
+    font-size: 17px !important;
+    line-height: 1.15 !important;
+    letter-spacing: -.015em !important;
+    color: #c9b7d6;
+  }
+  .app-shell-home .topbar { margin-bottom: 9px !important; row-gap: 8px !important; }
+  .app-shell-home .home-quickbar { padding-bottom: 0; }
+  .waxloom-home-desktop { display: none !important; }
+  .waxloom-mobile-home {
+    display: grid;
+    width: 100%;
+    min-width: 0;
+    gap: 19px;
+    margin-top: 0;
+    padding-bottom: 4px;
+    overflow: visible;
+  }
+  .waxloom-mobile-home > section { min-width: 0; width: 100%; overflow: hidden; }
+  .waxloom-mobile-home-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 9px;
+    min-height: 48px;
+    margin-bottom: 9px;
+    padding-inline: 1px;
+  }
+  .waxloom-mobile-home-section-head > div { min-width: 0; }
+  .waxloom-home-overline {
+    display: block;
+    margin-bottom: 3px;
+    color: #b799cd;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: .19em;
+  }
+  .waxloom-mobile-home-section-head h2 {
+    margin: 0 !important;
+    color: #f2edf6;
+    font-size: clamp(21px, 5.6vw, 26px) !important;
+    letter-spacing: -.055em;
+    line-height: 1.08;
+  }
+  .waxloom-mobile-home-section-head p {
+    margin: 5px 0 0;
+    color: #978aa1;
+    font-size: 11px;
+  }
+  .waxloom-home-see-all {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    gap: 6px;
+    min-height: 36px;
+    border: 1px solid #4b3b57;
+    border-radius: 9px;
+    padding: 7px 10px;
+    background: #241b2d;
+    color: #e2cdeb;
+    font-size: 11px;
+    font-weight: 650;
+    cursor: pointer;
+  }
+  .waxloom-home-see-all span { font-size: 15px; }
+  .waxloom-home-see-all:active { background: #453255; }
+
+  /* A physical bin: record sleeves sink and rise during *native* horizontal scroll. */
+  .waxloom-vinyl-crate {
+    position: relative;
+    width: 100%;
+    height: 277px;
+    min-height: 0;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid #3b2b42;
+    border-radius: 17px 17px 11px 11px;
+    background:
+      radial-gradient(ellipse 90% 120% at 50% -20%, rgba(166,110,194,.2), transparent 55%),
+      linear-gradient(180deg, #261d2e 0%, #100e16 68%, #221827 100%);
+    box-shadow: inset 0 12px 27px rgba(0,0,0,.36), 0 12px 27px rgba(0,0,0,.21);
+  }
+  .waxloom-vinyl-rack {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    padding: 29px max(14px, calc(50% - 81px)) 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: max(14px, calc(50% - 81px));
+    scrollbar-width: none;
+    touch-action: pan-x pan-y;
+  }
+  .waxloom-vinyl-rack::-webkit-scrollbar { display: none; }
+  .waxloom-vinyl-rack:focus-visible { outline: 2px solid #cf9cf2; outline-offset: -3px; }
+  .waxloom-vinyl-sleeve {
+    position: relative;
+    flex: 0 0 162px;
+    box-sizing: border-box;
+    width: 162px;
+    min-width: 162px;
+    margin-right: -17px;
+    transform-origin: 50% 100%;
+    transform: translate3d(0, var(--waxloom-vinyl-lift, 11px), 0) rotate(var(--waxloom-vinyl-tilt, 0deg));
+    transition: transform 90ms ease-out, filter 140ms ease-out;
+    will-change: transform;
+    scroll-snap-align: center;
+    contain: layout style;
+    filter: brightness(.84) saturate(.9);
+  }
+  .waxloom-vinyl-sleeve[data-centered="true"] {
+    filter: brightness(1.09) saturate(1.06);
+  }
+  .waxloom-vinyl-face {
+    display: block;
+    position: relative;
+    width: 162px;
+    height: 162px;
+    padding: 0;
+    margin: 0;
+    border: 2px solid rgba(250,237,255,.22);
+    border-radius: 3px;
+    overflow: hidden;
+    background: #31243d;
+    box-shadow:
+      3px 5px 10px rgba(0,0,0,.56),
+      -3px 0 1px rgba(0,0,0,.28),
+      inset 2px 0 0 rgba(255,255,255,.22);
+    cursor: pointer;
+  }
+  .waxloom-vinyl-face img {
+    position: absolute;
+    inset: 0;
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .waxloom-vinyl-face img[hidden] { display: none; }
+  .waxloom-vinyl-fallback {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    color: #c7a7d2;
+    font-size: 58px;
+    font-weight: 800;
+    background: linear-gradient(140deg, #4f355f, #262032 78%);
+  }
+  .waxloom-vinyl-shine {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(118deg, rgba(255,255,255,.2), transparent 21%, transparent 60%, rgba(0,0,0,.3));
+    opacity: .38;
+  }
+  .waxloom-vinyl-play {
+    position: absolute;
+    top: 113px;
+    right: 9px;
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    min-height: 38px;
+    padding: 0 0 0 2px;
+    border: 1px solid rgba(239,223,255,.72);
+    border-radius: 50%;
+    background: rgba(26,19,34,.83);
+    box-shadow: 0 4px 15px rgba(0,0,0,.44);
+    color: #f7ebff;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .waxloom-vinyl-play:active { background: #815aa0; }
+  .waxloom-vinyl-label {
+    display: grid;
+    gap: 3px;
+    width: 160px;
+    min-width: 0;
+    padding: 20px 4px 0;
+    box-sizing: border-box;
+    text-align: center;
+    pointer-events: none;
+  }
+  .waxloom-vinyl-label strong,
+  .waxloom-vinyl-label small {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .waxloom-vinyl-label strong { color: #f4eafa; font-size: 12px; font-weight: 750; }
+  .waxloom-vinyl-label small { color: #c2b2ce; font-size: 10px; }
+  .waxloom-vinyl-crate-front {
+    position: absolute;
+    z-index: 45;
+    left: 0;
+    right: 0;
+    bottom: 85px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 28px;
+    padding: 0 15px;
+    border-top: 1px solid #886b93;
+    border-bottom: 2px solid #120f18;
+    background: linear-gradient(180deg, #57405f 0%, #34283f 45%, #211b29 100%);
+    box-shadow: 0 4px 8px rgba(0,0,0,.5), inset 0 1px rgba(255,255,255,.08);
+    color: rgba(210,188,221,.63);
+    font-size: 8px;
+    font-weight: 850;
+    letter-spacing: .22em;
+    pointer-events: none;
+  }
+  .waxloom-vinyl-crate-rivet {
+    display: block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: #88718c;
+    box-shadow: inset 0 1px 2px #1b1423;
+  }
+  .waxloom-vinyl-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 9px;
+    height: 36px;
+    padding: 2px 2px 0;
+  }
+  .waxloom-vinyl-count {
+    color: #eedcf6;
+    font-size: 11px;
+    letter-spacing: .11em;
+    font-variant-numeric: tabular-nums;
+    font-weight: 800;
+  }
+  .waxloom-vinyl-count > span { color: #796985; }
+  .waxloom-vinyl-drag-hint {
+    min-width: 0;
+    color: #94839d;
+    font-size: 10px;
+    letter-spacing: .04em;
+  }
+  .waxloom-vinyl-arrows { display: flex; gap: 6px; }
+  .waxloom-vinyl-arrows button {
+    display: grid;
+    place-items: center;
+    width: 37px;
+    height: 34px;
+    border: 1px solid #47344f;
+    border-radius: 10px;
+    background: #241c2b;
+    color: #ddc9eb;
+    font-size: 18px;
+    cursor: pointer;
+  }
+  .waxloom-vinyl-arrows button:active { background: #58406b; }
+
+  .waxloom-mobile-home-tracks { margin-top: 0; }
+  .waxloom-home-track-rail {
+    display: flex;
+    gap: 11px;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 0 1px 9px;
+    box-sizing: border-box;
+  }
+  .waxloom-home-track-rail::-webkit-scrollbar { display: none; }
+  .waxloom-home-track-rail:focus-visible { outline: 2px solid #cf9cf2; border-radius: 9px; }
+  .waxloom-home-track-card {
+    display: grid;
+    flex: 0 0 117px;
+    width: 117px;
+    min-width: 117px;
+    min-height: 0;
+    align-content: start;
+    gap: 3px;
+    padding: 0 0 2px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    text-align: left;
+    color: #f0e8f6;
+    cursor: pointer;
+    scroll-snap-align: start;
+  }
+  .waxloom-home-track-cover {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 117px;
+    height: 117px;
+    border: 1px solid #48354e;
+    border-radius: 9px;
+    overflow: hidden;
+    color: #947ca5;
+    background: linear-gradient(145deg, #4e3659, #251e2c);
+  }
+  .waxloom-home-track-note { font-size: 39px; color: #c9b0d8; }
+  .waxloom-home-track-cover img {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .waxloom-home-track-cover img[hidden] { display: none; }
+  .waxloom-home-track-play {
+    position: absolute;
+    z-index: 2;
+    bottom: 7px;
+    right: 7px;
+    display: grid;
+    place-items: center;
+    width: 29px;
+    height: 29px;
+    padding-left: 2px;
+    border-radius: 50%;
+    background: rgba(19,15,25,.84);
+    color: #f6e8ff;
+    font-size: 11px;
+  }
+  .waxloom-home-track-card strong, .waxloom-home-track-card small {
+    display: block;
+    min-width: 0;
+    width: 100%;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .waxloom-home-track-card strong {
+    margin-top: 5px;
+    font-size: 11px;
+    font-weight: 800;
+    color: #eee7f2;
+  }
+  .waxloom-home-track-card small { font-size: 10px; color: #a79aae; }
+
+  .waxloom-home-explore {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 57px;
+    width: 100%;
+    padding: 11px 15px;
+    border: 1px solid #3c3046;
+    border-radius: 12px;
+    color: #e9d9f6;
+    background: linear-gradient(110deg, #2b2135, #1c1824);
+    text-align: left;
+    cursor: pointer;
+  }
+  .waxloom-home-explore > span:first-child { display: grid; gap: 4px; }
+  .waxloom-home-explore strong { font-size: 12px; }
+  .waxloom-home-explore small { color: #988ba6; font-size: 10px; }
+  .waxloom-home-explore > span:last-child { font-size: 21px; color: #c69ddf; }
+  .waxloom-home-empty { padding: 25px 15px; color: #9a8b9f; font-size: 12px; }
+
+  .waxloom-mobile-home button:focus-visible {
+    outline: 2px solid #dbadee;
+    outline-offset: 3px;
+  }
+}
+
+@media (max-width: 355px) {
+  .waxloom-mobile-home { gap: 15px; }
+  .waxloom-mobile-home-section-head h2 { font-size: 21px !important; }
+  .waxloom-vinyl-crate { height: 265px; }
+  .waxloom-vinyl-crate-front { bottom: 76px; }
+  .waxloom-vinyl-drag-hint { display: none; }
+  .waxloom-vinyl-controls { justify-content: space-between; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waxloom-vinyl-sleeve { transition: none !important; transform: none !important; filter: none !important; }
+  .waxloom-vinyl-rack, .waxloom-home-track-rail { scroll-behavior: auto !important; }
+}

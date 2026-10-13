@@ -4,6 +4,7 @@ import { api } from "./api";
 import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
 import { MobileNavigation } from "./MobileNavigation";
+import { MobileHome } from "./MobileHome";
 import { DownloadTray } from "./downloadQueue";
 import { usePlayer } from "./Player";
 import type {
@@ -442,7 +443,7 @@ export default function App() {
   }
 
   return (
-    <main className={`app-shell ${player.currentSong || player.currentPreview ? "app-shell-with-player" : ""} ${view === "discovery" ? "app-shell-discovery" : ""}`}>
+    <main className={`app-shell ${player.currentSong || player.currentPreview ? "app-shell-with-player" : ""} ${view === "discovery" ? "app-shell-discovery" : ""} ${view === "home" ? "app-shell-home" : ""}`}>
       <aside className="sidebar">
         <div className="brand">Waxloom</div>
         <nav aria-label="Waxloom sections">
@@ -520,6 +521,14 @@ export default function App() {
               </span>
             </section>
 
+            <MobileHome albums={homeAlbums} recent={recentSongs}
+              onOpenAlbum={(album) => void openAlbum(album)}
+              onPlayAlbum={(album) => void playAlbum(album)}
+              onPlayRecent={(index) => player.playSongs(recentSongs, index)}
+              onBrowseAlbums={() => navigate("albums")}
+              onRefreshRecent={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}
+            />
+            <div className="waxloom-home-desktop">
             <section>
               <div className="section-toolbar"><div><p className="eyebrow">Recently imported tracks</p><h2>New songs in your library</h2></div><button className="secondary-action" type="button" onClick={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}>Refresh</button></div>
               {recentSongs.length > 0 ? (
@@ -535,6 +544,7 @@ export default function App() {
               <div className="section-toolbar"><div><p className="eyebrow">Random</p><h2>Play something</h2></div><button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>Fresh shuffle</button></div>
               <SongTable songs={homeSongs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
             </section>
+            </div>
           </div>
         )}
 
