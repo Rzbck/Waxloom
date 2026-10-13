@@ -8,6 +8,7 @@
 - Each Discovery '+' changes to a working glyph then checkmark/error; a compact toggleable global download tray reports steps and failures.
 - Player dock gains favorite, add-to-playlist, and instant mix for playing **library** tracks, using existing Navidrome APIs; previews clearly require an import before those library-only actions.
 - Web-only change; API/database/music not mutated by rollout. Run TypeScript production build, Python regression suite, security gate, Docker smoke, Tailscale smoke; retain previous Docker image tag for rollback.
+- Browser-driven viewport audit discovered global player clearance of 148px overriding Discovery page padding; fixed with scoped body:has(.player-dock) selector. Measure actual viewport at 1440x900 and 390x844 and confirm document scrollHeight == viewport height before completion.
 
 ## 2026-10-13 active production tranche
 

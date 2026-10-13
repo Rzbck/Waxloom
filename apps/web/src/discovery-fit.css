@@ -250,3 +250,15 @@
 .player-tools { gap: 5px !important; }
 .player-tools .player-action-tip { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media(max-width:820px) { .player-tools { justify-content: flex-end; gap: 2px !important; } .player-tools .volume-slider { max-width: 70px; } .player-tools .player-action-tip { display: none; } }
+
+/* The global player-clearance rule adds 148px of scroll padding to every page.
+   Discovery is explicitly non-scrolling and reserves the dock in its HEIGHT,
+   so double clearance would waste an entire row of artwork. */
+body:has(.player-dock) .app-shell-discovery .content {
+  padding-bottom: 6px !important;
+}
+@media(max-width:820px) {
+  body:has(.player-dock) .app-shell-discovery .content {
+    padding-bottom: 4px !important;
+  }
+}
