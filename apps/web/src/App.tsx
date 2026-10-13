@@ -500,27 +500,13 @@ export default function App() {
 
         {view === "home" && (
           <div className="workspace-stack">
-            <section className="hero-grid">
-              <article className="panel panel-primary">
-                <p className="eyebrow">Navidrome + Waxloom</p>
-                <h2>Browse. Play. Discover. Import.</h2>
-                <p>
-                  Your Navidrome library is the player core. Discovery, AudioMuse and imports now live in the same interface instead of separate local dashboards.
-                </p>
-                <div className="button-row">
-                  <button className="primary-action" type="button" onClick={() => navigate("discovery")}>Discover music</button>
-                  <button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>Shuffle something</button>
-                </div>
-              </article>
-              <article className="panel integration-panel">
-                <p className="eyebrow">Integrations</p>
-                {Object.entries(health?.integrations ?? {}).map(([name, configured]) => (
-                  <div className="integration-row" key={name}>
-                    <div><strong>{name}</strong><small>{name === "navidrome" ? statusLabel(navidromeHealth?.status) : configured ? "Configured" : "Off"}</small></div>
-                    <span className={(name === "navidrome" ? navidromeHealth?.status === "ok" : configured) ? "dot dot-on" : "dot"} />
-                  </div>
-                ))}
-              </article>
+            <section className="home-quickbar" aria-label="Quick music actions">
+              <button className="primary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>⤨ Shuffle</button>
+              <button className="secondary-action" type="button" onClick={() => navigate("discovery")}>✦ Discover</button>
+              <span className="home-quickbar-status" title="Integration details are available in the status indicator above">
+                <span className={navidromeHealth?.status === "ok" ? "dot dot-on" : "dot"} />
+                {navidromeHealth?.status === "ok" ? "Library online" : "Library unavailable"}
+              </span>
             </section>
 
             <section>
