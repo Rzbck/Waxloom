@@ -1,5 +1,14 @@
 # Waxloom AI handoff
 
+## 2026-10-13 14:3x — one-screen artwork Discovery and player quick actions
+
+- Discovery shows every current candidate in an artwork-first, two-row horizontally swipeable/wheelable shelf. No vertical content overflow, no More tracks paging, and no For you/Surprise me/Rare finds segmentation.
+- Cover Art Archive release image is used when release MBID exists, with fallback artwork otherwise (not generated/fabricated covers).
+- Frontend-only queue (`apps/web/src/downloadQueue.tsx`) permits up to two imports concurrently, keeps them running while navigating between Waxloom views in the same tab, and exposes compact individual queued/searching/downloading/indexing/error states. Duplicate clicks cannot enqueue the same active candidate. Browser refresh interrupts front-end jobs: no claim of persistent server-side jobs.
+- Each Discovery '+' changes to a working glyph then checkmark/error; a compact toggleable global download tray reports steps and failures.
+- Player dock gains favorite, add-to-playlist, and instant mix for playing **library** tracks, using existing Navidrome APIs; previews clearly require an import before those library-only actions.
+- Web-only change; API/database/music not mutated by rollout. Run TypeScript production build, Python regression suite, security gate, Docker smoke, Tailscale smoke; retain previous Docker image tag for rollback.
+
 ## 2026-10-13 active production tranche
 
 - Development branch: `fix/discovery-library-pipeline-20261013` (GitHub PR #15, draft, **not merged to main**).

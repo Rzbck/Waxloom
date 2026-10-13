@@ -10,7 +10,7 @@ import {
 } from "react";
 
 import { api } from "./api";
-import type { PreviewTrack, Song } from "./types";
+import type { PlaylistSummary, PreviewTrack, Song } from "./types";
 
 type RepeatMode = "off" | "all" | "one";
 type PlayerMode = "navidrome" | "preview";
@@ -62,10 +62,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [shuffle, setShuffle] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
+  const [playerPlaylists, setPlayerPlaylists] = useState<PlaylistSummary[]>([]);
+  const [playerStarred, setPlayerStarred] = useState(false);
+  const [playerActionBusy, setPlayerActionBusy] = useState(false);
+  const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
 
   const currentSong = mode === "navidrome" && currentIndex >= 0 ? queue[currentIndex] ?? null : null;
   const currentPreview = mode === "preview" && previewIndex >= 0 ? previewQueue[previewIndex] ?? null : null;
+  useEffect(() => {
+    setPlayerStarred(Boolean(currentSong?.starred));
+    setPlaylistPickerOpen(false);
+    setPlayerActionMessage(null);
+  }, [currentSong?.id, currentPreview?.id]);
+
   const activeIndex = mode === "preview" ? previewIndex : currentIndex;
   const activeLength = mode === "preview" ? previewQueue.length : queue.length;
   const activeTitle = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
@@ -465,6 +476,75 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     void audio.play().catch(() => setPlaying(false));
   }
 
+  async function toggleCurrentFavorite() {
+    if (!currentSong || playerActionBusy) return;
+    const target = !playerStarred;
+    setPlayerActionBusy(true);
+    try {
+      await api.setStarred(currentSong.id, target);
+      setPlayerStarred(target);
+      setQueue((existing) => existing.map((song) => song.id === currentSong.id
+        ? { ...song, starred: target ? new Date().toISOString() : undefined } : song));
+      setPlayerActionMessage(target ? "Added to favorites" : "Removed from favorites");
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not update favorites");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  async function openPlayerPlaylists() {
+    if (!currentSong || playerActionBusy) return;
+    if (playlistPickerOpen) { setPlaylistPickerOpen(false); return; }
+    setPlayerActionBusy(true);
+    try {
+      const response = await api.playlists();
+      setPlayerPlaylists(response.items);
+      setPlaylistPickerOpen(true);
+      setPlayerActionMessage(null);
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not load playlists");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  async function addCurrentToPlaylist(playlist: PlaylistSummary) {
+    if (!currentSong || playerActionBusy) return;
+    setPlayerActionBusy(true);
+    try {
+      await api.updatePlaylist(playlist.id, { song_ids_to_add: [currentSong.id] });
+      setPlaylistPickerOpen(false);
+      setPlayerActionMessage(`Added to ${playlist.name}`);
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not update playlist");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  async function instantMixFromPlaying() {
+    if (!currentSong || playerActionBusy) return;
+    setPlayerActionBusy(true);
+    setPlayerActionMessage("Building an instant mix…");
+    try {
+      const response = await api.localSimilar(currentSong.id, 24);
+      const similar: Song[] = response.items
+        .filter((song) => song.id && song.id !== currentSong.id)
+        .map((song) => ({ id: song.id, title: song.title, artist: song.artist, album: song.album }));
+      if (!similar.length) {
+        setPlayerActionMessage("No similar local tracks available yet");
+        return;
+      }
+      playSongs([currentSong, ...similar], 0);
+      setPlayerActionMessage(`Instant mix — ${similar.length} similar tracks`);
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Instant mix unavailable");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
   const contextValue = useMemo<PlayerContextValue>(
     () => ({
       queue,
@@ -577,6 +657,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </aside>
           )}
 
+          {playlistPickerOpen && (
+            <aside className="player-playlist-picker" aria-label="Add playing track to playlist">
+              <strong>Add “{currentSong?.title}” to playlist</strong>
+              {playerPlaylists.length ? playerPlaylists.map((playlist) => (
+                <button key={playlist.id} type="button" disabled={playerActionBusy}
+                  onClick={() => void addCurrentToPlaylist(playlist)}>{playlist.name}</button>
+              )) : <span className="player-action-tip">Create a playlist from the Playlists tab first.</span>}
+              <button type="button" onClick={() => setPlaylistPickerOpen(false)}>Close</button>
+            </aside>
+          )}
           <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""}`}>
             <div className="player-track">
               <div className="player-cover">
@@ -610,9 +700,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </div>
 
             <div className="player-tools">
+              <button className={playerStarred && currentSong ? "icon-button player-quick-action is-favorite" : "icon-button player-quick-action"}
+                type="button" onClick={() => void toggleCurrentFavorite()}
+                title={currentSong ? (playerStarred ? "Remove from favorites" : "Add playing song to favorites") : "Download Discovery preview to library first"}
+                aria-label="Favorite playing song" disabled={!currentSong || playerActionBusy}>♥</button>
+              <button className="icon-button player-quick-action" type="button"
+                onClick={() => void openPlayerPlaylists()} disabled={!currentSong || playerActionBusy}
+                title={currentSong ? "Add playing song to playlist" : "Download Discovery preview to library first"}
+                aria-label="Add playing song to playlist">＋</button>
+              <button className="icon-button player-quick-action" type="button"
+                onClick={() => void instantMixFromPlaying()} disabled={!currentSong || playerActionBusy}
+                title={currentSong ? "Instant mix from this song" : "Download Discovery preview to library first"}
+                aria-label="Instant mix from playing song">✦</button>
               <button className="icon-button" type="button" onClick={() => setQueueOpen((value) => !value)} aria-label="Queue">☷ {activeQueue.length}</button>
               <span>🔊</span>
               <input className="volume-slider" type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="Volume" />
+              {playerActionMessage && <small className="player-action-tip" role="status">{playerActionMessage}</small>}
             </div>
           </footer>
         </>

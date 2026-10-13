@@ -21,6 +21,7 @@ import "./discovery-shelf-stability-v6.css";
 import "./player-clearance-v7.css";
 import "./sidebar-fixed-v8.css";
 import "./discovery-bad-source-v9.css";
+import "./discovery-fit.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

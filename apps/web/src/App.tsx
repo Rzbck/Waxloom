@@ -3,6 +3,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { api } from "./api";
 import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
+import { DownloadTray } from "./downloadQueue";
 import { usePlayer } from "./Player";
 import type {
   Album,
@@ -438,7 +439,7 @@ export default function App() {
   }
 
   return (
-    <main className={player.currentSong ? "app-shell app-shell-with-player" : "app-shell"}>
+    <main className={`app-shell ${player.currentSong || player.currentPreview ? "app-shell-with-player" : ""} ${view === "discovery" ? "app-shell-discovery" : ""}`}>
       <aside className="sidebar">
         <div className="brand">Waxloom</div>
         <nav aria-label="Waxloom sections">
@@ -621,6 +622,8 @@ export default function App() {
           <ImportsView target={importTarget} playlists={playlists} onImported={handleImported} />
         )}
       </section>
+
+      <DownloadTray />
 
       {playlistSongTarget && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setPlaylistSongTarget(null)}>

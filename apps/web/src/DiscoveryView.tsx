@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
 
 import { api } from "./api";
 import { usePlayer } from "./Player";
@@ -17,8 +18,7 @@ type TasteEntry = {
 };
 
 type TasteState = Record<string, TasteEntry>;
-type ShelfKey = "main";
-type DiscoveryMode = "for_you" | "surprise" | "rare";
+
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
 const TASTE_KEY = "waxloom.discovery.taste.v1";
@@ -165,7 +165,7 @@ function DiscoveryTrackCard({
   candidate,
   currentPreviewMbid,
   playing,
-  importing,
+  phase,
   rejecting,
   taste,
   onPlay,
@@ -176,7 +176,7 @@ function DiscoveryTrackCard({
   candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
   playing: boolean;
-  importing: boolean;
+  phase?: ReturnType<typeof downloadPhase>;
   rejecting: boolean;
   taste: TasteState;
   onPlay: (candidate: DiscoveryCandidate) => void;
@@ -187,87 +187,58 @@ function DiscoveryTrackCard({
   const currentFeedback = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
   const isPlaying = currentPreviewMbid === candidate.recording_mbid && playing;
   const canRejectSource = candidate.source === "youtube_dig";
-
+  const [coverFailed, setCoverFailed] = useState(false);
+  const coverId = candidate.release_mbid && /^[0-9a-f-]{36}$/i.test(candidate.release_mbid) ? candidate.release_mbid : null;
+  const cover = coverId && !coverFailed ? `https://coverartarchive.org/release/${encodeURIComponent(coverId)}/front-250` : null;
+  const working = phase === "queued" || phase === "searching" || phase === "downloading";
   return (
-    <article className="discovery-song-card">
-      <div className="discovery-song-copy">
-        <strong title={candidate.title}>{candidate.title}</strong>
-        <span title={candidate.artist}>{candidate.artist}</span>
-      </div>
-      <b className="discovery-song-score">{scorePercent(candidate.rank)}</b>
+    <article className="discovery-cover-card">
       <button
-        className={isPlaying ? "compact-action compact-action-play compact-action-playing" : "compact-action compact-action-play"}
+        className="discovery-cover-art"
         type="button"
-        onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
-        onPointerDown={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
         onClick={() => onPlay(candidate)}
-        title={isPlaying ? "Playing in Waxloom" : "Play in Waxloom"}
-        aria-label={isPlaying ? `Playing ${candidate.title}` : `Play ${candidate.title}`}
+        onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
+        title={`Play ${candidate.artist} — ${candidate.title}`}
+        aria-label={`Play ${candidate.title}`}
       >
-        <span className={isPlaying ? "css-pause-mark" : "css-play-mark"} aria-hidden="true" />
+        {cover ? <img src={cover} loading="lazy" alt="" onError={() => setCoverFailed(true)} /> : (
+          <span className="discovery-cover-fallback" aria-hidden="true">{candidate.artist.slice(0, 2).toUpperCase()}</span>
+        )}
+        <span className={isPlaying ? "discovery-cover-play is-playing" : "discovery-cover-play"} aria-hidden="true">{isPlaying ? "Ⅱ" : "▶"}</span>
       </button>
-      <button
-        className="compact-action compact-action-add"
-        type="button"
-        disabled={importing}
-        onClick={() => onQuickAdd(candidate)}
-        title={importing ? "Adding to library…" : "Add to library"}
-        aria-label={`Download ${candidate.title} into music library`}
-      >↓</button>
-      <button
-        className={currentFeedback === 1 ? "taste-chip taste-chip-like taste-chip-active" : "taste-chip taste-chip-like"}
-        type="button"
-        onClick={() => onFeedback(candidate, currentFeedback === 1 ? 0 : 1)}
-        title="More like this"
-        aria-label={`More like ${candidate.title}`}
-      >Like</button>
-      <button
-        className={currentFeedback === -1 ? "taste-chip taste-chip-less taste-chip-less-active" : "taste-chip taste-chip-less"}
-        type="button"
-        onClick={() => onFeedback(candidate, currentFeedback === -1 ? 0 : -1)}
-        title="Show less like this"
-        aria-label={`Less like ${candidate.title}`}
-      >Less</button>
-      {canRejectSource ? (
+      <div className="discovery-cover-copy">
+        <strong title={candidate.title}>{candidate.title}</strong>
+        <small title={candidate.artist}>{candidate.artist}</small>
+      </div>
+      <div className="discovery-cover-actions">
         <button
-          className="compact-action compact-action-bad-source"
+          className={`discovery-cover-download ${working ? "is-working" : ""} ${phase === "indexed" || phase === "existing" ? "is-complete" : ""}`}
           type="button"
-          disabled={rejecting}
-          onClick={() => onBadSource(candidate)}
-          title={rejecting ? "Removing bad source…" : "Not music / bad source"}
-          aria-label={`Report ${candidate.title} as not music`}
-        >
-          <span className="css-x-mark" aria-hidden="true" />
-        </button>
-      ) : <span aria-hidden="true" />}
+          disabled={working || phase === "indexed" || phase === "existing"}
+          title={phase === "failed" ? "Retry download" : phase === "downloading" ? "Downloading and indexing" : phase === "queued" ? "Queued" : phase === "indexed" ? "Saved in library" : "Download into library"}
+          aria-label={`Download ${candidate.title} to library`}
+          onClick={() => onQuickAdd(candidate)}
+        >{phase === "indexed" || phase === "existing" ? "✓" : working ? "◌" : phase === "failed" ? "!" : "+"}</button>
+        <button className={currentFeedback === 1 ? "discovery-cover-vote discovery-cover-like is-liked" : "discovery-cover-vote discovery-cover-like"}
+          type="button" aria-label={`More like ${candidate.title}`} title="More like this"
+          onClick={() => onFeedback(candidate, currentFeedback === 1 ? 0 : 1)}>Like</button>
+        <button className={currentFeedback === -1 ? "discovery-cover-vote discovery-cover-less is-less" : "discovery-cover-vote discovery-cover-less"}
+          type="button" aria-label={`Less like ${candidate.title}`} title="Show less like this"
+          onClick={() => onFeedback(candidate, currentFeedback === -1 ? 0 : -1)}>Less</button>
+        {canRejectSource ? <button className="discovery-cover-reject" type="button" disabled={rejecting}
+          aria-label={`Report ${candidate.title} as non-music`} title="Not music / bad source"
+          onClick={() => onBadSource(candidate)}>×</button> : <span className="discovery-cover-action-space" aria-hidden="true" />}
+      </div>
     </article>
   );
 }
 
 function DiscoveryShelf({
-  eyebrow,
-  title,
-  items,
-  page,
-  onNextPage,
-  currentPreviewMbid,
-  playing,
-  importingMbid,
-  rejectingMbid,
-  taste,
-  onPlayQueue,
-  onQuickAdd,
-  onFeedback,
-  onBadSource,
+  items, currentPreviewMbid, playing, rejectingMbid, taste, onPlayQueue, onQuickAdd, onFeedback, onBadSource,
 }: {
-  eyebrow: string;
-  title: string;
   items: DiscoveryCandidate[];
-  page: number;
-  onNextPage: () => void;
   currentPreviewMbid: string | null;
   playing: boolean;
-  importingMbid: string | null;
   rejectingMbid: string | null;
   taste: TasteState;
   onPlayQueue: (items: DiscoveryCandidate[], candidate: DiscoveryCandidate) => void;
@@ -275,39 +246,22 @@ function DiscoveryShelf({
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
   onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
-  if (items.length === 0) return null;
-  const pageCount = Math.max(1, Math.ceil(items.length / SHELF_PAGE_SIZE));
-  const normalizedPage = page % pageCount;
-  const start = normalizedPage * SHELF_PAGE_SIZE;
-  const visible = items.slice(start, start + SHELF_PAGE_SIZE);
-
+  if (items.length === 0) return <p className="muted">Preparing musical discoveries…</p>;
   return (
-    <section className="discovery-rail-section discovery-track-shelf">
-      <div className="section-toolbar discovery-rail-toolbar discovery-track-toolbar">
-        <div>
-          <p className="eyebrow">{eyebrow} · {items.length} tracks</p>
-          <h2>{title}</h2>
-        </div>
-        {pageCount > 1 && (
-          <button className="secondary-action discovery-more-tracks" type="button" onClick={onNextPage}>
-            More tracks <span>{normalizedPage + 1}/{pageCount}</span>
-          </button>
-        )}
-      </div>
-      <div className="discovery-track-grid" aria-label={`${title} tracks`}>
-        {visible.map((candidate) => (
+    <section className="discovery-cover-shelf" aria-label="All Discovery recommendations">
+      <div className="discovery-cover-grid" role="region" aria-label="Swipe sideways or use mouse wheel to explore every track"
+        tabIndex={0} onWheel={(event) => {
+          const node = event.currentTarget;
+          if (node.scrollWidth > node.clientWidth) node.scrollLeft += event.deltaY + event.deltaX;
+        }}>
+        {items.map((candidate) => (
           <DiscoveryTrackCard
-            key={candidate.recording_mbid}
-            candidate={candidate}
-            currentPreviewMbid={currentPreviewMbid}
-            playing={playing}
-            importing={importingMbid === candidate.recording_mbid}
-            rejecting={rejectingMbid === candidate.recording_mbid}
-            taste={taste}
+            key={candidate.recording_mbid} candidate={candidate}
+            currentPreviewMbid={currentPreviewMbid} playing={playing}
+            phase={downloadPhase(candidate.recording_mbid)}
+            rejecting={rejectingMbid === candidate.recording_mbid} taste={taste}
             onPlay={(track) => onPlayQueue(items, track)}
-            onQuickAdd={onQuickAdd}
-            onFeedback={onFeedback}
-            onBadSource={onBadSource}
+            onQuickAdd={onQuickAdd} onFeedback={onFeedback} onBadSource={onBadSource}
           />
         ))}
       </div>
@@ -321,12 +275,9 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const [feedStatus, setFeedStatus] = useState<string>(bundle?.status ?? "starting");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [importing, setImporting] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
-  const [shelfPages, setShelfPages] = useState<Record<ShelfKey, number>>({ main: 0 });
-  const [mode, setMode] = useState<DiscoveryMode>("for_you");
-  const [shuffleTurn, setShuffleTurn] = useState(0);
+  const downloads = useDownloads();
 
   async function readFeed() {
     try {
@@ -361,30 +312,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     };
   }, []);
 
-  // A single coherent feed: the recommendation algorithm remains advanced,
-  // while its source-specific internal 'shelves' are no longer shown to users.
-  const rails = useMemo(() => {
-    const ranked = activeCandidates(bundle?.external.items ?? [], taste);
-    const ordered = [...ranked];
-    if (mode === "rare") {
-      ordered.sort((a, b) => (b.underground + b.rank * 0.18) - (a.underground + a.rank * 0.18));
-    } else if (mode === "surprise") {
-      const signature = (candidate: DiscoveryCandidate) => {
-        const text = `${candidate.recording_mbid}:${shuffleTurn}:${bundle?.rotation_id ?? 0}`;
-        let hash = 2166136261;
-        for (let index = 0; index < text.length; index += 1) {
-          hash = Math.imul(hash ^ text.charCodeAt(index), 16777619);
-        }
-        return hash >>> 0;
-      };
-      ordered.sort((a, b) => signature(a) - signature(b));
-    }
-    return { main: diversify(ordered, 2), totalTracks: ranked.length };
-  }, [bundle, taste, mode, shuffleTurn]);
-
-  useEffect(() => {
-    setShelfPages({ main: 0 });
-  }, [bundle?.rotation_id, bundle?.generated_at]);
+  // Show every available recommendation at once in a horizontal, two-row
+  // viewport. No source labels, mood tabs, More tracks, or page pagination.
+  const recommendations = useMemo(
+    () => diversify(activeCandidates(bundle?.external.items ?? [], taste), 3),
+    [bundle, taste],
+  );
 
   useEffect(() => {
     const source = bundle?.external.items ?? [];
@@ -392,7 +325,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
     const seen = new Set<string>();
     const ordered: DiscoveryCandidate[] = [];
-    for (const candidate of [...rails.main, ...source]) {
+    for (const candidate of [...recommendations, ...source]) {
       if (seen.has(candidate.recording_mbid)) continue;
       seen.add(candidate.recording_mbid);
       ordered.push(candidate);
@@ -494,106 +427,38 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     }
   }
 
-  async function addToLibrary(candidate: DiscoveryCandidate) {
-    if (importing) return;
-
-    const authKey = "waxloom.authorizedMediaImports";
-    let authorized = window.localStorage.getItem(authKey) === "true";
-    if (!authorized) {
-      authorized = window.confirm(
-        "Waxloom can download this music source into your local library. Confirm that you are authorized to save the media you import this way.",
-      );
-      if (!authorized) return;
-      window.localStorage.setItem(authKey, "true");
-    }
-
-    setImporting(candidate.recording_mbid);
-    setError(null);
-    setNotice(`Adding ${candidate.artist} — ${candidate.title} to your library…`);
-
-    try {
-      const search = await api.youtubeSearch(candidate.artist, candidate.title, undefined, 1);
-      const best = search.items[0];
-      if (!best || best.score < 80) {
-        setNotice("The automatic source match was ambiguous. Choose the music source manually before importing.");
-        onImportCandidate(candidate);
-        return;
-      }
-
-      const result = await api.youtubeImport(candidate.artist, candidate.title, best.url, null, true);
-      setNotice(
-        result.status === "already_local"
-          ? "Already in your local library — no duplicate was downloaded."
-          : result.status === "imported"
-            ? `Added to your library: ${result.relative_path ?? `${candidate.artist} / unknown release`}.`
-            : `Downloaded to your library: ${result.relative_path ?? `${candidate.artist} / Singles`}. Navidrome is still indexing it.`,
-      );
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Library import failed.");
-      setNotice(null);
-    } finally {
-      setImporting(null);
-    }
+  function addToLibrary(candidate: DiscoveryCandidate) {
+    const enqueued = enqueueDiscoveryDownload(candidate, onImportCandidate);
+    if (enqueued) setNotice(null);
   }
 
   const tasteLikes = Object.values(taste).filter((entry) => entry.value > 0).length;
   const tasteLess = Object.values(taste).filter((entry) => entry.value < 0).length;
   const currentPreviewMbid = player.currentPreview?.recording_mbid ?? null;
 
-  function nextShelfPage(key: ShelfKey) {
-    setShelfPages((current) => ({ ...current, [key]: current[key] + 1 }));
-  }
-
   return (
-    <div className="discovery-layout discovery-auto-layout">
-      <section className="panel discovery-profile-panel discovery-profile-compact">
-        <div className="section-toolbar">
-          <div>
-            <p className="eyebrow">Discovery · music outside your library</p>
-            <h2>Find something new.</h2>
-            <p className="muted">Listen, like, skip or download a track into your library.</p>
-          </div>
-          <button className="secondary-action" type="button" onClick={() => void requestBackgroundRefresh()}>
-            Find fresh tracks
-          </button>
+    <div className="discovery-layout discovery-fit-page">
+      <header className="discovery-fit-header">
+        <div>
+          <strong>Discovery</strong>
+          <span>{recommendations.length} tracks · {feedStatus === "ready" ? "ready" : feedStatus} · {formatFeedTime(bundle?.generated_at)}</span>
         </div>
-        <div className="discovery-feed-status">
-          <span className={`feed-dot feed-dot-${feedStatus}`} />
-          <strong>{feedStatus === "ready" ? "Ready" : feedStatus === "refreshing" ? "Updating music…" : "Preparing music…"}</strong>
-          <span>{formatFeedTime(bundle?.generated_at)}</span>
-          {bundle?.rotation_seconds ? <span>New mix every {Math.round(bundle.rotation_seconds / 60)} min</span> : null}
+        <div className="discovery-fit-controls">
+          {downloads.some((item) => ["queued", "searching", "downloading"].includes(item.phase))
+            ? <small>{downloads.filter((item) => ["queued", "searching", "downloading"].includes(item.phase)).length} downloading</small> : null}
+          <button className="secondary-action" type="button" onClick={() => void requestBackgroundRefresh()} title="Prepare fresh suggestions in the background">↻ New music</button>
         </div>
-        <div className="discovery-mode-controls" role="group" aria-label="Discovery mood">
-          <button className={mode === "for_you" ? "secondary-action discovery-mode-active" : "secondary-action"} onClick={() => setMode("for_you")} type="button">For you</button>
-          <button className={mode === "surprise" ? "secondary-action discovery-mode-active" : "secondary-action"} onClick={() => { setMode("surprise"); setShuffleTurn((n) => n + 1); }} type="button">Surprise me</button>
-          <button className={mode === "rare" ? "secondary-action discovery-mode-active" : "secondary-action"} onClick={() => setMode("rare")} type="button">Rare finds</button>
-          <button className="secondary-action" onClick={() => { setShuffleTurn((n) => n + 1); setShelfPages({ main: 0 }); setMode("surprise"); }} type="button">Another mix ↻</button>
-        </div>
-        {!bundle && <div className="discovery-building discovery-building-passive">Preparing the first discoveries. You can leave this page.</div>}
-        {error && <div className="state-card state-card-error">{error}</div>}
-        {notice && <div className="state-card state-card-success">{notice}</div>}
-      </section>
-
-      {bundle && (
-        <>
-          <DiscoveryShelf
-            eyebrow={`${rails.totalTracks} available tracks`}
-            title={mode === "for_you" ? "For you" : mode === "rare" ? "Rare finds" : "Your mix"}
-            items={rails.main}
-            page={shelfPages.main}
-            onNextPage={() => nextShelfPage("main")}
-            currentPreviewMbid={currentPreviewMbid}
-            playing={player.playing}
-            importingMbid={importing}
-            rejectingMbid={rejecting}
-            taste={taste}
-            onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={(candidate) => void addToLibrary(candidate)}
-            onFeedback={updateFeedback}
-            onBadSource={(candidate) => void rejectBadSource(candidate)}
-          />
-        </>
-      )}
+      </header>
+      {error && <div className="discovery-fit-message is-error">{error}</div>}
+      {notice && <div className="discovery-fit-message">{notice}</div>}
+      {bundle ? (
+        <DiscoveryShelf items={recommendations}
+          currentPreviewMbid={currentPreviewMbid} playing={player.playing}
+          rejectingMbid={rejecting} taste={taste}
+          onPlayQueue={playDiscoveryQueue} onQuickAdd={addToLibrary}
+          onFeedback={updateFeedback}
+          onBadSource={(candidate) => void rejectBadSource(candidate)} />
+      ) : <div className="discovery-fit-message">Preparing the first discoveries…</div>}
     </div>
   );
 }
