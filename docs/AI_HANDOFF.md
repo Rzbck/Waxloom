@@ -10,6 +10,7 @@
 - Navidrome database mounted read-only into Docker for `/api/library/recent-tracks`; refreshes in web when app is visible. Full scan fallback if selective scan misses a new artist folder.
 - Validation: Docker service healthy, web and HTTPS status 200, recent-track API 200, both local and Tailscale HTTP audio Range 206 byte-for-byte identical, Python tests, TypeScript build, security and Discovery invariant checks.
 - **Open validation**: Safari on physical iPhone; at least one user-authorized real Discovery import; 11 pre-existing old Singles-folder files (including 6 WebM) require manual per-item source/metadata review, not blind deletion.
+- **2026-10-13 14:00 layout follow-up**: Discovery now uses a single full-width compact song list on desktop and mobile, with seven fixed grid slots so thumbs cannot wrap/misalign; narrow phones hide only the optional score. Real imports at 13:56–13:58 (Kid Francescoli, Klangkarussell & GIVVEN, video-title `4K`) were indexed, opened with inherited NTFS ACLs, probed as playable M4A and passed byte-matching HTTP 206 tests. The last has suspect YouTube-derived artist/title metadata; intentionally not changed or deleted.
 - Rollback instructions: `docs/DISCOVERY_LIBRARY_PIPELINE_20261013.md`; local Docker backups are outside the GitHub repo.
 
 ## Published baseline
