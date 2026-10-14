@@ -10,7 +10,9 @@ import {
 } from "react";
 
 import { api } from "./api";
-import type { PreviewTrack, Song } from "./types";
+import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
+import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
+import type { DiscoveryCandidate, PlaylistSummary, PreviewTrack, Song } from "./types";
 
 type RepeatMode = "off" | "all" | "one";
 type PlayerMode = "navidrome" | "preview";
@@ -21,10 +23,10 @@ type PlayerContextValue = {
   currentPreview: PreviewTrack | null;
   currentIndex: number;
   playing: boolean;
-  playSongs: (songs: Song[], startIndex?: number) => void;
+  playSongs: (songs: Song[], startIndex?: number, options?: { ordered?: boolean }) => void;
   playNow: (song: Song) => void;
   addToQueue: (song: Song) => void;
-  playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number) => void;
+  playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number, onManualImport?: (candidate: DiscoveryCandidate) => void) => void;
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -45,7 +47,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrobbledRef = useRef<string | null>(null);
   const localSongIdRef = useRef<string | null>(null);
+  const explicitQueueRef = useRef(false);
   const previewStartAtZeroRef = useRef(false);
+  const previewManualImportRef = useRef<((candidate: DiscoveryCandidate) => void) | null>(null);
+  const failedPreviewsRef = useRef<Set<string>>(new Set());
+  const previewFailureStreakRef = useRef(0);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
   const [mode, setMode] = useState<PlayerMode>("navidrome");
@@ -62,10 +68,46 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [shuffle, setShuffle] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+  const closeMobilePlayer = useCallback(() => setMobileExpanded(false), []);
+  const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
+  const [playerPlaylists, setPlayerPlaylists] = useState<PlaylistSummary[]>([]);
+  const [playlistQuery, setPlaylistQuery] = useState("");
+  const playlistMenuRef = useRef<HTMLElement | null>(null);
+  const playlistButtonRef = useRef<HTMLButtonElement | null>(null);
+  const playlistRequestRef = useRef(0);
+  const [playerStarred, setPlayerStarred] = useState(false);
+  // Shared with Discovery's taste profile: dislikes are durable and influence
+  // recommendations without deleting or hiding the listener's music files.
+  const [playerTaste, setPlayerTaste] = useState<Record<string, { value: -1 | 1; artist: string; tags: string[] }>>(() => {
+    try {
+      const value = JSON.parse(localStorage.getItem("waxloom.discovery.taste.v1") ?? "{}");
+      return value && typeof value === "object" ? value : {};
+    } catch { return {}; }
+  });
+  const [playerActionBusy, setPlayerActionBusy] = useState(false);
+  const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
+  const downloads = useDownloads();
 
   const currentSong = mode === "navidrome" && currentIndex >= 0 ? queue[currentIndex] ?? null : null;
   const currentPreview = mode === "preview" && previewIndex >= 0 ? previewQueue[previewIndex] ?? null : null;
+  const currentPreviewDownloadPhase = currentPreview
+    ? (downloads.find((item) => item.id === currentPreview.recording_mbid)?.phase ?? downloadPhase(currentPreview.recording_mbid))
+    : undefined;
+  const tasteKey = currentPreview?.recording_mbid
+    ?? (currentSong ? `library:${currentSong.id}` : null);
+  const currentTaste = tasteKey ? (playerTaste[tasteKey]?.value ?? 0) : 0;
+  const playerDisliked = currentTaste === -1;
+  const playerLiked = currentPreview ? currentTaste === 1 : playerStarred;
+  useEffect(() => {
+    setPlayerStarred(Boolean(currentSong?.starred));
+    playlistRequestRef.current += 1;
+    setPlaylistPickerOpen(false);
+    setPlaylistQuery("");
+    setPlayerActionMessage(null);
+  }, [currentSong?.id, currentPreview?.id]);
+
   const activeIndex = mode === "preview" ? previewIndex : currentIndex;
   const activeLength = mode === "preview" ? previewQueue.length : queue.length;
   const activeTitle = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
@@ -105,6 +147,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     void api
       .playQueue()
       .then((saved) => {
+        // An explicit selection beats a slow saved-queue response on first load.
+        if (explicitQueueRef.current) return;
         const entries = saved.entry ?? [];
         if (entries.length === 0) return;
         setQueue(entries);
@@ -249,26 +293,39 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id);
   }, [queue, currentSong?.id, mode]);
 
-  const playSongs = useCallback((songs: Song[], startIndex = 0) => {
+  const playSongs = useCallback((songs: Song[], startIndex = 0, options?: { ordered?: boolean }) => {
     if (songs.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, songs.length - 1));
     const song = songs[safeIndex];
     if (!song) return;
 
-    startLocalPlayback(song);
+    // Home's chronological New tracks list needs a deterministic Next,
+    // even after the user previously enabled Shuffle or Repeat one.
+    if (options?.ordered) {
+      setShuffle(false);
+      setRepeat("off");
+    }
+    explicitQueueRef.current = true;
     setMode("navidrome");
-    setQueue(songs);
+    setQueue([...songs]);
     setCurrentIndex(safeIndex);
+    setCurrentTime(0);
     setPreviewError(null);
+    startLocalPlayback(song);
   }, [startLocalPlayback]);
 
-  const playPreviewTracks = useCallback((tracks: PreviewTrack[], startIndex = 0) => {
+  const playPreviewTracks = useCallback((
+    tracks: PreviewTrack[], startIndex = 0,
+    onManualImport?: (candidate: DiscoveryCandidate) => void,
+  ) => {
     if (tracks.length === 0) return;
+    previewManualImportRef.current = onManualImport ?? null;
+    failedPreviewsRef.current.clear();
+    previewFailureStreakRef.current = 0;
 
     const preparedTracks = tracks.map((track) => ({
       ...track,
-      preview_url: track.preview_url
-        ?? `/api/discovery/previews/${encodeURIComponent(track.recording_mbid)}`,
+      preview_url: api.previewStreamUrl(track.recording_mbid, track.artist, track.title),
     }));
     const safeIndex = Math.max(0, Math.min(startIndex, preparedTracks.length - 1));
     const target = preparedTracks[safeIndex];
@@ -319,6 +376,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playNow = useCallback((song: Song) => playSongs([song], 0), [playSongs]);
 
   const addToQueue = useCallback((song: Song) => {
+    explicitQueueRef.current = true;
     setQueue((current) => {
       if (current.length === 0) {
         setCurrentIndex(0);
@@ -465,6 +523,157 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     void audio.play().catch(() => setPlaying(false));
   }
 
+  async function toggleCurrentFavorite() {
+    if (!currentSong || playerActionBusy) return;
+    const target = !playerStarred;
+    setPlayerActionBusy(true);
+    try {
+      await api.setStarred(currentSong.id, target);
+      setPlayerStarred(target);
+      setQueue((existing) => existing.map((song) => song.id === currentSong.id
+        ? { ...song, starred: target ? new Date().toISOString() : undefined } : song));
+      setPlayerActionMessage(target ? "Added to favorites" : "Removed from favorites");
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not update favorites");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  async function setCurrentTaste(value: -1 | 0 | 1) {
+    if (playerActionBusy || !tasteKey) return;
+    const artist = currentPreview?.artist ?? currentSong?.artist ?? "Unknown artist";
+    const title = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
+    setPlayerActionBusy(true);
+    try {
+      await api.discoveryTrackFeedback(tasteKey, artist, title, value);
+      setPlayerTaste((old) => {
+        const next = { ...old };
+        if (value === 0) delete next[tasteKey];
+        else next[tasteKey] = { value, artist, tags: [] };
+        try { localStorage.setItem("waxloom.discovery.taste.v1", JSON.stringify(next)); } catch { /* private mode */ }
+        return next;
+      });
+      setPlayerActionMessage(value === -1 ? "Show less like this in Discovery"
+        : value === 1 ? "Liked — more similar discoveries"
+        : "Taste feedback cleared");
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not save taste feedback");
+    } finally { setPlayerActionBusy(false); }
+  }
+
+  async function handleLikePlaying() {
+    if (currentPreview) {
+      await setCurrentTaste(playerLiked ? 0 : 1);
+    } else {
+      await toggleCurrentFavorite();
+    }
+  }
+
+  async function toggleDislikePlaying() {
+    await setCurrentTaste(playerDisliked ? 0 : -1);
+  }
+
+  function downloadPlayingPreview() {
+    const candidate = currentPreview?.candidate;
+    if (!candidate) {
+      setPlayerActionMessage("Choose a Discovery track to download.");
+      return;
+    }
+    const accepted = enqueueDiscoveryDownload(candidate, (selection) => {
+      if (previewManualImportRef.current) previewManualImportRef.current(selection);
+      else setPlayerActionMessage("This source needs manual selection in Discovery.");
+    });
+    if (accepted) setPlayerActionMessage("Download queued — see Downloads for progress.");
+  }
+
+  async function openPlayerPlaylists() {
+    if (!currentSong) return;
+    if (playlistPickerOpen) {
+      playlistRequestRef.current += 1;
+      setPlaylistPickerOpen(false);
+      return;
+    }
+    const requestId = ++playlistRequestRef.current;
+    setPlaylistQuery("");
+    setPlaylistPickerOpen(true); // Never wait for the network to open the menu.
+    setPlayerActionMessage(null);
+    setPlayerActionBusy(true);
+    try {
+      const response = await api.playlists();
+      if (playlistRequestRef.current === requestId) {
+        setPlayerPlaylists(response.items);
+      }
+    } catch (error) {
+      if (playlistRequestRef.current === requestId) {
+        setPlaylistPickerOpen(false);
+        setPlayerActionMessage(error instanceof Error ? error.message : "Could not load playlists");
+      }
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!playlistPickerOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      const node = event.target as Node;
+      if (playlistMenuRef.current?.contains(node) || playlistButtonRef.current?.contains(node)) return;
+      playlistRequestRef.current += 1;
+      setPlaylistPickerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      playlistRequestRef.current += 1;
+      setPlaylistPickerOpen(false);
+      playlistButtonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [playlistPickerOpen]);
+
+  async function addCurrentToPlaylist(playlist: PlaylistSummary) {
+    if (!currentSong || playerActionBusy) return;
+    setPlayerActionBusy(true);
+    try {
+      await api.updatePlaylist(playlist.id, { song_ids_to_add: [currentSong.id] });
+      setPlaylistPickerOpen(false);
+      setPlayerActionMessage(`Added to ${playlist.name}`);
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not update playlist");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  async function instantMixFromPlaying() {
+    if (!currentSong || playerActionBusy) return;
+    setPlayerActionBusy(true);
+    setPlayerActionMessage("Building an instant mix…");
+    try {
+      const response = await api.localSimilar(currentSong.id, 24);
+      const similar: Song[] = response.items
+        .filter((song) => song.id && song.id !== currentSong.id)
+        .map((song) => ({ ...song, id: song.id, title: song.title, artist: song.artist, album: song.album }));
+      if (!similar.length) {
+        setPlayerActionMessage("No similar local tracks available yet");
+        return;
+      }
+      playSongs([currentSong, ...similar], 0);
+      setPlayerActionMessage(response.source === "library_fallback"
+        ? `Library mix — ${similar.length} tracks (AudioMuse not indexed yet)`
+        : `Instant mix — ${similar.length} similar tracks`);
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Instant mix unavailable");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
   const contextValue = useMemo<PlayerContextValue>(
     () => ({
       queue,
@@ -480,7 +689,77 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [queue, currentSong, currentPreview, activeIndex, playing, playSongs, playNow, addToQueue, playPreviewTracks],
   );
 
+  const jumpToIndex = (targetIndex: number) => {
+    if (targetIndex < 0) return;
+    if (mode === "navidrome") {
+      const song = queue[targetIndex];
+      if (!song) return;
+      startLocalPlayback(song, "queue");
+      setCurrentIndex(targetIndex);
+      return;
+    }
+    const preview = previewQueue[targetIndex];
+    if (!preview) return;
+    const audio = audioRef.current;
+    previewStartAtZeroRef.current = true;
+    audio?.pause();
+    if (audio) {
+      try { audio.currentTime = 0; } catch { /* Metadata not yet loaded. */ }
+    }
+    setCurrentTime(0);
+    setDuration(preview.duration ?? 0);
+    setPreviewIndex(targetIndex);
+    setPlaying(true);
+  };
+
   const activeQueue = mode === "preview" ? previewQueue : queue;
+
+  // Standard iOS lock-screen controls. Web Media Session cannot expose
+  // arbitrary Favorite/Playlist/Instant Mix buttons in Apple's lock-screen UI.
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || (!currentSong && !currentPreview)) return;
+    const session = navigator.mediaSession;
+    if (typeof MediaMetadata === "undefined") return;
+    session.metadata = new MediaMetadata({
+      title: activeTitle,
+      artist: activeArtist,
+      album: currentSong?.album ?? "",
+      artwork: currentSong?.coverArt ? [{ src: api.coverUrl(currentSong.coverArt, 600), sizes: "600x600" }] : [],
+    });
+    const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+      ["nexttrack", () => next()],
+      ["previoustrack", () => previous()],
+      ["play", () => { void audioRef.current?.play(); }],
+      ["pause", () => { audioRef.current?.pause(); }],
+    ];
+    for (const [action, handler] of actions) {
+      try { session.setActionHandler(action, handler); } catch { /* Unsupported iOS action. */ }
+    }
+    return () => {
+      for (const [action] of actions) {
+        try { session.setActionHandler(action, null); } catch { /* Unsupported. */ }
+      }
+    };
+  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id, next, previous]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+  }, [playing]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState
+        || !Number.isFinite(duration) || duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.min(Math.max(currentTime, 0), duration),
+      });
+    } catch { /* Older Safari versions may not accept position updates. */ }
+  }, [currentTime, duration]);
+
+
 
   return (
     <PlayerContext.Provider value={contextValue}>
@@ -507,14 +786,40 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }}
         onTimeUpdate={onTimeUpdate}
         onPlay={() => setPlaying(true)}
+        onPlaying={() => {
+          if (mode === "preview") {
+            previewFailureStreakRef.current = 0;
+            setPreviewError(null);
+          }
+        }}
+        onPause={() => setPlaying(false)}
         onEnded={() => {
           submitScrobble();
           next();
         }}
         onError={() => {
-          setPlaying(false);
-          if (mode === "preview") {
-            setPreviewError("The cached Discovery preview could not be played. Press next or try again.");
+          if (mode !== "preview" || !currentPreview) {
+            // Ordinary Navidrome streams are unaffected by Discovery failover.
+            setPlaying(false);
+            return;
+          }
+          const src = audioRef.current?.currentSrc;
+          const expected = currentPreview.preview_url;
+          // Ignore a late error from a previous track after rapid Next taps.
+          if (src && expected && new URL(src, window.location.href).href
+            !== new URL(expected, window.location.href).href) return;
+
+          failedPreviewsRef.current.add(currentPreview.id);
+          previewFailureStreakRef.current += 1;
+          const nextAvailable = previewQueue.findIndex((item, index) =>
+            index > previewIndex && !failedPreviewsRef.current.has(item.id));
+          // A broken external source must not strand the whole Discovery
+          // queue. Cap consecutive automatic skips; never create a loop.
+          if (previewFailureStreakRef.current <= 3 && nextAvailable >= 0) {
+            jumpToIndex(nextAvailable);
+          } else {
+            setPlaying(false);
+            setPreviewError("These Discovery previews are unavailable right now. Try another track or refresh Discovery.");
           }
         }}
       />
@@ -522,7 +827,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       {(currentSong || currentPreview) && (
         <>
           {queueOpen && (
-            <aside className="queue-drawer" aria-label="Play queue">
+            <aside className={`queue-drawer ${mobileExpanded ? "waxloom-queue-sheet" : ""}`} aria-label="Play queue">
               <div className="queue-drawer-head">
                 <div>
                   <p className="eyebrow">{mode === "preview" ? "Discovery preview queue" : "Navidrome play queue"}</p>
@@ -541,30 +846,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       type="button"
                       key={`${item.id}-${index}`}
                       onClick={() => {
-                        if (mode === "preview") {
-                          if (index === previewIndex) {
-                            togglePlayback();
-                            return;
-                          }
-                          const audio = audioRef.current;
-                          previewStartAtZeroRef.current = true;
-                          audio?.pause();
-                          if (audio) {
-                            try {
-                              audio.currentTime = 0;
-                            } catch {
-                              // loadedmetadata performs the hard reset.
-                            }
-                          }
-                          setCurrentTime(0);
-                          setDuration((item as PreviewTrack).duration ?? 0);
-                          setPreviewIndex(index);
-                          setPlaying(true);
+                        if (index === activeIndex) {
+                          togglePlayback();
                           return;
                         }
-                        const song = item as Song;
-                        startLocalPlayback(song, "queue");
-                        setCurrentIndex(index);
+                        jumpToIndex(index);
                       }}
                     >
                       <span>{index + 1}</span>
@@ -577,7 +863,50 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </aside>
           )}
 
+          {playlistPickerOpen && (
+            <aside ref={playlistMenuRef} className={`player-playlist-picker ${mobileExpanded ? "waxloom-playlist-sheet" : ""}`} aria-label="Choose a playlist">
+              <strong>Add “{currentSong?.title}” to a playlist</strong>
+              <input type="search" value={playlistQuery} autoFocus
+                onChange={(event) => setPlaylistQuery(event.target.value)}
+                placeholder="Find a playlist…" aria-label="Find a playlist" />
+              <div className="player-playlist-options">
+                {playerPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistQuery.toLowerCase()))
+                  .slice(0, 12).map((playlist) => (
+                  <button key={playlist.id} type="button" disabled={playerActionBusy}
+                    onClick={() => void addCurrentToPlaylist(playlist)}>{playlist.name}</button>
+                ))}
+              </div>
+              {playerActionBusy && playerPlaylists.length === 0 && <span className="player-action-tip">Loading playlists…</span>}
+              {!playerActionBusy && playerPlaylists.length === 0 && <span className="player-action-tip">No playlists yet. Create one from the Playlists tab.</span>}
+              {playerPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistQuery.toLowerCase())).length > 12
+                && <small>Refine your search to see more playlists.</small>}
+            </aside>
+          )}
           <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""}`}>
+            <div className="waxloom-mobile-mini">
+              <button className="waxloom-mobile-mini-info" type="button"
+                onClick={() => setMobileExpanded(true)}
+                aria-label={`Open full-screen player for ${activeTitle}`}>
+                <span className="waxloom-mobile-mini-cover">
+                  {currentSong?.coverArt
+                    ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" />
+                    : <PlayerIcon name="music" size={25} />}
+                </span>
+                <span className="waxloom-mobile-mini-copy">
+                  <MarqueeText value={activeTitle} className="waxloom-mobile-mini-title" />
+                  <span className="waxloom-mobile-mini-artist">{activeArtist}</span>
+                </span>
+                <span className="waxloom-mobile-mini-chevron"><PlayerIcon name="chevron-down" size={22} /></span>
+              </button>
+              <button className="waxloom-mobile-mini-play" type="button" onClick={togglePlayback}
+                disabled={mode === "preview" && Boolean(previewResolving)}
+                aria-label={playing ? "Pause" : "Play"}>
+                <PlayerIcon name={playing ? "pause" : "play"} size={24} />
+              </button>
+              <button className="waxloom-mobile-mini-next" type="button" onClick={next} aria-label="Next track">
+                <PlayerIcon name="next" size={22} />
+              </button>
+            </div>
             <div className="player-track">
               <div className="player-cover">
                 {currentSong?.coverArt ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" /> : <span>{mode === "preview" ? "◎" : "♪"}</span>}
@@ -610,11 +939,68 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </div>
 
             <div className="player-tools">
+              <button className={playerLiked ? "icon-button player-quick-action is-favorite" : "icon-button player-quick-action"}
+                type="button" onClick={() => void handleLikePlaying()}
+                title={currentPreview ? "Like this Discovery preview" : (playerStarred ? "Remove from favorites" : "Like / favorite playing song")}
+                aria-label="Favorite playing song" disabled={(!currentSong && !currentPreview) || playerActionBusy}>♥</button>
+              <button className={playerDisliked ? "icon-button player-quick-action is-less" : "icon-button player-quick-action"}
+                type="button" onClick={() => void toggleDislikePlaying()} disabled={playerActionBusy}
+                aria-label={playerDisliked ? "Clear dislike" : "Dislike playing song"}
+                title={playerDisliked ? "Clear dislike" : "Show less like this"}>↓</button>
+              <button ref={playlistButtonRef} className="icon-button player-quick-action" type="button"
+                onClick={() => void openPlayerPlaylists()} disabled={!currentSong || playerActionBusy}
+                title={currentSong ? "Add playing song to playlist" : "Download Discovery preview to library first"}
+                aria-label="Add playing song to playlist">＋</button>
+              <button className="icon-button player-quick-action" type="button"
+                onClick={() => void instantMixFromPlaying()} disabled={!currentSong || playerActionBusy}
+                title={currentSong ? "Instant mix from this song" : "Download Discovery preview to library first"}
+                aria-label="Instant mix from playing song">✦</button>
               <button className="icon-button" type="button" onClick={() => setQueueOpen((value) => !value)} aria-label="Queue">☷ {activeQueue.length}</button>
               <span>🔊</span>
               <input className="volume-slider" type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="Volume" />
+              {playerActionMessage && <small className="player-action-tip" role="status">{playerActionMessage}</small>}
             </div>
           </footer>
+          <MobilePlayerPanel
+            open={mobileExpanded}
+            onClose={closeMobilePlayer}
+            title={activeTitle}
+            artist={activeArtist}
+            album={currentSong?.album}
+            cover={currentSong?.coverArt ? api.coverUrl(currentSong.coverArt, 600) : undefined}
+            isPreview={mode === "preview"}
+            playing={playing}
+            resolving={Boolean(previewResolving)}
+            currentTime={currentTime}
+            duration={duration}
+            queue={activeQueue.map((song) => ({
+              id: song.id, title: song.title ?? "Unknown title",
+              artist: song.artist ?? "Unknown artist", duration: song.duration,
+            }))}
+            index={activeIndex}
+            shuffle={shuffle}
+            repeat={repeat}
+            isFavorite={playerLiked}
+            isDisliked={playerDisliked}
+            busy={playerActionBusy}
+            feedback={playerActionMessage}
+            playbackError={previewError}
+            suspended={playlistPickerOpen || queueOpen}
+            onPlayPause={togglePlayback}
+            onPrevious={previous}
+            onNext={next}
+            onSeek={seek}
+            onShuffle={() => setShuffle((value) => !value)}
+            onRepeat={cycleRepeat}
+            onFavorite={() => void handleLikePlaying()}
+            onDislike={() => void toggleDislikePlaying()}
+            onPlaylist={() => void openPlayerPlaylists()}
+            onMix={() => void instantMixFromPlaying()}
+            downloadPhase={currentPreviewDownloadPhase}
+            onDownload={downloadPlayingPreview}
+            onQueue={() => setQueueOpen(true)}
+            onQueueItem={jumpToIndex}
+          />
         </>
       )}
     </PlayerContext.Provider>

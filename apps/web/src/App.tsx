@@ -1,8 +1,14 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 
 import { api } from "./api";
 import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
+import { MobileNavigation } from "./MobileNavigation";
+import { MobileHome } from "./MobileHome";
+import { VinylAlbums } from "./VinylRack";
+import { VinylSongs } from "./VinylSongs";
+import { VinylArtists, VinylPlaylists } from "./VinylEntities";
+import { DownloadTray } from "./downloadQueue";
 import { usePlayer } from "./Player";
 import type {
   Album,
@@ -48,97 +54,14 @@ type SongTableProps = {
   onToggleStar: (song: Song) => void;
   onAddPlaylist: (song: Song) => void;
   onRemove?: (index: number) => void;
+  ordered?: boolean;
 };
 
-function SongTable({ songs, starOverrides, onToggleStar, onAddPlaylist, onRemove }: SongTableProps) {
-  const player = usePlayer();
-
-  return (
-    <div className="track-list" role="table" aria-label="Songs">
-      <div className="track-row track-row-header" role="row">
-        <span>#</span>
-        <span>Title</span>
-        <span>Artist</span>
-        <span>Album</span>
-        <span>Time</span>
-        <span>Actions</span>
-      </div>
-      {songs.map((song, index) => {
-        const starred = starOverrides[song.id] ?? Boolean(song.starred);
-        return (
-          <div className="track-row" role="row" key={`${song.id}-${index}`}>
-            <button
-              className="track-play"
-              type="button"
-              onClick={() => player.playSongs(songs, index)}
-              aria-label={`Play ${song.title ?? "song"}`}
-            >
-              ▶
-            </button>
-            <button className="track-title-button" type="button" onClick={() => player.playSongs(songs, index)}>
-              {song.title ?? "Unknown title"}
-            </button>
-            <span title={song.artist ?? "Unknown artist"}>{song.artist ?? "Unknown artist"}</span>
-            <span title={song.album ?? "Unknown album"}>{song.album ?? "Unknown album"}</span>
-            <span>{formatDuration(song.duration)}</span>
-            <div className="row-actions">
-              <button
-                className={starred ? "mini-action mini-action-active" : "mini-action"}
-                type="button"
-                onClick={() => onToggleStar(song)}
-                title={starred ? "Remove favorite" : "Favorite"}
-              >
-                ★
-              </button>
-              <button className="mini-action" type="button" onClick={() => player.addToQueue(song)} title="Add to queue">
-                +Q
-              </button>
-              <button className="mini-action" type="button" onClick={() => onAddPlaylist(song)} title="Add to playlist">
-                +P
-              </button>
-              {onRemove && (
-                <button className="mini-action mini-action-danger" type="button" onClick={() => onRemove(index)} title="Remove from playlist">
-                  ×
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      })}
-      {songs.length === 0 && <div className="empty-state">No songs.</div>}
-    </div>
-  );
+/* One artwork-led track presentation on phone and desktop; no legacy tables. */
+function SongTable(props: SongTableProps) {
+  return <VinylSongs {...props} />;
 }
 
-function AlbumCard({ album, onOpen, onPlay }: { album: Album; onOpen: () => void; onPlay: () => void }) {
-  return (
-    <article className="media-card">
-      <button className="media-cover-button" type="button" onClick={onOpen}>
-        <div className="media-cover">
-          {album.coverArt ? <img src={api.coverUrl(album.coverArt, 360)} alt="" loading="lazy" /> : <span>◫</span>}
-          <span className="cover-play" onClick={(event) => { event.stopPropagation(); onPlay(); }}>▶</span>
-        </div>
-      </button>
-      <button className="media-copy" type="button" onClick={onOpen}>
-        <strong>{itemName(album)}</strong>
-        <span>{album.artist ?? "Unknown artist"}</span>
-        <small>{[album.year, album.genre].filter(Boolean).join(" · ") || `${album.songCount ?? 0} tracks`}</small>
-      </button>
-    </article>
-  );
-}
-
-function ArtistCard({ artist, onOpen }: { artist: Artist; onOpen: () => void }) {
-  return (
-    <button className="artist-card" type="button" onClick={onOpen}>
-      <div className="artist-avatar">
-        {artist.coverArt ? <img src={api.coverUrl(artist.coverArt, 260)} alt="" loading="lazy" /> : <span>{artist.name.slice(0, 1).toUpperCase()}</span>}
-      </div>
-      <strong>{artist.name}</strong>
-      <span>{artist.albumCount ?? 0} albums</span>
-    </button>
-  );
-}
 
 export default function App() {
   const player = usePlayer();
@@ -151,6 +74,7 @@ export default function App() {
 
   const [homeAlbums, setHomeAlbums] = useState<Album[]>([]);
   const [homeSongs, setHomeSongs] = useState<Song[]>([]);
+  const [recentSongs, setRecentSongs] = useState<Song[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
   const [albumMode, setAlbumMode] = useState("newest");
   const [artists, setArtists] = useState<Artist[]>([]);
@@ -175,6 +99,27 @@ export default function App() {
       .catch(() => setNavidromeHealth({ status: "unavailable", message: "Navidrome health check failed." }));
     void loadHome();
     void loadPlaylists(false);
+  }, []);
+
+  // External imports (Shazam/Waxloom) refresh automatically on desktop and phone.
+  useEffect(() => {
+    let active = true;
+    const refresh = () => {
+      if (document.visibilityState === "hidden") return;
+      void api.recentSongs(24)
+        .then((res) => { if (active) setRecentSongs(res.items); })
+        .catch(() => { /* Album view remains usable if read-only index is absent. */ });
+    };
+    refresh();
+    const ticker = window.setInterval(refresh, 45_000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      active = false;
+      window.clearInterval(ticker);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, []);
 
   async function run<T>(work: () => Promise<T>, apply: (value: T) => void) {
@@ -370,6 +315,8 @@ export default function App() {
     if (next === "favorites") void loadFavorites();
   }
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
   const navItems: Array<{ id: View; label: string }> = [
     { id: "home", label: "Home" },
     { id: "albums", label: "Albums" },
@@ -387,11 +334,14 @@ export default function App() {
   }, [view, searchQuery]);
 
   function renderAlbumGrid(items: Album[]) {
+    if (!items.length) return <p className="muted">No albums in this collection.</p>;
     return (
-      <div className="media-grid">
-        {items.map((album) => (
-          <AlbumCard key={album.id} album={album} onOpen={() => void openAlbum(album)} onPlay={() => void playAlbum(album)} />
-        ))}
+      <div className="waxloom-album-vinyl">
+        <VinylAlbums albums={items} batchSize={40}
+          label="Album covers. Swipe through the record bin."
+          onOpenAlbum={(album) => void openAlbum(album)}
+          onPlayAlbum={(album) => void playAlbum(album)}
+        />
       </div>
     );
   }
@@ -416,7 +366,7 @@ export default function App() {
   }
 
   return (
-    <main className={player.currentSong ? "app-shell app-shell-with-player" : "app-shell"}>
+    <main className={`app-shell ${player.currentSong || player.currentPreview ? "app-shell-with-player" : ""} ${view === "discovery" ? "app-shell-discovery" : ""} ${view === "home" ? "app-shell-home" : ""}`}>
       <aside className="sidebar">
         <div className="brand">Waxloom</div>
         <nav aria-label="Waxloom sections">
@@ -425,12 +375,13 @@ export default function App() {
               className={`nav-item ${view === item.id ? "nav-item-active" : ""}`}
               key={item.id}
               type="button"
-              onClick={() => navigate(item.id)}
+              onClick={() => { navigate(item.id); setMobileMenuOpen(false); }}
             >
               <span>{item.label}</span>
             </button>
           ))}
         </nav>
+        <button className="mobile-menu-toggle" type="button" aria-label="Open navigation menu" aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)}>☰ Menu</button>
         <div className="sidebar-status">
           <span className={navidromeHealth?.status === "ok" ? "dot dot-on" : "dot"} />
           <div>
@@ -440,6 +391,13 @@ export default function App() {
         </div>
       </aside>
 
+      <MobileNavigation
+        open={mobileMenuOpen}
+        current={view}
+        items={navItems}
+        onClose={closeMobileMenu}
+        onNavigate={(id) => { navigate(id); closeMobileMenu(); }}
+      />
       <section className="content">
         <header className="topbar">
           <div className="topbar-title">
@@ -477,31 +435,31 @@ export default function App() {
 
         {view === "home" && (
           <div className="workspace-stack">
-            <section className="hero-grid">
-              <article className="panel panel-primary">
-                <p className="eyebrow">Navidrome + Waxloom</p>
-                <h2>Browse. Play. Discover. Import.</h2>
-                <p>
-                  Your Navidrome library is the player core. Discovery, AudioMuse and imports now live in the same interface instead of separate local dashboards.
-                </p>
-                <div className="button-row">
-                  <button className="primary-action" type="button" onClick={() => navigate("discovery")}>Discover music</button>
-                  <button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>Shuffle something</button>
-                </div>
-              </article>
-              <article className="panel integration-panel">
-                <p className="eyebrow">Integrations</p>
-                {Object.entries(health?.integrations ?? {}).map(([name, configured]) => (
-                  <div className="integration-row" key={name}>
-                    <div><strong>{name}</strong><small>{name === "navidrome" ? statusLabel(navidromeHealth?.status) : configured ? "Configured" : "Off"}</small></div>
-                    <span className={(name === "navidrome" ? navidromeHealth?.status === "ok" : configured) ? "dot dot-on" : "dot"} />
-                  </div>
-                ))}
-              </article>
+            <section className="home-quickbar" aria-label="Quick music actions">
+              <button className="primary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>⤨ Shuffle</button>
+              <button className="secondary-action" type="button" onClick={() => navigate("discovery")}>✦ Discover</button>
+              <span className="home-quickbar-status" title="Integration details are available in the status indicator above">
+                <span className={navidromeHealth?.status === "ok" ? "dot dot-on" : "dot"} />
+                {navidromeHealth?.status === "ok" ? "Library online" : "Library unavailable"}
+              </span>
             </section>
 
+            <MobileHome albums={homeAlbums} recent={recentSongs}
+              onOpenAlbum={(album) => void openAlbum(album)}
+              onPlayAlbum={(album) => void playAlbum(album)}
+              onPlayRecent={(index) => player.playSongs(recentSongs, index, { ordered: true })}
+              onBrowseAlbums={() => navigate("albums")}
+              onRefreshRecent={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}
+            />
+            <div className="waxloom-home-desktop">
             <section>
-              <div className="section-toolbar"><div><p className="eyebrow">Recently added</p><h2>New in your library</h2></div><button className="secondary-action" type="button" onClick={() => navigate("albums")}>All albums →</button></div>
+              <div className="section-toolbar"><div><p className="eyebrow">Recently imported tracks</p><h2>New songs in your library</h2></div><button className="secondary-action" type="button" onClick={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}>Refresh</button></div>
+              {recentSongs.length > 0 ? (
+                <SongTable songs={recentSongs} ordered starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
+              ) : <p className="muted">New tracks are indexed by Navidrome; new albums appear below.</p>}
+            </section>
+            <section>
+              <div className="section-toolbar"><div><p className="eyebrow">Recently added albums</p><h2>New albums</h2></div><button className="secondary-action" type="button" onClick={() => navigate("albums")}>All albums →</button></div>
               {renderAlbumGrid(homeAlbums)}
             </section>
 
@@ -509,6 +467,7 @@ export default function App() {
               <div className="section-toolbar"><div><p className="eyebrow">Random</p><h2>Play something</h2></div><button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>Fresh shuffle</button></div>
               <SongTable songs={homeSongs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
             </section>
+            </div>
           </div>
         )}
 
@@ -554,7 +513,7 @@ export default function App() {
                 {renderAlbumGrid(selectedArtist.album ?? [])}
               </>
             ) : (
-              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome library</p><h2>Artists</h2><p className="muted">{artists.length} artists</p></div><button className="secondary-action" type="button" onClick={() => void loadArtists()}>Refresh</button></div><div className="artist-grid">{artists.map((artist) => <ArtistCard key={artist.id} artist={artist} onOpen={() => void openArtist(artist)} />)}</div></>
+              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome library</p><h2>Artists</h2><p className="muted">{artists.length} artists</p></div><button className="secondary-action" type="button" onClick={() => void loadArtists()}>Refresh</button></div><VinylArtists artists={artists} onOpen={(artist) => void openArtist(artist)} /></>
             )}
           </div>
         )}
@@ -568,7 +527,7 @@ export default function App() {
                 <SongTable songs={selectedPlaylist.entry ?? []} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} onRemove={(index) => void removePlaylistSong(index)} />
               </>
             ) : (
-              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome</p><h2>Your playlists</h2><p className="muted">{playlists.length} playlists</p></div><div className="button-row"><button className="secondary-action" type="button" onClick={() => void loadPlaylists()}>Refresh</button><button className="primary-action" type="button" onClick={() => void createPlaylist()}>+ New playlist</button></div></div><div className="playlist-grid">{playlists.map((playlist) => <button className="playlist-card" type="button" key={playlist.id} onClick={() => void openPlaylist(playlist)}><div className="playlist-card-art">{playlist.name.slice(0, 1).toUpperCase()}</div><div className="playlist-card-copy"><strong>{playlist.name}</strong><span>{playlist.songCount ?? 0} tracks · {formatDuration(playlist.duration)}</span></div><span>→</span></button>)}</div></>
+              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome</p><h2>Your playlists</h2><p className="muted">{playlists.length} playlists</p></div><div className="button-row"><button className="secondary-action" type="button" onClick={() => void loadPlaylists()}>Refresh</button><button className="primary-action" type="button" onClick={() => void createPlaylist()}>+ New playlist</button></div></div><VinylPlaylists playlists={playlists} onOpen={(playlist) => void openPlaylist(playlist)} /></>
             )}
           </div>
         )}
@@ -576,14 +535,14 @@ export default function App() {
         {view === "favorites" && (
           <div className="workspace-stack">
             <div className="section-toolbar"><div><p className="eyebrow">Navidrome starred</p><h2>Favorites</h2></div><button className="secondary-action" type="button" onClick={() => void loadFavorites()}>Refresh</button></div>
-            {favorites && <><section><h3>Artists</h3><div className="artist-grid compact-grid">{favorites.artists.map((artist) => <ArtistCard key={artist.id} artist={artist} onOpen={() => void openArtist(artist)} />)}</div></section><section><h3>Albums</h3>{renderAlbumGrid(favorites.albums)}</section><section><div className="section-toolbar"><h3>Tracks</h3><button className="secondary-action" type="button" onClick={() => player.playSongs(favorites.songs, 0)} disabled={favorites.songs.length === 0}>▶ Play favorites</button></div><SongTable songs={favorites.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
+            {favorites && <><section><h3>Artists</h3><VinylArtists artists={favorites.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums</h3>{renderAlbumGrid(favorites.albums)}</section><section><div className="section-toolbar"><h3>Tracks</h3><button className="secondary-action" type="button" onClick={() => player.playSongs(favorites.songs, 0)} disabled={favorites.songs.length === 0}>▶ Play favorites</button></div><SongTable songs={favorites.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
           </div>
         )}
 
         {view === "search" && (
           <div className="workspace-stack">
             {!searchResults && <div className="state-card">Use the search box above to search your whole Navidrome library.</div>}
-            {searchResults && <><section><h3>Artists <span className="muted-count">{searchResults.artists.length}</span></h3><div className="artist-grid compact-grid">{searchResults.artists.map((artist) => <ArtistCard key={artist.id} artist={artist} onOpen={() => void openArtist(artist)} />)}</div></section><section><h3>Albums <span className="muted-count">{searchResults.albums.length}</span></h3>{renderAlbumGrid(searchResults.albums)}</section><section><div className="section-toolbar"><h3>Tracks <span className="muted-count">{searchResults.songs.length}</span></h3><button className="secondary-action" type="button" onClick={() => player.playSongs(searchResults.songs, 0)} disabled={searchResults.songs.length === 0}>▶ Play results</button></div><SongTable songs={searchResults.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
+            {searchResults && <><section><h3>Artists <span className="muted-count">{searchResults.artists.length}</span></h3><VinylArtists artists={searchResults.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums <span className="muted-count">{searchResults.albums.length}</span></h3>{renderAlbumGrid(searchResults.albums)}</section><section><div className="section-toolbar"><h3>Tracks <span className="muted-count">{searchResults.songs.length}</span></h3><button className="secondary-action" type="button" onClick={() => player.playSongs(searchResults.songs, 0)} disabled={searchResults.songs.length === 0}>▶ Play results</button></div><SongTable songs={searchResults.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
           </div>
         )}
 
@@ -593,6 +552,8 @@ export default function App() {
           <ImportsView target={importTarget} playlists={playlists} onImported={handleImported} />
         )}
       </section>
+
+      <DownloadTray />
 
       {playlistSongTarget && (
         <div className="modal-backdrop" role="presentation" onMouseDown={() => setPlaylistSongTarget(null)}>

@@ -111,7 +111,7 @@ export function ImportsView({
           <div>
             <p className="eyebrow">Authorized media import</p>
             <h2>Find the exact source, then add it to your library.</h2>
-            <p className="muted">Waxloom stores imported music as a normal local-library track under Artist / Singles. No playlist is required.</p>
+            <p className="muted">Waxloom downloads into your music library, using a verified release when available. Unknown albums remain unlabelled. No playlist is required.</p>
           </div>
           <div className={runtimeReady ? "runtime-pill runtime-pill-ok" : "runtime-pill"}>
             {runtimeReady ? "Runtime ready" : "Runtime check"}
@@ -210,7 +210,7 @@ export function ImportsView({
         <div>
           <p className="eyebrow">Local library</p>
           <h2>Download + add to library</h2>
-          <p className="muted">Best available audio is kept without a forced MP3 transcode and saved under Artist / Singles.</p>
+          <p className="muted">The selected track is prepared safely and added to your library without overwriting existing music.</p>
         </div>
 
         <label className="authorization-check">

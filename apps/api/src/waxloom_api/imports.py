@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import os
 import re
+import shutil
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
+from uuid import uuid4
 
 from mutagen import File as MutagenFile
 
@@ -40,11 +45,16 @@ def _exact_song(
 
 
 def _album_name(discovery_candidate: dict[str, Any] | None) -> str:
-    if discovery_candidate is not None:
-        release = str(discovery_candidate.get("release") or "").strip()
-        if release:
-            return release
-    return "Singles"
+    """Use a known release, never invent the album Singles."""
+    return str((discovery_candidate or {}).get("release") or "").strip()
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _move_to_album(
@@ -54,48 +64,56 @@ def _move_to_album(
     artist: str,
     album: str,
 ) -> Path:
+    """Atomically publish verified audio without overwriting user media.
+
+    Copy to a hidden non-audio temp file in the destination directory; create
+    the final filename via an exclusive hard link. This refuses any collision.
+    """
     source = path.resolve()
-    album_dir = (
-        library_root
-        / _safe_component(artist, "Unknown Artist")
-        / _safe_component(album, "Singles")
-    ).resolve()
-    album_dir.relative_to(library_root)
+    root = library_root.resolve()
+    album_dir = root / _safe_component(artist, "Unknown Artist")
+    if album:
+        album_dir = album_dir / _safe_component(album, "Unknown Release")
+    album_dir = album_dir.resolve()
+    album_dir.relative_to(root)
     album_dir.mkdir(parents=True, exist_ok=True)
-
     target = (album_dir / source.name).resolve()
-    target.relative_to(library_root)
-    if target == source:
-        return source
-
-    previous_parent = source.parent
-    if target.is_file() and target.stat().st_size >= 100 * 1024:
-        source.unlink(missing_ok=True)
-    else:
-        target.unlink(missing_ok=True)
-        source.replace(target)
-
+    target.relative_to(root)
+    if source == target:
+        raise ValueError("Source must be outside library.")
+    if target.exists():
+        if target.is_file() and _sha256(target) == _sha256(source):
+            return target
+        raise FileExistsError(f"Different recording already exists: {target.name}")
+    staged = album_dir / f".{target.stem}.{uuid4().hex}.waxloom-part"
     try:
-        previous_parent.rmdir()
-    except OSError:
-        pass
-
+        # copyfile creates a fresh ACL in the music library.
+        shutil.copyfile(source, staged)
+        if staged.stat().st_size < 100 * 1024 or _sha256(staged) != _sha256(source):
+            raise OSError("Staged audio is incomplete.")
+        try:
+            os.link(staged, target)  # atomic publication, exclusive
+        except FileExistsError:
+            if target.is_file() and _sha256(target) == _sha256(staged):
+                return target
+            raise FileExistsError(f"Recording appeared during import: {target.name}")
+    finally:
+        staged.unlink(missing_ok=True)
     return target
 
 
 def _retag_album(path: Path, album: str) -> None:
-    """Best-effort album correction after the generic import normalization."""
-    try:
-        audio = MutagenFile(path, easy=True)
-        if audio is None:
-            return
-        if audio.tags is None:
-            audio.add_tags()
-        audio["album"] = [album]
-        audio.save()
-    except Exception:
-        # The album folder still gives Navidrome a useful filesystem fallback.
+    """Write verified release only; remove invented Singles tags."""
+    audio = MutagenFile(path, easy=True)
+    if audio is None:
         return
+    if audio.tags is None:
+        audio.add_tags()
+    if album:
+        audio["album"] = [album]
+    else:
+        audio.pop("album", None)
+    audio.save()
 
 
 class ImportService:
@@ -104,7 +122,7 @@ class ImportService:
     Discovery's + action is library-first: no playlist is required. When the
     Discovery candidate includes release metadata, imports are stored under
     ``<MusicFolder>/<Artist>/<Release>`` and tagged with that album name.
-    ``Singles`` remains the fallback when no reliable release is available.
+    Unknown release names remain unset, never forcibly labeled Singles.
     """
 
     def __init__(
@@ -182,39 +200,37 @@ class ImportService:
                 "playlist_pending": False,
             }
 
-        output: Path | None = None
-        if self.preview_cache is not None:
-            output = await self.preview_cache.promote_if_matching(
-                artist=artist,
-                title=title,
-                source_url=source_url,
-                output_root=self._library_root(),
-            )
-
-        if output is None:
+        # Explicit user-triggered import only. Stage outside indexed library.
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        with TemporaryDirectory(prefix="waxloom-import-", dir=self.state_dir) as workspace:
+            staging_root = Path(workspace)
+            output: Path | None = None
+            if self.preview_cache is not None:
+                output = await self.preview_cache.promote_if_matching(
+                    artist=artist,
+                    title=title,
+                    source_url=source_url,
+                    output_root=staging_root,
+                )
+            if output is None:
+                output = await asyncio.to_thread(
+                    self.youtube.download_selected,
+                    artist=artist,
+                    title=title,
+                    source_url=source_url,
+                    output_root=staging_root,
+                )
             output = await asyncio.to_thread(
-                self.youtube.download_selected,
-                artist=artist,
-                title=title,
-                source_url=source_url,
-                output_root=self._library_root(),
+                self.youtube.prepare_library_audio, output, artist=artist, title=title,
             )
-
-        output = await asyncio.to_thread(
-            self.youtube.prepare_library_audio,
-            output,
-            artist=artist,
-            title=title,
-        )
-
-        output = await asyncio.to_thread(
-            _move_to_album,
-            output,
-            library_root=self._library_root(),
-            artist=artist,
-            album=album,
-        )
-        await asyncio.to_thread(_retag_album, output, album)
+            await asyncio.to_thread(_retag_album, output, album)
+            output = await asyncio.to_thread(
+                _move_to_album,
+                output,
+                library_root=self._library_root(),
+                artist=artist,
+                album=album,
+            )
 
         if discovery_candidate is not None:
             recording_mbid = str(
@@ -244,6 +260,11 @@ class ImportService:
             indexed_song = _exact_song(search, artist, title)
             if indexed_song:
                 break
+
+        if not indexed_song:
+            # Navidrome's selective scanner can miss an entirely new artist
+            # directory. Escalate once to a full *background* scan, not a GUI.
+            await self.navidrome.start_scan(full_scan=True)
 
         relative = output.relative_to(self.library_root)
         return {

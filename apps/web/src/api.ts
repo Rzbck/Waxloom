@@ -197,6 +197,7 @@ export const api = {
   albums: (type = "newest", size = 80, offset = 0) => loadAlbumsCached(type, size, offset),
   artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
+  recentSongs: (size = 24) => request<ListResponse<Song>>(`/api/library/recent-tracks?size=${size}`, { cache: "no-store" }),
   album: (id: string) => loadAlbumDetailCached(id),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
   song: (id: string) => request<Song>(`/api/songs/${encodeURIComponent(id)}`),
@@ -238,7 +239,7 @@ export const api = {
     body: JSON.stringify({ ids, current, position }),
   }),
 
-  localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack>>(
+  localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack> & { source?: "audiomuse" | "library_fallback" }>(
     `/api/discovery/local-similar/${encodeURIComponent(songId)}?count=${count}`,
   ),
   discover: (seedSongIds: string[], undergroundWeight = 0.75, resultCount = 50) => request<DiscoveryResponse>("/api/discovery/external", {
@@ -261,6 +262,14 @@ export const api = {
       tags: candidate.tags ?? [],
       value,
     }),
+  }),
+
+  discoveryTrackFeedback: (
+    recordingMbid: string, artist: string, title: string,
+    value: -1 | 0 | 1, tags: string[] = [],
+  ) => request<{ ok: boolean; likes: number; dislikes: number; total: number }>("/api/discovery/feedback", {
+    method: "POST",
+    body: JSON.stringify({ recording_mbid: recordingMbid, artist, title, tags, value }),
   }),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
@@ -287,6 +296,11 @@ export const api = {
   }),
   scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
 
+  // The client retains track identity across Home Screen app suspensions, but
+  // Discovery recommendations rotate every 20 minutes. Send identity metadata
+  // so the API can rebuild a *missing* preview without accepting arbitrary URLs.
+  previewStreamUrl: (id: string, artist: string, title: string) =>
+    `/api/discovery/previews/${encodeURIComponent(id)}?${new URLSearchParams({ artist, title })}`,
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
   coverUrl: (coverId?: string, size = 300) => mediaCoverUrl(coverId, size),
 };

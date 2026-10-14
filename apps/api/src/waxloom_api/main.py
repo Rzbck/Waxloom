@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -16,11 +17,13 @@ from waxloom_api import __version__
 from waxloom_api.discovery import DiscoveryService
 from waxloom_api.discovery_feed import DiscoveryFeedEngine
 from waxloom_api.imports import ImportService
+from waxloom_api.mix_fallback import library_mix
 from waxloom_api.preview_cache import DiscoveryPreviewCache
 from waxloom_api.providers.audiomuse import AudioMuseClient
 from waxloom_api.providers.listenbrainz import ListenBrainzLabsClient
 from waxloom_api.providers.navidrome import NavidromeClient, NavidromeError
 from waxloom_api.providers.youtube import YouTubeProvider
+from waxloom_api.recent_tracks import get_newest_songs
 from waxloom_api.settings import settings
 
 app = FastAPI(
@@ -253,6 +256,17 @@ async def artists() -> dict[str, object]:
     return {"items": items, "count": len(items)}
 
 
+@app.get("/api/library/recent-tracks")
+def recent_tracks(size: int = Query(default=24, ge=1, le=100)) -> dict[str, object]:
+    """Recently indexed songs, never release-date sorted albums."""
+    require_navidrome()
+    try:
+        items = get_newest_songs(limit=size)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Navidrome index unavailable.") from exc
+    return {"items": items, "count": len(items)}
+
+
 @app.get("/api/library/random")
 async def random_songs(size: int = Query(default=50, ge=1, le=500)) -> dict[str, object]:
     require_navidrome()
@@ -344,11 +358,21 @@ async def save_play_queue(payload: PlayQueueRequest) -> dict[str, object]:
 @app.get("/api/discovery/local-similar/{song_id}")
 async def local_similar(song_id: str, count: int = Query(default=40, ge=1, le=200)) -> dict[str, object]:
     require_navidrome()
+    # Not every Navidrome song has been vectorized by AudioMuse. In particular
+    # newly imported music returns AudioMuse 404. Use a clearly labeled library
+    # mix instead of leaving Instant Mix broken for that track.
     try:
         items = await discovery_service().local_similar(song_id, count=count)
-    except (httpx.HTTPError, RuntimeError) as exc:
-        raise HTTPException(status_code=502, detail=f"AudioMuse similarity failed: {exc}") from exc
-    return {"items": items, "count": len(items)}
+        if items:
+            return {"items": items, "count": len(items), "source": "audiomuse"}
+    except (httpx.HTTPError, RuntimeError, ValueError):
+        pass
+
+    try:
+        items = await library_mix(navidrome_client(), song_id, count=count)
+    except (httpx.HTTPError, RuntimeError, ValueError, NavidromeError) as exc:
+        raise HTTPException(status_code=502, detail="Local music mix unavailable.") from exc
+    return {"items": items, "count": len(items), "source": "library_fallback"}
 
 
 @app.post("/api/discovery/external")
@@ -428,7 +452,11 @@ async def discovery_preview_status() -> dict[str, int]:
 
 
 @app.get("/api/discovery/previews/{recording_mbid}", name="discovery_preview_media")
-async def discovery_preview_media(recording_mbid: str) -> FileResponse:
+async def discovery_preview_media(
+    recording_mbid: str,
+    artist: str | None = Query(default=None, min_length=1, max_length=300),
+    title: str | None = Query(default=None, min_length=1, max_length=300),
+) -> FileResponse:
     candidate = preview_cache().candidate(recording_mbid)
     if candidate is None:
         feed = discovery_feed_engine.feed()
@@ -443,6 +471,22 @@ async def discovery_preview_media(recording_mbid: str) -> FileResponse:
             ),
             None,
         )
+    if candidate is None and artist and title:
+        # A Home Screen app may resume with a Discovery rotation that has
+        # expired server-side. Its selected media ID is still valid; recover
+        # the preview by verified YouTube ID or by artist/title matching.
+        # Accept only known identifier shapes; never accept an arbitrary URL.
+        if re.fullmatch(r"yt:[A-Za-z0-9_-]{11}", recording_mbid):
+            video_id = recording_mbid[3:]
+            candidate = {
+                "recording_mbid": recording_mbid,
+                "artist": artist,
+                "title": title,
+                "source": "youtube_dig",
+                "youtube_url": f"https://www.youtube.com/watch?v={video_id}",
+            }
+        elif re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", recording_mbid):
+            candidate = {"recording_mbid": recording_mbid, "artist": artist, "title": title}
     if candidate is None:
         raise HTTPException(status_code=404, detail="Discovery preview is not in the active rotation.")
     entry = await preview_cache().ensure_candidate(candidate, foreground=True)

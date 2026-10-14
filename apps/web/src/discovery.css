@@ -540,3 +540,8 @@
     grid-row: 1 / span 2;
   }
 }
+
+/* Discovery simplified 2026-10: one compact, responsive track feed. */
+.discovery-mode-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.discovery-mode-controls .secondary-action { font-size: 12px; padding: 5px 9px; min-height: 30px; }
+.discovery-mode-active { border-color: var(--accent, #9c89ff) !important; background: rgba(130, 112, 203, .15) !important; }

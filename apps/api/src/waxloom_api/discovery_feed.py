@@ -381,10 +381,12 @@ class DiscoveryFeedEngine:
     ) -> list[dict[str, Any]]:
         """Rotate actual membership, not merely the order of the same tracks."""
 
+        # Each 20-minute rotation draws a different source-wise page from
+        # the larger pool instead of repeatedly selecting the same top songs.
         source_limits = {
-            "listenbrainz": 16,
-            "youtube_dig": 12,
-            "musicbrainz_catalog": 16,
+            "listenbrainz": 20,
+            "youtube_dig": 16,
+            "musicbrainz_catalog": 20,
         }
 
         by_source: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -425,8 +427,10 @@ class DiscoveryFeedEngine:
 
         for source, limit in source_limits.items():
             rows = by_source.get(source, [])
-            rows.sort(key=rotation_score, reverse=True)
-            selected.extend(rows[:limit])
+            rows.sort(key=lambda item: (self._candidate_score(item), str(item.get("recording_mbid") or "")), reverse=True)
+            if rows:
+                start = (slot * limit) % len(rows)
+                selected.extend(rows[(start + index) % len(rows)] for index in range(min(limit, len(rows))))
 
         uncapped.sort(key=rotation_score, reverse=True)
         selected.extend(

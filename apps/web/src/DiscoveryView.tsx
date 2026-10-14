@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
+import { VinylRack } from "./VinylRack";
 
 import { api } from "./api";
 import { usePlayer } from "./Player";
@@ -17,9 +19,10 @@ type TasteEntry = {
 };
 
 type TasteState = Record<string, TasteEntry>;
-type ShelfKey = "closest" | "underground" | "deep";
+
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
+const BROWSER_CACHE_AGE_MS = 5 * 60 * 1000;
 const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SOURCE_REJECT_TAG = "__waxloom_source:not_music__";
 const SHELF_PAGE_SIZE = 12;
@@ -128,6 +131,8 @@ function readBrowserFeed(): DiscoveryFeedResponse | null {
     if (!raw) return null;
     const value = JSON.parse(raw) as DiscoveryFeedResponse;
     if (!value?.profile || !Array.isArray(value?.external?.items)) return null;
+    const stamp = (value as DiscoveryFeedResponse & { _cached_at?: number })._cached_at;
+    if (!stamp || Date.now() - stamp > BROWSER_CACHE_AGE_MS || stamp > Date.now() + 60000) return null;
     return value;
   } catch {
     return null;
@@ -137,7 +142,7 @@ function readBrowserFeed(): DiscoveryFeedResponse | null {
 function storeBrowserFeed(value: DiscoveryFeedResponse) {
   if (!value.profile || value.external.items.length === 0) return;
   try {
-    window.localStorage.setItem(BROWSER_CACHE_KEY, JSON.stringify(value));
+    window.localStorage.setItem(BROWSER_CACHE_KEY, JSON.stringify({ ...value, _cached_at: Date.now() }));
   } catch {
     // Browser storage is only a convenience cache.
   }
@@ -157,116 +162,61 @@ function asPreviewTrack(candidate: DiscoveryCandidate): PreviewTrack {
     title: candidate.title,
     artist: candidate.artist,
     release: candidate.release,
+    candidate,
   };
 }
 
 function DiscoveryTrackCard({
-  candidate,
-  currentPreviewMbid,
-  playing,
-  importing,
-  rejecting,
-  taste,
-  onPlay,
-  onQuickAdd,
-  onFeedback,
-  onBadSource,
+  candidate, currentPreviewMbid, playing, phase, onPlay, onQuickAdd,
 }: {
   candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
   playing: boolean;
-  importing: boolean;
-  rejecting: boolean;
-  taste: TasteState;
+  phase?: ReturnType<typeof downloadPhase>;
   onPlay: (candidate: DiscoveryCandidate) => void;
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
-  onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
-  onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
-  const currentFeedback = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
   const isPlaying = currentPreviewMbid === candidate.recording_mbid && playing;
-  const canRejectSource = candidate.source === "youtube_dig";
-
+  const [coverFailed, setCoverFailed] = useState(false);
+  const coverId = candidate.release_mbid && /^[0-9a-f-]{36}$/i.test(candidate.release_mbid) ? candidate.release_mbid : null;
+  const cover = coverId && !coverFailed ? `https://coverartarchive.org/release/${encodeURIComponent(coverId)}/front-250` : null;
+  const busy = phase === "queued" || phase === "searching" || phase === "downloading";
+  const complete = phase === "indexed" || phase === "existing";
+  const status = busy ? "Downloading" : complete ? "Saved" : phase === "failed" ? "Retry download" : "Download";
   return (
-    <article className="discovery-song-card">
-      <div className="discovery-song-copy">
-        <strong title={candidate.title}>{candidate.title}</strong>
-        <span title={candidate.artist}>{candidate.artist}</span>
-      </div>
-      <b className="discovery-song-score">{scorePercent(candidate.rank)}</b>
-      <button
-        className={isPlaying ? "compact-action compact-action-play compact-action-playing" : "compact-action compact-action-play"}
-        type="button"
-        onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
-        onPointerDown={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
+    <article className="discovery-cover-card">
+      <button className="discovery-cover-art" type="button"
         onClick={() => onPlay(candidate)}
-        title={isPlaying ? "Playing in Waxloom" : "Play in Waxloom"}
-        aria-label={isPlaying ? `Playing ${candidate.title}` : `Play ${candidate.title}`}
-      >
-        <span className={isPlaying ? "css-pause-mark" : "css-play-mark"} aria-hidden="true" />
+        onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
+        title={`Play ${candidate.artist} - ${candidate.title}`}
+        aria-label={`Play ${candidate.title}`}>
+        {cover ? <img src={cover} loading="lazy" alt="" onError={() => setCoverFailed(true)} /> : (
+          <span className="discovery-cover-fallback" aria-hidden="true">{candidate.artist.slice(0, 2).toUpperCase()}</span>
+        )}
+        <span className={isPlaying ? "discovery-cover-play is-playing" : "discovery-cover-play"} aria-hidden="true">
+          {isPlaying ? "Ⅱ" : "▶"}
+        </span>
       </button>
-      <button
-        className="compact-action compact-action-add"
-        type="button"
-        disabled={importing}
-        onClick={() => onQuickAdd(candidate)}
-        title={importing ? "Adding to library…" : "Add to library"}
-        aria-label={`Add ${candidate.title} to library`}
-      >+</button>
-      <button
-        className={currentFeedback === 1 ? "taste-chip taste-chip-like taste-chip-active" : "taste-chip taste-chip-like"}
-        type="button"
-        onClick={() => onFeedback(candidate, currentFeedback === 1 ? 0 : 1)}
-        title="More like this"
-        aria-label={`More like ${candidate.title}`}
-      >Like</button>
-      <button
-        className={currentFeedback === -1 ? "taste-chip taste-chip-less taste-chip-less-active" : "taste-chip taste-chip-less"}
-        type="button"
-        onClick={() => onFeedback(candidate, currentFeedback === -1 ? 0 : -1)}
-        title="Show less like this"
-        aria-label={`Less like ${candidate.title}`}
-      >Less</button>
-      {canRejectSource ? (
-        <button
-          className="compact-action compact-action-bad-source"
-          type="button"
-          disabled={rejecting}
-          onClick={() => onBadSource(candidate)}
-          title={rejecting ? "Removing bad source…" : "Not music / bad source"}
-          aria-label={`Report ${candidate.title} as not music`}
-        >
-          <span className="css-x-mark" aria-hidden="true" />
-        </button>
-      ) : <span aria-hidden="true" />}
+      <button type="button"
+        className={`discovery-cover-quick-download ${busy ? "is-working" : ""} ${complete ? "is-complete" : ""} ${phase === "failed" ? "is-failed" : ""}`}
+        aria-label={`${status} ${candidate.title}`} title={`${status}: ${candidate.title}`}
+        disabled={busy || complete} onClick={() => onQuickAdd(candidate)}>
+        <span aria-hidden="true">{complete ? "✓" : busy ? "…" : phase === "failed" ? "↻" : "↓"}</span>
+      </button>
+      <div className="discovery-cover-copy">
+        <strong title={candidate.title}>{candidate.title}</strong>
+        <small title={candidate.artist}>{candidate.artist}</small>
+      </div>
     </article>
   );
 }
 
 function DiscoveryShelf({
-  eyebrow,
-  title,
-  items,
-  page,
-  onNextPage,
-  currentPreviewMbid,
-  playing,
-  importingMbid,
-  rejectingMbid,
-  taste,
-  onPlayQueue,
-  onQuickAdd,
-  onFeedback,
-  onBadSource,
+  items, currentPreviewMbid, playing, rejectingMbid, taste, onPlayQueue, onQuickAdd, onFeedback, onBadSource,
 }: {
-  eyebrow: string;
-  title: string;
   items: DiscoveryCandidate[];
-  page: number;
-  onNextPage: () => void;
   currentPreviewMbid: string | null;
   playing: boolean;
-  importingMbid: string | null;
   rejectingMbid: string | null;
   taste: TasteState;
   onPlayQueue: (items: DiscoveryCandidate[], candidate: DiscoveryCandidate) => void;
@@ -274,41 +224,62 @@ function DiscoveryShelf({
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
   onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
-  if (items.length === 0) return null;
-  const pageCount = Math.max(1, Math.ceil(items.length / SHELF_PAGE_SIZE));
-  const normalizedPage = page % pageCount;
-  const start = normalizedPage * SHELF_PAGE_SIZE;
-  const visible = items.slice(start, start + SHELF_PAGE_SIZE);
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  if (items.length === 0) return <p className="muted">Preparing musical discoveries.</p>;
 
+  const candidate = items[Math.min(selectedIndex, items.length - 1)] ?? items[0];
+  const phase = downloadPhase(candidate.recording_mbid);
+  const busy = phase === "queued" || phase === "searching" || phase === "downloading";
+  const complete = phase === "indexed" || phase === "existing";
+  const liked = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
   return (
-    <section className="discovery-rail-section discovery-track-shelf">
-      <div className="section-toolbar discovery-rail-toolbar discovery-track-toolbar">
-        <div>
-          <p className="eyebrow">{eyebrow} · {items.length} tracks</p>
-          <h2>{title}</h2>
-        </div>
-        {pageCount > 1 && (
-          <button className="secondary-action discovery-more-tracks" type="button" onClick={onNextPage}>
-            More tracks <span>{normalizedPage + 1}/{pageCount}</span>
+    <section className="discovery-cover-shelf" aria-label="All Discovery recommendations">
+      <div className="waxloom-discovery-vinyl">
+        <VinylRack count={items.length} contentKey={items[0]?.recording_mbid}
+          label="Discover tracks. Tap cover to play a preview, or choose actions below."
+          variant="discovery"
+          records={items.map((item) => ({ title: item.title, artist: item.artist }))}
+          onSelectionChange={(index) => { setSelectedIndex(index); setOptionsOpen(false); }}>
+          {items.map((item) => (
+            <div key={item.recording_mbid} className="waxloom-vinyl-sleeve waxloom-vinyl-sleeve--discovery">
+              <DiscoveryTrackCard candidate={item}
+                currentPreviewMbid={currentPreviewMbid} playing={playing}
+                phase={downloadPhase(item.recording_mbid)}
+                onPlay={(track) => onPlayQueue(items, track)} onQuickAdd={onQuickAdd} />
+            </div>
+          ))}
+        </VinylRack>
+        <div className="waxloom-vinyl-context">
+          <button type="button" className="waxloom-vinyl-context-trigger"
+            aria-label={`Options for ${candidate.title}`}
+            aria-expanded={optionsOpen}
+            onClick={() => setOptionsOpen((value) => !value)}>
+            <span aria-hidden="true">···</span> {busy ? "Downloading…" : complete ? "Saved · Options" : "Options"}
           </button>
+        </div>
+        {optionsOpen && (
+          <div className="waxloom-vinyl-context-panel" role="group" aria-label={`Actions for ${candidate.title}`}>
+            <button type="button" disabled={busy || complete}
+              onClick={() => { onQuickAdd(candidate); setOptionsOpen(false); }}>
+              {complete ? "✓ In library" : busy ? "Downloading…" : phase === "failed" ? "↻ Retry download" : "+ Download"}
+            </button>
+            <button type="button" aria-pressed={liked === 1}
+              onClick={() => { onFeedback(candidate, liked === 1 ? 0 : 1); setOptionsOpen(false); }}>
+              {liked === 1 ? "✓ Liked" : "♡ More like this"}
+            </button>
+            <button type="button" aria-pressed={liked === -1}
+              onClick={() => { onFeedback(candidate, liked === -1 ? 0 : -1); setOptionsOpen(false); }}>
+              {liked === -1 ? "✓ Less like this" : "↓ Less like this"}
+            </button>
+            {candidate.source === "youtube_dig" && (
+              <button type="button" disabled={rejectingMbid === candidate.recording_mbid}
+                onClick={() => { onBadSource(candidate); setOptionsOpen(false); }}>
+                Not music / bad source
+              </button>
+            )}
+          </div>
         )}
-      </div>
-      <div className="discovery-track-grid" aria-label={`${title} tracks`}>
-        {visible.map((candidate) => (
-          <DiscoveryTrackCard
-            key={candidate.recording_mbid}
-            candidate={candidate}
-            currentPreviewMbid={currentPreviewMbid}
-            playing={playing}
-            importing={importingMbid === candidate.recording_mbid}
-            rejecting={rejectingMbid === candidate.recording_mbid}
-            taste={taste}
-            onPlay={(track) => onPlayQueue(items, track)}
-            onQuickAdd={onQuickAdd}
-            onFeedback={onFeedback}
-            onBadSource={onBadSource}
-          />
-        ))}
       </div>
     </section>
   );
@@ -320,10 +291,9 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const [feedStatus, setFeedStatus] = useState<string>(bundle?.status ?? "starting");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [importing, setImporting] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
-  const [shelfPages, setShelfPages] = useState<Record<ShelfKey, number>>({ closest: 0, underground: 0, deep: 0 });
+  const downloads = useDownloads();
 
   async function readFeed() {
     try {
@@ -350,127 +320,23 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       if (!cancelled) void readFeed();
     };
     window.addEventListener("focus", onFocus);
+    const onVisibility = () => { if (!document.hidden && !cancelled) void readFeed(); };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
-  const rails = useMemo(() => {
-    const ranked = activeCandidates(bundle?.external.items ?? [], taste);
-    const used = new Set<string>();
-
-    const listenbrainz = ranked.filter(
-      (candidate) => candidate.source === "listenbrainz",
-    );
-    const catalogue = ranked.filter(
-      (candidate) => candidate.source === "musicbrainz_catalog",
-    );
-    const otherMetadata = ranked.filter(
-      (candidate) =>
-        candidate.source !== "youtube_dig"
-        && candidate.source !== "listenbrainz"
-        && candidate.source !== "musicbrainz_catalog",
-    );
-
-    // Deep cuts gets catalogue first, then a bounded reserve of
-    // farther / rarer ListenBrainz candidates.
-    const deepListenbrainz = [...listenbrainz].sort((a, b) => {
-      const aDepth =
-        a.underground * 0.65
-        + Math.max(0, 1 - a.rank) * 0.35;
-
-      const bDepth =
-        b.underground * 0.65
-        + Math.max(0, 1 - b.rank) * 0.35;
-
-      return bDepth - aDepth;
-    });
-
-    const proportionalReserve =
-      listenbrainz.length < 2
-        ? 0
-        : Math.max(
-            1,
-            Math.floor(listenbrainz.length * 0.35),
-          );
-
-    const catalogueShortfall =
-      Math.max(0, 6 - catalogue.length);
-
-    const deepFallbackQuota =
-      Math.min(
-        6,
-        catalogueShortfall,
-        proportionalReserve,
-      );
-
-    const deepFallback =
-      deepListenbrainz.slice(0, deepFallbackQuota);
-
-    const deep = fillShelf(
-      catalogue,
-      deepFallback,
-      used,
-    );
-
-    const closestPrimary =
-      [...listenbrainz, ...otherMetadata]
-        .filter(
-          (candidate) =>
-            !used.has(candidate.recording_mbid),
-        )
-        .sort((a, b) => b.rank - a.rank);
-
-    const closest = fillShelf(
-      closestPrimary,
-      closestPrimary,
-      used,
-    );
-
-    const youtubeDigPrimary = [...ranked]
-      .filter(
-        (candidate) =>
-          candidate.source === "youtube_dig",
-      )
-      .sort(
-        (a, b) =>
-          (b.underground + b.rank * 0.25)
-          - (a.underground + a.rank * 0.25),
-      );
-
-    const rareMetadataFallback = [...listenbrainz]
-      .filter(
-        (candidate) =>
-          !used.has(candidate.recording_mbid)
-          && candidate.underground >= 0.82,
-      )
-      .sort(
-        (a, b) =>
-          (b.underground + b.rank * 0.15)
-          - (a.underground + a.rank * 0.15),
-      );
-
-    const underground = fillShelf(
-      youtubeDigPrimary,
-      rareMetadataFallback,
-      used,
-      28,
-    );
-
-    return {
-      closest,
-      underground,
-      deep,
-      totalTracks: ranked.length,
-    };
-  }, [bundle, taste]);
-
-  useEffect(() => {
-    setShelfPages({ closest: 0, underground: 0, deep: 0 });
-  }, [bundle?.rotation_id, bundle?.generated_at]);
+  // Show every available recommendation at once in a horizontal, two-row
+  // viewport. No source labels, mood tabs, More tracks, or page pagination.
+  const recommendations = useMemo(
+    () => diversify(activeCandidates(bundle?.external.items ?? [], taste), 3),
+    [bundle, taste],
+  );
 
   useEffect(() => {
     const source = bundle?.external.items ?? [];
@@ -478,7 +344,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
     const seen = new Set<string>();
     const ordered: DiscoveryCandidate[] = [];
-    for (const candidate of [...rails.closest, ...rails.underground, ...rails.deep, ...source]) {
+    for (const candidate of [...recommendations, ...source]) {
       if (seen.has(candidate.recording_mbid)) continue;
       seen.add(candidate.recording_mbid);
       ordered.push(candidate);
@@ -505,7 +371,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   function playDiscoveryQueue(items: DiscoveryCandidate[], candidate: DiscoveryCandidate) {
     const queue = items.map(asPreviewTrack);
     const index = Math.max(0, items.findIndex((item) => item.recording_mbid === candidate.recording_mbid));
-    player.playPreviewTracks(queue, index);
+    player.playPreviewTracks(queue, index, onImportCandidate);
   }
 
   function updateFeedback(candidate: DiscoveryCandidate, value: -1 | 0 | 1) {
@@ -580,144 +446,38 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     }
   }
 
-  async function addToLibrary(candidate: DiscoveryCandidate) {
-    if (importing) return;
-
-    const authKey = "waxloom.authorizedMediaImports";
-    let authorized = window.localStorage.getItem(authKey) === "true";
-    if (!authorized) {
-      authorized = window.confirm(
-        "Waxloom can download this music source into your local library. Confirm that you are authorized to save the media you import this way.",
-      );
-      if (!authorized) return;
-      window.localStorage.setItem(authKey, "true");
-    }
-
-    setImporting(candidate.recording_mbid);
-    setError(null);
-    setNotice(`Adding ${candidate.artist} — ${candidate.title} to your library…`);
-
-    try {
-      const search = await api.youtubeSearch(candidate.artist, candidate.title, undefined, 1);
-      const best = search.items[0];
-      if (!best || best.score < 80) {
-        setNotice("The automatic source match was ambiguous. Choose the music source manually before importing.");
-        onImportCandidate(candidate);
-        return;
-      }
-
-      const result = await api.youtubeImport(candidate.artist, candidate.title, best.url, null, true);
-      setNotice(
-        result.status === "already_local"
-          ? "Already in your local library — no duplicate was downloaded."
-          : result.status === "imported"
-            ? `Added to your library: ${result.relative_path ?? `${candidate.artist} / Singles`}.`
-            : `Downloaded to your library: ${result.relative_path ?? `${candidate.artist} / Singles`}. Navidrome is still indexing it.`,
-      );
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Library import failed.");
-      setNotice(null);
-    } finally {
-      setImporting(null);
-    }
+  function addToLibrary(candidate: DiscoveryCandidate) {
+    const enqueued = enqueueDiscoveryDownload(candidate, onImportCandidate);
+    if (enqueued) setNotice(null);
   }
 
   const tasteLikes = Object.values(taste).filter((entry) => entry.value > 0).length;
   const tasteLess = Object.values(taste).filter((entry) => entry.value < 0).length;
   const currentPreviewMbid = player.currentPreview?.recording_mbid ?? null;
 
-  function nextShelfPage(key: ShelfKey) {
-    setShelfPages((current) => ({ ...current, [key]: current[key] + 1 }));
-  }
-
   return (
-    <div className="discovery-layout discovery-auto-layout">
-      <section className="panel discovery-profile-panel discovery-profile-compact">
-        <div className="section-toolbar">
-          <div>
-            <p className="eyebrow">Always-on Discovery · outside your library</p>
-            <h2>Your feed is ready before you arrive.</h2>
-            <p className="muted">Track-first recommendations, diversified across artists. Preview sources warm quietly in the background.</p>
-          </div>
-          <button className="secondary-action" type="button" onClick={() => void requestBackgroundRefresh()}>Refresh in background</button>
+    <div className="discovery-layout discovery-fit-page">
+      <header className="discovery-fit-header">
+        <div>
+          <strong>Discovery</strong>
+          <span>{recommendations.length} tracks · {feedStatus === "ready" ? "ready" : feedStatus} · {formatFeedTime(bundle?.generated_at)}</span>
         </div>
-
-        <div className="discovery-feed-status">
-          <span className={`feed-dot feed-dot-${feedStatus}`} />
-          <strong>{feedStatus === "ready" ? "Feed ready" : feedStatus === "refreshing" ? "Refreshing behind the scenes" : "Preparing feed in background"}</strong>
-          <span>{formatFeedTime(bundle?.generated_at)}</span>
-          {bundle?.external.pool_count ? <span>{bundle.external.pool_count} candidates in pool</span> : null}
-          {bundle?.rotation_seconds ? <span>rotates every {Math.round(bundle.rotation_seconds / 60)} min</span> : null}
-          {(tasteLikes + tasteLess) > 0 && <span>{tasteLikes} liked · {tasteLess} less</span>}
+        <div className="discovery-fit-controls">
+          {downloads.some((item) => ["queued", "searching", "downloading"].includes(item.phase))
+            ? <small>{downloads.filter((item) => ["queued", "searching", "downloading"].includes(item.phase)).length} downloading</small> : null}
+          <button className="secondary-action" type="button" onClick={() => void requestBackgroundRefresh()} title="Prepare fresh suggestions in the background">↻ New music</button>
         </div>
-
-        {bundle?.profile && (
-          <div className="profile-stat-grid profile-stat-grid-library">
-            <div><strong>{bundle.profile.library_tracks}</strong><span>library tracks</span></div>
-            <div><strong>{bundle.profile.library_albums}</strong><span>albums</span></div>
-            <div><strong>{bundle.profile.library_artists}</strong><span>artists</span></div>
-            <div><strong>{bundle.profile.library_genres}</strong><span>genres</span></div>
-            <div><strong>{bundle.profile.representative_seeds}</strong><span>smart anchors</span></div>
-          </div>
-        )}
-
-        {!bundle && <div className="discovery-building discovery-building-passive">First feed is being prepared by Waxloom in the background. You can leave Discovery; it will continue working.</div>}
-        {error && <div className="state-card state-card-error">{error}</div>}
-        {notice && <div className="state-card state-card-success">{notice}</div>}
-      </section>
-
-      {bundle && (
-        <>
-          <DiscoveryShelf
-            eyebrow={`Best matches · ${rails.totalTracks} tracks in this rotation`}
-            title="Closest to your collection"
-            items={rails.closest}
-            page={shelfPages.closest}
-            onNextPage={() => nextShelfPage("closest")}
-            currentPreviewMbid={currentPreviewMbid}
-            playing={player.playing}
-            importingMbid={importing}
-            rejectingMbid={rejecting}
-            taste={taste}
-            onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={(candidate) => void addToLibrary(candidate)}
-            onFeedback={updateFeedback}
-            onBadSource={(candidate) => void rejectBadSource(candidate)}
-          />
-          <DiscoveryShelf
-            eyebrow="YouTube dig · music-verified · low exposure / high engagement"
-            title="More underground"
-            items={rails.underground}
-            page={shelfPages.underground}
-            onNextPage={() => nextShelfPage("underground")}
-            currentPreviewMbid={currentPreviewMbid}
-            playing={player.playing}
-            importingMbid={importing}
-            rejectingMbid={rejecting}
-            taste={taste}
-            onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={(candidate) => void addToLibrary(candidate)}
-            onFeedback={updateFeedback}
-            onBadSource={(candidate) => void rejectBadSource(candidate)}
-          />
-          <DiscoveryShelf
-            eyebrow="Catalogue · farther matches"
-            title="Deep cuts"
-            items={rails.deep}
-            page={shelfPages.deep}
-            onNextPage={() => nextShelfPage("deep")}
-            currentPreviewMbid={currentPreviewMbid}
-            playing={player.playing}
-            importingMbid={importing}
-            rejectingMbid={rejecting}
-            taste={taste}
-            onPlayQueue={playDiscoveryQueue}
-            onQuickAdd={(candidate) => void addToLibrary(candidate)}
-            onFeedback={updateFeedback}
-            onBadSource={(candidate) => void rejectBadSource(candidate)}
-          />
-        </>
-      )}
+      </header>
+      {error && <div className="discovery-fit-message is-error">{error}</div>}
+      {notice && <div className="discovery-fit-message">{notice}</div>}
+      {bundle ? (
+        <DiscoveryShelf items={recommendations}
+          currentPreviewMbid={currentPreviewMbid} playing={player.playing}
+          rejectingMbid={rejecting} taste={taste}
+          onPlayQueue={playDiscoveryQueue} onQuickAdd={addToLibrary}
+          onFeedback={updateFeedback}
+          onBadSource={(candidate) => void rejectBadSource(candidate)} />
+      ) : <div className="discovery-fit-message">Preparing the first discoveries…</div>}
     </div>
   );
 }

@@ -1,0 +1,386 @@
+/* Waxloom unified record collections — iPhone and desktop.
+   The *album bitmap itself never transforms during native inertial scrolling*.
+   Only a separate decorative black record rises behind the selected sleeve,
+   once scrolling has stopped. The bin is behind artwork, never in front. */
+.waxloom-vinyl-crate {
+  background:
+    radial-gradient(ellipse 70% 95% at 48% -16%, rgba(155,109,177,.19), transparent 67%),
+    repeating-linear-gradient(90deg, rgba(160,122,178,.026) 0 2px, transparent 2px 25px),
+    linear-gradient(180deg,#27202e 0%,#130f1b 67%,#282030 100%) !important;
+  border: 1px solid #493850;
+  box-shadow: inset 0 12px 25px #08040d6b, inset 0 -9px 17px #171020, 0 8px 19px #05030841;
+  isolation: isolate;
+}
+/* Record sleeves pass into dark side slots at the edges of the crate.
+   Only 14px at each edge, NEVER a band across artwork or controls. */
+.waxloom-vinyl-crate::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(90deg,
+    #100c17e6 0px, #1710209c 7px, transparent 17px,
+    transparent calc(100% - 17px), #1710209c calc(100% - 7px), #100c17e6 100%);
+  box-shadow: inset 8px 0 10px -7px #000c, inset -8px 0 10px -7px #000c;
+}
+.waxloom-vinyl-sleeve {
+  transform: none !important;
+  filter: none !important;
+  will-change: auto !important;
+  transition: none !important;
+  overflow: visible;
+}
+.waxloom-vinyl-rack {
+  scroll-snap-type: none !important;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+}
+.waxloom-vinyl-sleeve::before {
+  content: "";
+  position: absolute;
+  top: -13px;
+  left: 24px;
+  width: 112px;
+  height: 112px;
+  box-sizing: border-box;
+  border: 2px solid #48444e;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at center, #a38eae 0 6%, #131219 7% 12%, #35323d 13% 14%, #100e15 15% 28%, #29252e 29% 29.5%, #100e15 30% 39%, #2b2631 39.5% 40%, #14121a 41% 51%, #292631 51.5% 52%, #131119 53% 100%);
+  box-shadow: 0 2px 9px #000a;
+  transition: top 290ms cubic-bezier(.16,.85,.19,1);
+}
+.waxloom-vinyl-rack:not([data-scrolling="true"]) .waxloom-vinyl-sleeve[data-centered="true"]::before {
+  top: -30px;
+}
+.waxloom-vinyl-rack[data-scrolling="true"] .waxloom-vinyl-sleeve::before {
+  top: -13px;
+  transition: none;
+}
+.waxloom-vinyl-sleeve > .waxloom-vinyl-face,
+.waxloom-vinyl-sleeve > .waxloom-track-face,
+.waxloom-vinyl-sleeve > .discovery-cover-card {
+  position: relative;
+  z-index: 1;
+}
+.waxloom-vinyl-sleeve[data-centered="true"] .waxloom-vinyl-face,
+.waxloom-vinyl-sleeve[data-centered="true"] .waxloom-track-face {
+  border-color: #bf9bd4;
+}
+.waxloom-vinyl-play { z-index: 3; }
+.waxloom-vinyl-display--discovery .waxloom-vinyl-sleeve::before,
+.waxloom-vinyl-display--track .waxloom-vinyl-sleeve::before {
+  left: 25px;
+}
+.waxloom-vinyl-crate::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  left: 3px;
+  right: 3px;
+  bottom: 9px;
+  height: 23px;
+  border-radius: 0 0 8px 8px;
+  pointer-events: none;
+  background: repeating-linear-gradient(90deg, transparent 0 23px, #987ba518 24px 25px),
+    linear-gradient(180deg, #211726, #0e0a13);
+  box-shadow: 0 -8px 17px #06030b73;
+}
+/* Native scroll-synced vinyl motion: the *black record behind the sleeve*
+   rises out of its slot near viewport center and sinks toward either edge.
+   The photo/cover NEVER moves, rotates, or gets a scroll-time JS transform.
+   Safari 26.4+ runs this scroll animation on the compositor thread. On older
+   browsers the quiet selected-record pop remains as fallback. */
+@keyframes waxloom-disc-emerge {
+  0%, 100% { transform: translate3d(0, 9px, 0); }
+  42%, 58% { transform: translate3d(0, -20px, 0); }
+}
+@supports (animation-timeline: view(inline)) {
+  @media (prefers-reduced-motion: no-preference) {
+    .waxloom-vinyl-rack .waxloom-vinyl-sleeve::before,
+    .waxloom-vinyl-rack:not([data-scrolling="true"]) .waxloom-vinyl-sleeve[data-centered="true"]::before,
+    .waxloom-vinyl-rack[data-scrolling="true"] .waxloom-vinyl-sleeve::before {
+      top: -13px;
+      transition: none;
+    }
+    .waxloom-vinyl-rack .waxloom-vinyl-sleeve::before {
+      animation: waxloom-disc-emerge linear both;
+      animation-timeline: view(inline);
+      animation-range: cover 0% cover 100%;
+    }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .waxloom-vinyl-sleeve::before { transition: none !important; }
+}
+
+/* A shared vinyl rack for all song lists, instead of desktop tables. */
+.waxloom-song-vinyl { display: grid; gap: 11px; min-width: 0; width: 100%; }
+.waxloom-vinyl-display--track .waxloom-vinyl-crate { height: 291px; }
+.waxloom-vinyl-display--track .waxloom-vinyl-rack { padding-top: 28px; }
+.waxloom-track-sleeve { flex: 0 0 162px; width: 162px; min-width: 162px; margin-right: -11px; }
+.waxloom-track-face {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 162px;
+  height: 162px;
+  box-sizing: border-box;
+  padding: 0;
+  border: 2px solid #594363;
+  border-radius: 3px;
+  overflow: hidden;
+  background: linear-gradient(142deg, #46324e, #201827);
+  color: #d7c5df;
+  cursor: pointer;
+  box-shadow: 3px 5px 12px #0503089c;
+}
+.waxloom-track-face img {
+  display: block;
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+.waxloom-track-face img[hidden] { display:none; }
+.waxloom-track-fallback { font-size: 45px; color: #b49ac5; }
+.waxloom-track-play-indicator {
+  position: absolute;
+  left: 13px;
+  bottom: 10px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  height: 36px;
+  width: 36px;
+  border: 1px solid #b299c6;
+  border-radius: 50%;
+  background: #1b1422dc;
+  color: #eee2f6;
+}
+.waxloom-track-copy {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 5px 5px;
+  width: 162px;
+  height: 47px;
+  min-width: 0;
+  box-sizing: border-box;
+  text-align: center;
+}
+.waxloom-track-copy strong,.waxloom-track-copy small {
+  display:block;
+  overflow:hidden;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+}
+.waxloom-track-copy strong { font-size:12px; color:#f1e8f7; }
+.waxloom-track-copy small { font-size:10px; color:#beafca; }
+.waxloom-track-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 162px;
+  padding: 2px 0;
+  position: relative;
+  z-index: 3;
+}
+.waxloom-track-action {
+  display: grid;
+  place-items: center;
+  flex: 0 0 39px;
+  width: 39px;
+  height: 39px;
+  padding: 0;
+  border: 1px solid #8d6d9e;
+  border-radius: 9px;
+  background: #46334e;
+  color: #f1e6f8;
+  cursor: pointer;
+}
+.waxloom-track-action.is-starred { color:#ffc2d2; border-color:#a16077; background:#613747; }
+.waxloom-track-action:nth-child(2) { color:#b7e8e0; background:#2e4847; border-color:#54847a; }
+.waxloom-track-action:nth-child(3) { color:#c1dff4; background:#304354; border-color:#577992; }
+.waxloom-track-remove { color:#f0a5b1; font-size:20px; }
+.waxloom-track-sleeve.is-current .waxloom-track-face { border-color:#d4a6f5; }
+.waxloom-vinyl-load-more {
+  display:flex; align-items:center; justify-content:space-between;
+  width:100%; min-height:42px; padding:10px 14px;
+  border:1px solid #554266; border-radius:10px;
+  color:#ebdbf6; background:#2b2035; font-size:12px; font-weight:700; cursor:pointer;
+}
+.waxloom-vinyl-load-more span { font-size:11px; color:#a898b3; font-variant-numeric:tabular-nums; }
+.waxloom-song-vinyl button:focus-visible,.waxloom-album-vinyl button:focus-visible {
+  outline:2px solid #dbb0ee; outline-offset:2px;
+}
+
+/* Constrain grid tracks to the viewport, never the intrinsic width of 24
+   horizontally browsed covers. Otherwise desktop Home grows to 3,000px. */
+.workspace-stack { grid-template-columns: minmax(0,1fr); min-width:0; }
+.workspace-stack > section,
+.waxloom-home-desktop > section { min-width:0; max-width:100%; }
+.waxloom-vinyl-display,
+.waxloom-song-vinyl,
+.waxloom-vinyl-crate { max-width:100%; min-width:0; }
+/* Properly sized discovery actions: all four remain inside the 166px sleeve. */
+.waxloom-discovery-vinyl .discovery-cover-actions button {
+  width:36px;
+  height:36px;
+  min-width:36px;
+  border-color:#786185;
+  background:#41324a;
+}
+/* People and playlists use the same swipeable physical sleeve language. */
+.waxloom-entity-vinyl { display:grid; gap:11px; min-width:0; }
+.waxloom-vinyl-display--artist .waxloom-vinyl-crate,
+.waxloom-vinyl-display--playlist .waxloom-vinyl-crate { height:259px; }
+.waxloom-vinyl-display--artist .waxloom-vinyl-rack,
+.waxloom-vinyl-display--playlist .waxloom-vinyl-rack { padding-top:27px; }
+.waxloom-entity-sleeve {
+  flex:0 0 162px; width:162px; min-width:162px; margin-right:-11px;
+}
+.waxloom-entity-face {
+  position:relative; z-index:1; display:grid; place-items:center;
+  width:162px; height:162px; box-sizing:border-box; padding:0;
+  border:2px solid #5f4c6a; border-radius:4px; overflow:hidden;
+  background:linear-gradient(145deg,#664575,#2c2038); color:#f5e6ff;
+  box-shadow:3px 5px 12px #08060bac; cursor:pointer;
+}
+.waxloom-entity-face img { position:absolute; inset:0; width:100%; height:100%; display:block; object-fit:cover; }
+.waxloom-entity-face img[hidden] {display:none;}
+.waxloom-entity-fallback {font-size:68px;font-weight:800;opacity:.73;}
+.waxloom-entity-open {
+  position:absolute;bottom:9px;left:12px;z-index:2;display:grid;place-items:center;
+  width:36px;height:36px;border:1px solid #b599c5;border-radius:50%;
+  background:#1e1528dd;color:#fff;font-size:19px;
+}
+.waxloom-entity-copy {
+  display:grid;gap:4px;align-content:center;min-width:0;width:162px;
+  height:47px;padding:7px 4px;box-sizing:border-box;text-align:center;
+}
+.waxloom-entity-copy strong,.waxloom-entity-copy small {
+  display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+}
+.waxloom-entity-copy strong {font-size:12px;color:#f1e4f7;}
+.waxloom-entity-copy small {font-size:10px;color:#bda7c9;}
+.waxloom-entity-sleeve[data-centered="true"] .waxloom-entity-face {
+  border-color:#c39bd9;
+}
+@media (min-width:821px) {
+  .waxloom-vinyl-display--artist .waxloom-vinyl-crate,
+  .waxloom-vinyl-display--playlist .waxloom-vinyl-crate {height:251px;}
+}
+/* The compact Fresh tracks shelf also has record-slot depth, without ever
+   transforming loaded artwork or stealing the native horizontal gesture. */
+@media(max-width:820px) {
+  .waxloom-home-track-rail {
+    border-radius:12px;
+    background:linear-gradient(180deg,#281f2f30,#100c16 78%,#241b2c);
+    gap:7px;
+    padding:10px 4px 11px;
+  }
+  .waxloom-home-track-card {position:relative;flex-basis:117px;}
+  .waxloom-home-track-card::before {
+    content:"";position:absolute;left:15px;top:-9px;width:82px;height:82px;
+    border-radius:50%;border:2px solid #524359;pointer-events:none;
+    background:repeating-radial-gradient(circle at center,#1a141f 0 6px,#302735 7px 8px,#151119 9px 12px);
+  }
+  .waxloom-home-track-cover {z-index:1;box-shadow:2px 3px 8px #06030b7d;}
+}
+/* Actual desktop parity: same collection browsing model, larger viewport.
+   No duplicate hidden media grid/table remains visible. */
+@media (min-width:821px) {
+  .waxloom-album-vinyl, .waxloom-discovery-vinyl, .waxloom-vinyl-display { display:block !important; width:100%; min-width:0; }
+  .waxloom-album-grid-desktop, .discovery-cover-grid-desktop { display:none !important; }
+  .waxloom-vinyl-crate {
+    position:relative; width:100%; height:245px; overflow:hidden; border-radius:13px;
+  }
+  .waxloom-vinyl-rack {
+    position:relative; z-index:1; display:flex; align-items:flex-start; width:100%; height:100%;
+    box-sizing:border-box; padding:28px 27px 0; overflow-x:auto; overflow-y:hidden;
+    scrollbar-width:thin; scrollbar-color:#644d70 transparent; overscroll-behavior-x:contain;
+  }
+  .waxloom-vinyl-sleeve {
+    position:relative; flex:0 0 162px; width:162px; min-width:162px;
+    margin-right:-11px; box-sizing:border-box;
+  }
+  .waxloom-vinyl-face {
+    position:relative; display:block; padding:0; width:162px; height:162px; box-sizing:border-box;
+    overflow:hidden; border:2px solid #6b536f; border-radius:4px;
+    background:linear-gradient(135deg,#4d3858,#201828); cursor:pointer; box-shadow:3px 5px 12px #0007;
+  }
+  .waxloom-vinyl-face img {
+    position:absolute; inset:0; width:100%; height:100%; display:block; object-fit:cover;
+  }
+  .waxloom-vinyl-face img[hidden] { display:none; }
+  .waxloom-vinyl-fallback { display:grid; place-items:center; width:100%; height:100%; font-size:51px; color:#c8a6d7; }
+  .waxloom-vinyl-shine { position:absolute; inset:0; pointer-events:none; background:linear-gradient(110deg,#ffffff20,transparent 28%,#00000018); }
+  .waxloom-vinyl-play {
+    position:absolute; left:22px; top:115px; z-index:3; display:grid; place-items:center;
+    width:37px; height:37px; border:1px solid #d6bae6; border-radius:50%;
+    background:#1e1628e3; color:white; cursor:pointer;
+  }
+  .waxloom-vinyl-label {
+    display:grid; gap:3px; box-sizing:border-box; width:162px; padding:8px 3px 0;
+    text-align:center; pointer-events:none;
+  }
+  .waxloom-vinyl-label strong, .waxloom-vinyl-label small {
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%;
+  }
+  .waxloom-vinyl-label strong { font-size:11px; color:#f0e3f5; }
+  .waxloom-vinyl-label small { font-size:10px; color:#ac96ba; }
+  .waxloom-vinyl-controls {
+    display:flex; align-items:center; gap:12px; min-height:47px;
+    padding:5px 6px; box-sizing:border-box;
+  }
+  .waxloom-vinyl-count { color:#e7d4f4; font-size:12px; min-width:52px; font-weight:750; font-variant-numeric:tabular-nums; }
+  .waxloom-vinyl-selected { flex:1 1 auto; display:grid; gap:3px; min-width:0; text-align:center; }
+  .waxloom-vinyl-selected strong, .waxloom-vinyl-selected small {
+    display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+  }
+  .waxloom-vinyl-selected strong { color:#f2e9f7; font-size:12px; }
+  .waxloom-vinyl-selected small { color:#aa9ab5; font-size:11px; }
+  .waxloom-vinyl-drag-hint { flex:1; text-align:center; color:#aa9ab5; font-size:11px; }
+  .waxloom-vinyl-arrows { display:flex; gap:8px; }
+  .waxloom-vinyl-arrows button {
+    height:34px; width:39px; border:1px solid #5c4869; border-radius:9px;
+    background:#292033; color:#e5d4f3; cursor:pointer; font-size:18px;
+  }
+  .waxloom-album-vinyl .waxloom-vinyl-group + .waxloom-vinyl-group {
+    margin-top:16px; border-top:1px solid #392c41; padding-top:14px;
+  }
+  .waxloom-vinyl-group-heading {display:flex;justify-content:space-between;gap:8px;font-size:14px;color:#d7c2e4;}
+  .waxloom-vinyl-group-heading small {font-size:11px;color:#a291ab;}
+  .waxloom-vinyl-display--album .waxloom-vinyl-crate {height:251px;}
+  .waxloom-vinyl-display--track .waxloom-vinyl-crate {height:285px;}
+  .waxloom-vinyl-display--discovery .waxloom-vinyl-crate {height:293px;}
+  .waxloom-discovery-vinyl .waxloom-vinyl-rack {padding-top:24px;}
+  .waxloom-discovery-vinyl .waxloom-vinyl-sleeve {flex:0 0 174px;width:174px;min-width:174px;margin-right:-8px;}
+  .waxloom-discovery-vinyl .discovery-cover-card {
+    position:relative; display:flex; flex-direction:column; gap:6px;
+    width:174px; height:auto; padding:4px; border:0; background:transparent;
+  }
+  .waxloom-discovery-vinyl .discovery-cover-art {
+    width:166px;aspect-ratio:1;border:2px solid #6d537e;border-radius:3px;
+  }
+  .waxloom-discovery-vinyl .discovery-cover-copy {display:grid;gap:2px;text-align:center;padding:0 4px;}
+  .waxloom-discovery-vinyl .discovery-cover-copy strong {font-size:12px;}
+  .waxloom-discovery-vinyl .discovery-cover-copy small {font-size:10px;color:#af9ac0;}
+  .waxloom-discovery-vinyl .discovery-cover-actions {display:flex;gap:5px;align-items:center;justify-content:center;min-height:35px;}
+  .waxloom-discovery-vinyl .discovery-cover-actions button {min-width:34px;height:34px;border-radius:8px;}
+}
+@media (max-width:820px) {
+  .waxloom-vinyl-display--track .waxloom-vinyl-crate {height:292px;}
+  .waxloom-vinyl-display--track .waxloom-vinyl-rack {padding-top:27px;}
+  .waxloom-track-sleeve {margin-right:-11px;}
+}
+@media (prefers-reduced-motion:reduce) {
+  .waxloom-vinyl-rack:not([data-scrolling="true"]) .waxloom-vinyl-sleeve[data-centered="true"]::before {transition:none;}
+}
