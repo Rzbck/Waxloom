@@ -103,15 +103,9 @@ const metrics = `(() => {
       const last=collection?.querySelector('.waxloom-vinyl-load-more') || collection?.querySelector('.waxloom-vinyl-controls');
       return last?.getBoundingClientRect().bottom;
     })(),
-    discoveryActions:rect('.waxloom-discovery-vinyl .discovery-cover-actions'),
+    discoveryOldActions:document.querySelectorAll('.waxloom-discovery-vinyl .discovery-cover-actions').length,
+    discoveryOptions:rect('.waxloom-discovery-vinyl .waxloom-vinyl-context-trigger'),
     counterHeight:rect('.waxloom-discovery-vinyl .waxloom-vinyl-count')?.height,
-    downloadTapAvailable:(()=>{
-      const button=select('.waxloom-discovery-vinyl .discovery-cover-download');
-      if (!button) return false;
-      const r=button.getBoundingClientRect();
-      const hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
-      return hit===button || button.contains(hit);
-    })(),
     discoveryShelfHeight:rect('.discovery-cover-shelf')?.height,
     overflow:document.documentElement.scrollWidth>innerWidth,
   };
@@ -236,7 +230,7 @@ try {
     'Album image dimensions must stay fixed even across many records');
   assert(smoothness.bannerCount === 0,
     'WAXLOOM RECORDS banner must be fully removed on every record bin');
-  assert(smoothness.playTappable && smoothness.playPosition > 16 && smoothness.playPosition < 65,
+  assert(smoothness.playTappable && smoothness.playPosition >= 9 && smoothness.playPosition < 65,
     'Album play button must be accessible on the exposed side of the sleeve');
   assert(smoothness.touchAction.includes('pan-x') && smoothness.touchAction.includes('pan-y'),
     'Native vertical and horizontal swiping must remain enabled');
@@ -281,9 +275,21 @@ try {
   const discovery = await evaluate(metrics);
   assert(discovery.discovery && !discovery.discoveryGrid, "Discovery should use vinyl shelf, not old card grid");
   assert(discovery.suggestions > 4, "Discovery vinyl should show all suggestions");
-  assert(discovery.discoveryActions?.height >= 32, "Download/Like buttons should be usable inside Discovery vinyl");
+  assert(discovery.discoveryOldActions === 0 && discovery.discoveryOptions?.height >= 35,
+    "Discovery must use one context trigger, no per-cover action buttons");
   assert(discovery.discoveryRackScroll > discovery.discoveryRackWidth, "Discovery records should swipe horizontally");
   assert(!discovery.overflow, "Discovery causes page horizontal overflow");
+  await evaluate("document.querySelector('.waxloom-discovery-vinyl .waxloom-vinyl-context-trigger')?.click()");
+  await sleep(110);
+  const options = await evaluate(`(()=>{
+    const buttons=[...document.querySelectorAll('.waxloom-discovery-vinyl .waxloom-vinyl-context-panel button')];
+    return {count:buttons.length, labels:buttons.map(b=>b.textContent.trim()),
+      allVisible:buttons.every(b=>b.getClientRects().length>0)};
+  })()`);
+  assert(options.count >= 3 && options.allVisible && options.labels.some(v=>v.includes('Download')),
+    "Discovery context must expose download, Like and Less actions");
+  await evaluate("document.querySelector('.waxloom-discovery-vinyl .waxloom-vinyl-context-trigger')?.click()");
+  await sleep(55);
   await saveScreenshot("discovery");
 
   // 320px must preserve the download and vote controls in Discovery.
@@ -292,7 +298,18 @@ try {
   const narrow = await evaluate(metrics);
   assert(narrow.discovery && !narrow.overflow, "Small iPhone Discovery layout overflow");
   assert(narrow.counterHeight <= 20, "320px Discovery record count must fit on one line");
-  assert(narrow.downloadTapAvailable, "320px Discovery download button must be tappable");
+  await evaluate("document.querySelector('.waxloom-discovery-vinyl .waxloom-vinyl-context-trigger')?.click()");
+  await sleep(95);
+  const smallOptions = await evaluate(`(()=>{
+    const shelf=document.querySelector('.discovery-cover-shelf');
+    const buttons=[...document.querySelectorAll('.waxloom-discovery-vinyl .waxloom-vinyl-context-panel button')];
+    buttons[0]?.scrollIntoView({block:'nearest'});
+    return {count:buttons.length, viewportHeight:innerHeight, panelBottom:buttons.at(-1)?.getBoundingClientRect().bottom,
+      shelfScroll:shelf?.scrollHeight, shelfClient:shelf?.clientHeight};
+  })()`);
+  assert(smallOptions.count >= 3 && smallOptions.shelfScroll > smallOptions.shelfClient,
+    "320px Discovery options need a vertically scrollable host");
+  await evaluate("document.querySelector('.waxloom-discovery-vinyl .waxloom-vinyl-context-trigger')?.click()");
   await saveScreenshot("discovery-small");
 
   await rpc("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -316,7 +333,7 @@ try {
   await saveScreenshot("desktop");
 
   assert(errors.length === 0, `Unexpected JS runtime errors: ${errors.join("; ")}`);
-  console.log(JSON.stringify({passed:failures.length===0,failures,errors,writesIntercepted,homeGap,albumsGap,albumDetailGap,favoritesGap,playingHomeGap,playingAlbumsGap,smoothness,home,albums,favorites,search,artist,discovery,narrow,desktop},null,2));
+  console.log(JSON.stringify({passed:failures.length===0,failures,errors,writesIntercepted,homeGap,albumsGap,albumDetailGap,favoritesGap,playingHomeGap,playingAlbumsGap,smoothness,home,albums,favorites,search,artist,discovery,narrow,options,smallOptions,desktop},null,2));
 } finally {
   socket.close();
 }

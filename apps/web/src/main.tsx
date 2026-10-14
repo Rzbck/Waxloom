@@ -29,6 +29,7 @@ import "./mobile-shell.css";
 import "./mobile-home.css";
 import "./mobile-vinyl-system.css";
 import "./vinyl-unified.css";
+import "./vinyl-focus.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -21,23 +21,36 @@ export function VinylSongs({
 }: VinylSongsProps) {
   const player = usePlayer();
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  // When search/favorite/playlist results change, start on a compact first bin.
-  useEffect(() => setVisibleCount(PAGE_SIZE), [songs.length, songs[0]?.id, songs[songs.length - 1]?.id]);
-  if (songs.length === 0) return <div className="empty-state">No songs.</div>;
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [optionsOpen, setOptionsOpen] = useState(false);
 
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+    setSelectedIndex(0);
+    setOptionsOpen(false);
+  }, [songs.length, songs[0]?.id, songs[songs.length - 1]?.id]);
+
+  if (!songs.length) return <div className="empty-state">No songs.</div>;
   const selected = songs.slice(0, visibleCount);
-  const start = (index: number) => player.playSongs(songs, index, { ordered });
+  const selectedSong = selected[Math.min(selectedIndex, selected.length - 1)] ?? selected[0];
+  const starred = starOverrides[selectedSong.id] ?? Boolean(selectedSong.starred);
+
+  const start = (index: number) => {
+    setOptionsOpen(false);
+    player.playSongs(songs, index, { ordered });
+  };
+
   return (
-    <div className="waxloom-song-vinyl" aria-label="Tracks as record sleeves">
+    <div className="waxloom-song-vinyl" aria-label="Browse tracks as vinyl sleeves">
       <VinylRack
         count={selected.length}
         contentKey={selected[0]?.id}
         variant="track"
-        label="Swipe through tracks. Open a cover to play; use the controls underneath to manage your music."
+        label="Swipe through records. Tap a cover to play. Additional actions are in the full player or Options."
         records={selected.map((song) => ({ title: song.title ?? "Unknown track", artist: song.artist }))}
+        onSelectionChange={(index) => { setSelectedIndex(index); setOptionsOpen(false); }}
       >
         {selected.map((song, index) => {
-          const starred = starOverrides[song.id] ?? Boolean(song.starred);
           const playing = player.currentSong?.id === song.id;
           return (
             <article className={playing ? "waxloom-vinyl-sleeve waxloom-track-sleeve is-current" : "waxloom-vinyl-sleeve waxloom-track-sleeve"}
@@ -57,30 +70,38 @@ export function VinylSongs({
                 <strong title={song.title ?? "Unknown title"}>{song.title ?? "Unknown title"}</strong>
                 <small title={song.artist ?? "Unknown artist"}>{song.artist ?? "Unknown artist"}</small>
               </div>
-              <div className="waxloom-track-actions">
-                <button type="button" aria-label={starred ? `Remove ${song.title} from favorites` : `Favorite ${song.title}`}
-                  title={starred ? "Remove favorite" : "Favorite"}
-                  className={starred ? "waxloom-track-action is-starred" : "waxloom-track-action"}
-                  onClick={() => onToggleStar(song)}>
-                  <PlayerIcon name="heart" size={18} />
-                </button>
-                <button type="button" aria-label={`Queue ${song.title}`} title="Add to queue"
-                  className="waxloom-track-action" onClick={() => player.addToQueue(song)}>
-                  <PlayerIcon name="queue" size={18} />
-                </button>
-                <button type="button" aria-label={`Add ${song.title} to playlist`} title="Add to playlist"
-                  className="waxloom-track-action" onClick={() => onAddPlaylist(song)}>
-                  <PlayerIcon name="list-plus" size={18} />
-                </button>
-                {onRemove && (
-                  <button type="button" aria-label={`Remove ${song.title} from playlist`} title="Remove from playlist"
-                    className="waxloom-track-action waxloom-track-remove" onClick={() => onRemove(index)}>&times;</button>
-                )}
-              </div>
             </article>
           );
         })}
       </VinylRack>
+
+      <div className="waxloom-vinyl-context">
+        <button className="waxloom-vinyl-context-trigger" type="button"
+          aria-label={`Options for ${selectedSong.title}`}
+          aria-expanded={optionsOpen}
+          onClick={() => setOptionsOpen((value) => !value)}>
+          <span aria-hidden="true">···</span> Options
+        </button>
+      </div>
+      {optionsOpen && (
+        <div className="waxloom-vinyl-context-panel" role="group" aria-label={`Actions for ${selectedSong.title}`}>
+          <button type="button" onClick={() => start(selectedIndex)}>▶ Play</button>
+          <button type="button" onClick={() => onToggleStar(selectedSong)}>
+            {starred ? "♥ Unfavorite" : "♡ Like"}
+          </button>
+          <button type="button" onClick={() => { onAddPlaylist(selectedSong); setOptionsOpen(false); }}>
+            + Playlist
+          </button>
+          <button type="button" onClick={() => { player.addToQueue(selectedSong); setOptionsOpen(false); }}>
+            + Queue
+          </button>
+          {onRemove && (
+            <button type="button" onClick={() => { onRemove(selectedIndex); setOptionsOpen(false); }}>
+              Remove from playlist
+            </button>
+          )}
+        </div>
+      )}
       {visibleCount < songs.length && (
         <button className="waxloom-vinyl-load-more" type="button"
           onClick={() => setVisibleCount((value) => Math.min(songs.length, value + PAGE_SIZE))}>

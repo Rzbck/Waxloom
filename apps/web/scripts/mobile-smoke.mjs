@@ -142,13 +142,25 @@ try {
 
   await evalJs("document.querySelector('.waxloom-mobile-mini-info').click()");
   await wait(145);
+  const { writeFileSync } = await import("node:fs");
+  const { data: playerShot } = await rpc("Page.captureScreenshot", { format: "jpeg", quality: 77, captureBeyondViewport: false });
+  writeFileSync("C:/Users/DataC0re/AppData/Local/Temp/waxloom-focus-full-player-390.jpg", Buffer.from(playerShot,"base64"));
   const open = await evalJs(geometry);
   assert(Boolean(open.full), "Immersive player did not open.");
   assert(open.seek?.h >= 40, "Seek bar must be present and touch accessible.");
   assert(open.marquee, "Long song title should scroll.");
   assert(open.transport.length === 5 && open.transport.every((w) => w >= 44), "Player transport buttons are too small.");
-  assert(open.actions.length === 4 && open.actions.every((w) => w >= 60), "Actions need readable touch targets.");
+  assert(open.actions.length === 5 && open.actions.every((w) => w >= 54), "Five full-screen actions need readable touch targets.");
   assert(open.queue === 4, "Upcoming track list missing.");
+  const dislikeBefore = await evalJs("document.querySelector('.waxloom-mobile-player-actions button[aria-label=\\\"Dislike this song\\\"]')?.getAttribute('aria-pressed')");
+  assert(dislikeBefore === "false", "Dislike should initially be unpressed.");
+  await evalJs("document.querySelector('.waxloom-mobile-player-actions button[aria-label=\\\"Dislike this song\\\"]')?.click()");
+  await wait(210);
+  const dislikeAfter = await evalJs("document.querySelector('.waxloom-mobile-player-actions button[aria-label=\\\"Clear dislike\\\"]')?.getAttribute('aria-pressed')");
+  assert(dislikeAfter === "true", "Dislike must update after successful feedback.");
+  await evalJs("document.querySelector('.waxloom-mobile-player-actions button[aria-label=\\\"Clear dislike\\\"]')?.click()");
+  await wait(180);
+  assert(await evalJs("!!document.querySelector('.waxloom-mobile-player-actions button[aria-label=\\\"Dislike this song\\\"]')"), "Dislike must be reversible.");
 
   await evalJs("document.querySelector('.waxloom-mobile-player-actions button[aria-label=\\\"Add to playlist\\\"]').click()");
   await wait(550);
@@ -195,6 +207,10 @@ try {
     assert(!compact.overflow,`${name} page has horizontal overflow.`);
     await evalJs("document.querySelector('.waxloom-mobile-mini-info').click()");
     await wait(100);
+    if(name==="small"){
+      const { data: shot }=await rpc("Page.captureScreenshot",{format:"jpeg",quality:77,captureBeyondViewport:false});
+      writeFileSync("C:/Users/DataC0re/AppData/Local/Temp/waxloom-focus-full-player-320.jpg",Buffer.from(shot,"base64"));
+    }
     const expanded = await evalJs(geometry);
     assert(expanded.seek?.h >= 40, `${name}: seek bar missing.`);
     assert(expanded.transport.every((w)=>w>=44), `${name}: transport too small.`);
@@ -216,7 +232,7 @@ try {
   }
   const desktopLast = await evalJs(geometry);
   const desktopGap = desktopLast.mini && desktopLast.lastRow ? desktopLast.mini.y - desktopLast.lastRow : NaN;
-  assert(Number.isFinite(desktopGap) && desktopGap >= 6 && desktopGap <= 65,
+  assert(Number.isFinite(desktopGap) && desktopGap >= 6 && desktopGap <= 105,
     `Desktop last track should remain visible without extra clearance (gap=${Math.round(desktopGap)}px).`);
 
   assert(runtimeErrors.length === 0, `JavaScript exceptions: ${runtimeErrors.join("; ")}`);

@@ -73,12 +73,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playlistButtonRef = useRef<HTMLButtonElement | null>(null);
   const playlistRequestRef = useRef(0);
   const [playerStarred, setPlayerStarred] = useState(false);
+  // Shared with Discovery's taste profile: dislikes are durable and influence
+  // recommendations without deleting or hiding the listener's music files.
+  const [playerTaste, setPlayerTaste] = useState<Record<string, { value: -1 | 1; artist: string; tags: string[] }>>(() => {
+    try {
+      const value = JSON.parse(localStorage.getItem("waxloom.discovery.taste.v1") ?? "{}");
+      return value && typeof value === "object" ? value : {};
+    } catch { return {}; }
+  });
   const [playerActionBusy, setPlayerActionBusy] = useState(false);
   const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
 
   const currentSong = mode === "navidrome" && currentIndex >= 0 ? queue[currentIndex] ?? null : null;
   const currentPreview = mode === "preview" && previewIndex >= 0 ? previewQueue[previewIndex] ?? null : null;
+  const tasteKey = currentPreview?.recording_mbid
+    ?? (currentSong ? `library:${currentSong.id}` : null);
+  const currentTaste = tasteKey ? (playerTaste[tasteKey]?.value ?? 0) : 0;
+  const playerDisliked = currentTaste === -1;
+  const playerLiked = currentPreview ? currentTaste === 1 : playerStarred;
   useEffect(() => {
     setPlayerStarred(Boolean(currentSong?.starred));
     playlistRequestRef.current += 1;
@@ -514,6 +527,40 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  async function setCurrentTaste(value: -1 | 0 | 1) {
+    if (playerActionBusy || !tasteKey) return;
+    const artist = currentPreview?.artist ?? currentSong?.artist ?? "Unknown artist";
+    const title = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
+    setPlayerActionBusy(true);
+    try {
+      await api.discoveryTrackFeedback(tasteKey, artist, title, value);
+      setPlayerTaste((old) => {
+        const next = { ...old };
+        if (value === 0) delete next[tasteKey];
+        else next[tasteKey] = { value, artist, tags: [] };
+        try { localStorage.setItem("waxloom.discovery.taste.v1", JSON.stringify(next)); } catch { /* private mode */ }
+        return next;
+      });
+      setPlayerActionMessage(value === -1 ? "Show less like this in Discovery"
+        : value === 1 ? "Liked — more similar discoveries"
+        : "Taste feedback cleared");
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not save taste feedback");
+    } finally { setPlayerActionBusy(false); }
+  }
+
+  async function handleLikePlaying() {
+    if (currentPreview) {
+      await setCurrentTaste(playerLiked ? 0 : 1);
+    } else {
+      await toggleCurrentFavorite();
+    }
+  }
+
+  async function toggleDislikePlaying() {
+    await setCurrentTaste(playerDisliked ? 0 : -1);
+  }
+
   async function openPlayerPlaylists() {
     if (!currentSong) return;
     if (playlistPickerOpen) {
@@ -841,10 +888,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </div>
 
             <div className="player-tools">
-              <button className={playerStarred && currentSong ? "icon-button player-quick-action is-favorite" : "icon-button player-quick-action"}
-                type="button" onClick={() => void toggleCurrentFavorite()}
-                title={currentSong ? (playerStarred ? "Remove from favorites" : "Add playing song to favorites") : "Download Discovery preview to library first"}
-                aria-label="Favorite playing song" disabled={!currentSong || playerActionBusy}>♥</button>
+              <button className={playerLiked ? "icon-button player-quick-action is-favorite" : "icon-button player-quick-action"}
+                type="button" onClick={() => void handleLikePlaying()}
+                title={currentPreview ? "Like this Discovery preview" : (playerStarred ? "Remove from favorites" : "Like / favorite playing song")}
+                aria-label="Favorite playing song" disabled={(!currentSong && !currentPreview) || playerActionBusy}>♥</button>
+              <button className={playerDisliked ? "icon-button player-quick-action is-less" : "icon-button player-quick-action"}
+                type="button" onClick={() => void toggleDislikePlaying()} disabled={playerActionBusy}
+                aria-label={playerDisliked ? "Clear dislike" : "Dislike playing song"}
+                title={playerDisliked ? "Clear dislike" : "Show less like this"}>↓</button>
               <button ref={playlistButtonRef} className="icon-button player-quick-action" type="button"
                 onClick={() => void openPlayerPlaylists()} disabled={!currentSong || playerActionBusy}
                 title={currentSong ? "Add playing song to playlist" : "Download Discovery preview to library first"}
@@ -878,7 +929,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             index={activeIndex}
             shuffle={shuffle}
             repeat={repeat}
-            isFavorite={playerStarred}
+            isFavorite={playerLiked}
+            isDisliked={playerDisliked}
             busy={playerActionBusy}
             feedback={playerActionMessage}
             playbackError={previewError}
@@ -889,7 +941,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             onSeek={seek}
             onShuffle={() => setShuffle((value) => !value)}
             onRepeat={cycleRepeat}
-            onFavorite={() => void toggleCurrentFavorite()}
+            onFavorite={() => void handleLikePlaying()}
+            onDislike={() => void toggleDislikePlaying()}
             onPlaylist={() => void openPlayerPlaylists()}
             onMix={() => void instantMixFromPlaying()}
             onQueue={() => setQueueOpen(true)}

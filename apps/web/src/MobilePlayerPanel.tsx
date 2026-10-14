@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 
 type PlayerIconName =
   | "play" | "pause" | "previous" | "next" | "heart" | "list-plus"
-  | "sparkles" | "queue" | "shuffle" | "repeat" | "repeat-one" | "chevron-down" | "music";
+  | "sparkles" | "queue" | "shuffle" | "repeat" | "repeat-one" | "chevron-down" | "music" | "thumbs-down";
 
 export function PlayerIcon({ name, size = 22 }: { name: PlayerIconName; size?: number }) {
   const paths: Record<PlayerIconName, ReactNode> = {
@@ -11,6 +11,7 @@ export function PlayerIcon({ name, size = 22 }: { name: PlayerIconName; size?: n
     previous: <><path d="M19 20 9 12l10-8v16ZM5 5v14" /><path d="m18 18-8-6 8-6" fill="currentColor" stroke="none" /></>,
     next: <><path d="m5 4 10 8-10 8V4ZM19 5v14" /><path d="m6 6 8 6-8 6" fill="currentColor" stroke="none" /></>,
     heart: <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />,
+    "thumbs-down": <><path d="M17 14V2M9 18l1-4H5.2a2 2 0 0 1-1.9-2.6l2.9-8A2 2 0 0 1 8.1 2H20v12h-5l-4.5 7a2 2 0 0 1-2.3 0 2 2 0 0 1-1-2.4L9 18Z" /></>,
     "list-plus": <><path d="M4 6h12M4 12h9M4 18h8M19 12v8m-4-4h8" /></>,
     sparkles: <><path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2ZM20 17l.8 2.2L23 20l-2.2.8L20 23l-.8-2.2L17 20l2.2-.8L20 17Z" /></>,
     queue: <><path d="M4 5h16M4 10h16M4 15h9M16 17v5l5-2.5-5-2.5Z" /></>,
@@ -93,6 +94,7 @@ export type MobilePlayerPanelProps = {
   shuffle: boolean;
   repeat: "off" | "all" | "one";
   isFavorite: boolean;
+  isDisliked: boolean;
   busy: boolean;
   feedback: string | null;
   playbackError: string | null;
@@ -103,6 +105,7 @@ export type MobilePlayerPanelProps = {
   onShuffle: () => void;
   onRepeat: () => void;
   onFavorite: () => void;
+  onDislike: () => void;
   onPlaylist: () => void;
   onMix: () => void;
   onQueue: () => void;
@@ -118,9 +121,9 @@ function timeLabel(seconds: number): string {
 export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
   const {
     open, suspended, onClose, title, artist, album, cover, isPreview, playing, resolving,
-    currentTime, duration, queue, index, shuffle, repeat, isFavorite, busy,
+    currentTime, duration, queue, index, shuffle, repeat, isFavorite, isDisliked, busy,
     feedback, playbackError, onPlayPause, onPrevious, onNext, onSeek,
-    onShuffle, onRepeat, onFavorite, onPlaylist, onMix, onQueue, onQueueItem,
+    onShuffle, onRepeat, onFavorite, onDislike, onPlaylist, onMix, onQueue, onQueueItem,
   } = props;
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -224,9 +227,14 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
 
       <div className="waxloom-mobile-player-actions" aria-label="Track actions">
         <button type="button" className={isFavorite ? "waxloom-action-favorite is-active" : "waxloom-action-favorite"}
-          aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"} aria-pressed={isFavorite}
-          disabled={isPreview || busy} onClick={onFavorite}>
-          <PlayerIcon name="heart" size={25} /><span>Favorite</span>
+          aria-label={isPreview ? (isFavorite ? "Unlike preview" : "Like preview") : (isFavorite ? "Remove from favorites" : "Add to favorites")} aria-pressed={isFavorite}
+          disabled={busy} onClick={onFavorite}>
+          <PlayerIcon name="heart" size={25} /><span>{isPreview ? "Like" : "Favorite"}</span>
+        </button>
+        <button type="button" className={isDisliked ? "waxloom-action-less is-active" : "waxloom-action-less"}
+          aria-label={isDisliked ? "Clear dislike" : "Dislike this song"} aria-pressed={isDisliked}
+          disabled={busy} onClick={onDislike}>
+          <PlayerIcon name="thumbs-down" size={24} /><span>Dislike</span>
         </button>
         <button type="button" className="waxloom-action-playlist" aria-label="Add to playlist"
           disabled={isPreview || busy} onClick={onPlaylist}>

@@ -45,6 +45,10 @@ ws.onmessage = async ({data}) => {
           {id:"stale-queue-test",title:"STALE PERSISTED TRACK",artist:"QA",duration:130},
         ],current:"stale-queue-test",position:0})).toString("base64")
       });
+    } else if (path.startsWith("/api/discovery/previews/") && request.method === "GET") {
+      mediaDenied++;
+      await rpc("Fetch.fulfillRequest", {requestId,responseCode:404,responseHeaders:headers,
+        body:Buffer.from('{"detail":"QA intentionally blocks remote preview audio"}').toString("base64")});
     } else if (path.includes("/media/stream/") || path.includes("/media/download/")) {
       mediaDenied++;
       await rpc("Fetch.fulfillRequest", {requestId,responseCode:403,responseHeaders:headers,
@@ -214,39 +218,43 @@ try {
   }
   const playlistDetail=await checkScreen("phone-playlist-detail");
   check(playlistDetail.trackRack,"Opened playlist must show track sleeves and actions");
+  // Each sleeve has only a cover; all secondary controls are grouped below
+  // the selected record, not clipped inside the horizontal scroller.
   const beforeWrites=writes;
-  await evaluate("document.querySelector('.waxloom-song-vinyl .waxloom-track-face')?.scrollIntoView({block:'center',behavior:'instant'})");
-  await wait(240);
+  await evaluate("document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-context-trigger')?.scrollIntoView({block:'center'})");
+  await wait(130);
+  const coverActions=await evaluate(`(()=>({
+    underCover:document.querySelectorAll('.waxloom-song-vinyl .waxloom-track-actions button').length,
+    trigger:!!document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-context-trigger'),
+  }))()`);
+  check(coverActions.underCover===0 && coverActions.trigger,
+    "Playlist sleeves should have no crammed actions under artwork");
+  await evaluate("document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-context-trigger')?.click()");
+  await wait(120);
   const playlistActions=await evaluate(`(()=>{
-    const cover=document.querySelector('.waxloom-song-vinyl .waxloom-track-face');
-    cover?.scrollIntoView({block:'center'});
-    const r=cover?.getBoundingClientRect();
-    const hit=r&&document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
-    const star=document.querySelector('.waxloom-song-vinyl .waxloom-track-action[title="Favorite"],.waxloom-song-vinyl .waxloom-track-action[title="Remove favorite"]');
-    const add=document.querySelector('.waxloom-song-vinyl .waxloom-track-action[title="Add to playlist"]');
-    const remove=document.querySelector('.waxloom-song-vinyl .waxloom-track-remove');
-    const tappable=[star,add,remove].map((b)=>{
-      if(!b)return false;
-      const r=b.getBoundingClientRect();
-      const el=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
-      return el===b||b.contains(el);
-    });
-    return {coverHit:hit===cover||cover?.contains(hit),fullActions:!!(star&&add&&remove),actionHits:tappable,
-      initiallyStarred:!!star?.classList.contains('is-starred'),title:cover?.getAttribute('title')};
+    const menu=document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-context-panel');
+    const buttons=[...menu?.querySelectorAll('button')||[]];
+    return {count:buttons.length,labels:buttons.map(b=>b.textContent.trim()),
+      inDocument:menu?.getClientRects().length>0};
   })()`);
-  check(playlistActions.coverHit&&playlistActions.fullActions&&playlistActions.actionHits.every(Boolean),"Playlist vinyl buttons must be visible and tappable");
-  await evaluate("document.querySelector('.waxloom-song-vinyl .waxloom-track-action[title=\"Favorite\"],.waxloom-song-vinyl .waxloom-track-action[title=\"Remove favorite\"]')?.click()");
-  await wait(160);
-  const nowStarred=await evaluate("!!document.querySelector('.waxloom-song-vinyl .waxloom-track-sleeve .waxloom-track-action')?.classList.contains('is-starred')");
-  check(nowStarred!==playlistActions.initiallyStarred,"Favorite action should change visual state");
-  await evaluate("document.querySelector('.waxloom-song-vinyl .waxloom-track-action[title=\"Add to playlist\"]')?.click()");
+  check(playlistActions.inDocument && playlistActions.count>=5 &&
+    playlistActions.labels.some(t=>t.includes("Remove from playlist")),
+    "Selected playlist record should have Like, Playlist, Queue and Remove in Options");
+
+  await evaluate("(()=>{const a=[...document.querySelectorAll('.waxloom-song-vinyl .waxloom-vinyl-context-panel button')].find(b=>b.textContent.includes('Like'));a?.click()})()");
+  await wait(180);
+  const nowLiked=await evaluate("document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-context-panel')?.textContent.includes('Unfavorite')");
+  check(nowLiked===true, "Like action should update the options menu");
+  await evaluate("(()=>{const a=[...document.querySelectorAll('.waxloom-song-vinyl .waxloom-vinyl-context-panel button')].find(b=>b.textContent.includes('Playlist'));a?.click()})()");
   await wait(140);
-  check(await evaluate("!!document.querySelector('.modal[aria-label=\"Add to playlist\"]')"),"Playlist add popup missing");
+  check(await evaluate("!!document.querySelector('.modal[aria-label=\\\"Add to playlist\\\"]')"),
+    "Playlist action should open the existing modal");
   await evaluate("document.querySelector('.modal-backdrop')?.dispatchEvent(new MouseEvent('mousedown',{bubbles:true}))");
-  await wait(100);
-  check(await evaluate("!document.querySelector('.modal[aria-label=\"Add to playlist\"]')"),"Click outside must dismiss playlist popup");
-  check(writes>beforeWrites,"Favorite action must send intercepted API mutation");
-  results.playlistActions={...playlistActions,nowStarred,interceptedMutations:writes-beforeWrites};
+  await wait(90);
+  check(await evaluate("!document.querySelector('.modal[aria-label=\\\"Add to playlist\\\"]')"),
+    "Click outside should dismiss playlist picker");
+  check(writes>beforeWrites, "Like callback must reach the intercepted API");
+  results.playlistActions={...playlistActions,nowLiked,writesIntercepted:writes-beforeWrites};
   // Growing a 101-track playlist's record bin must not kick the user back
   // to the first sleeve or change the active playback queue.
   const paginationBefore=await evaluate("(()=>{const r=document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-rack');r.scrollLeft=355;r.dispatchEvent(new Event('scroll'));return {left:r.scrollLeft,count:r.querySelectorAll('.waxloom-track-sleeve').length}})()");
@@ -271,6 +279,38 @@ try {
   await shot("phone-favorites");
   await navigate("Discovery");const discovery=await checkScreen("phone-discovery");
   check(discovery.discoveryRack && !discovery.discoveryGrid, "Phone Discovery should use vinyl");
+  // While on Discovery, preview feedback must be available in the expanded
+  // player. The audio GET is blocked and all feedback POSTs are intercepted.
+  const previewWritesBefore=writes;
+  await evaluate("document.querySelector('.waxloom-discovery-vinyl .discovery-cover-art')?.click()");
+  await wait(450);
+  await evaluate("document.querySelector('.waxloom-mobile-mini-info')?.click()");
+  await wait(190);
+  const previewPanel=await evaluate(`(()=>({
+    open:!!document.querySelector('.waxloom-mobile-player'),
+    preview:document.querySelector('.waxloom-mobile-player-head-title span')?.textContent,
+    like:!!document.querySelector('.waxloom-mobile-player-actions .waxloom-action-favorite'),
+    initiallyLiked:document.querySelector('.waxloom-mobile-player-actions .waxloom-action-favorite')?.getAttribute('aria-pressed'),
+    less:!!document.querySelector('.waxloom-mobile-player-actions .waxloom-action-less'),
+    initiallyDisliked:document.querySelector('.waxloom-mobile-player-actions .waxloom-action-less')?.getAttribute('aria-pressed'),
+    playlistDisabled:document.querySelector('.waxloom-mobile-player-actions button[aria-label="Add to playlist"]')?.disabled,
+  }))()`);
+  check(previewPanel.open && previewPanel.preview === "Discovery preview" &&
+    previewPanel.like && previewPanel.less && previewPanel.playlistDisabled,
+    "Preview player should expose Like/Dislike while library-only actions stay disabled");
+  await evaluate("document.querySelector('.waxloom-mobile-player-actions .waxloom-action-favorite')?.click()");
+  await wait(215);
+  const previewLikeAfter=await evaluate("document.querySelector('.waxloom-mobile-player-actions .waxloom-action-favorite')?.getAttribute('aria-pressed')");
+  check(previewLikeAfter !== previewPanel.initiallyLiked, "Preview Like should toggle after stored feedback");
+  await evaluate("document.querySelector('.waxloom-mobile-player-actions .waxloom-action-less')?.click()");
+  await wait(200);
+  const previewLessAfter=await evaluate("document.querySelector('.waxloom-mobile-player-actions .waxloom-action-less')?.getAttribute('aria-pressed')");
+  check(previewLessAfter !== previewPanel.initiallyDisliked,
+    "Preview Dislike should toggle after stored feedback");
+  check(writes >= previewWritesBefore+2, "Preview taste actions must reach the intercepted API");
+  await evaluate("document.querySelector('.waxloom-mobile-player-close')?.click()");
+  await wait(110);
+  results.previewActions=previewPanel;
   await shot("phone-discovery");
   await setSize(320,568);const narrow=await checkScreen("phone-small");
   check(narrow.discoveryRack, "Small phone Discovery missing");await shot("phone-small");

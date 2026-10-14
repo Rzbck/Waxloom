@@ -264,6 +264,14 @@ export const api = {
     }),
   }),
 
+  discoveryTrackFeedback: (
+    recordingMbid: string, artist: string, title: string,
+    value: -1 | 0 | 1, tags: string[] = [],
+  ) => request<{ ok: boolean; likes: number; dislikes: number; total: number }>("/api/discovery/feedback", {
+    method: "POST",
+    body: JSON.stringify({ recording_mbid: recordingMbid, artist, title, tags, value }),
+  }),
+
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
   youtubeSearch: (artist: string, title: string, isrc?: string, limit = 8) => youtubeSearchCached(artist, title, isrc, limit),
   prefetchYoutubePreview: (artist: string, title: string) => {

@@ -115,6 +115,8 @@ try {
   assert(portrait.recentCoverImages > 0, "390: recent covers missing, try album ID as cover-art ID");
   assert(portrait.recentCoversLoaded >= 1, "390: none of the actual recent music covers loaded");
   assert(portrait.rackScrollWidth > portrait.rackWidth + 120, "390: vinyl crate should scroll horizontally");
+  assert(portrait.focusedCover != null && Math.abs(portrait.focusedCover + 81 - portrait.viewport[0]/2) < 4,
+    "390: selected sleeve should start centered in the viewport");
   assert(portrait.tracksScrollWidth > portrait.tracksWidth, "390: recent tracks should scroll horizontally");
   assert(portrait.pageWidth <= 390, "390: page has horizontal overflow");
   assert(portrait.pageHeight < 1550, "390: Home still unnecessarily long");
@@ -154,6 +156,32 @@ try {
     "Moving vinyl art must stay untransformed and free of scroll snapping");
   assert(motion.bannerCount === 0, "Old WAXLOOM RECORDS strip must be removed from DOM");
   assert(motion.coverWidth === 162, "Album cover should keep its exact square width while scrolling");
+  const focusQA = await evalJs(`(async()=>{
+    const rack=document.querySelector('.waxloom-mobile-home .waxloom-vinyl-rack');
+    const sleeves=[...rack.querySelectorAll('.waxloom-vinyl-sleeve')];
+    const first=sleeves[0].querySelector('.waxloom-vinyl-face').getBoundingClientRect();
+    const second=sleeves[1].querySelector('.waxloom-vinyl-face').getBoundingClientRect();
+    const crate=document.querySelector('.waxloom-mobile-home .waxloom-vinyl-crate');
+    const start=performance.now();
+    rack.scrollLeft=4*(second.left-first.left);
+    rack.dispatchEvent(new Event('scroll',{bubbles:true}));
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const selected=rack.querySelector('.waxloom-vinyl-sleeve[data-centered="true"]');
+    const expected=selected?.querySelector('.waxloom-vinyl-face')?.getAttribute('title')?.replace(/^Open /,'');
+    const shown=document.querySelector('.waxloom-mobile-home .waxloom-vinyl-selected strong')?.textContent;
+    const disc=getComputedStyle(selected,'::before');
+    return {gap:second.left-first.right,
+      border:getComputedStyle(crate).borderTopWidth,
+      time:performance.now()-start,
+      title:shown,expected,disc:disc.display,
+      selectedCenter:(()=>{const r=selected?.querySelector('.waxloom-vinyl-face')?.getBoundingClientRect();return r?.left+r?.width/2})(),
+      viewportCenter:rack.getBoundingClientRect().left+rack.clientWidth/2
+    };
+  })()`);
+  assert(focusQA.gap >= 24, "Neighbors should be visibly separated, not flattened together");
+  assert(focusQA.border === "0px", "Vinyl browsing area must not have a surrounding frame");
+  assert(focusQA.title === focusQA.expected && focusQA.time < 100,
+    "Selected record title must update during the swipe, not 150ms after it ends");
   assert(motion.playLeft >= motion.coverLeft + 10 && motion.playLeft < motion.coverRight - 40,
     "Play button should be on the uncovered side of the album sleeve");
   await rpc("Page.captureScreenshot", { format: "jpeg", quality: 72, captureBeyondViewport: false })
@@ -177,7 +205,7 @@ try {
     const data = await evalJs(measures);
     assert(data.home, `${label}: home hidden`);
     assert(data.pageWidth <= data.viewport[0], `${label}: horizontal overflow`);
-    assert(data.crateHeight >= 245 && data.crateHeight <= 265, `${label}: crate size wrong`);
+    assert(data.crateHeight >= 285 && data.crateHeight <= 303, `${label}: vinyl area should let the record rise fully`);
     assert(data.pageHeight < 1700, `${label}: unnecessarily long home`);
     if (label === "small" || label === "tablet") {
       const path = `C:/Users/DataC0re/AppData/Local/Temp/waxloom-home-${label}.jpg`;
@@ -208,7 +236,7 @@ try {
   writeFileSync("C:/Users/DataC0re/AppData/Local/Temp/waxloom-home-desktop.jpg", Buffer.from(desktopShot,"base64"));
 
   assert(exceptions.length === 0, `Browser exceptions: ${exceptions.join("; ")}`);
-  console.log(JSON.stringify({passed:failures.length===0,failures,exceptions,interceptedWrites,portrait,afterSwipe,motion,openedAlbum,lastGap,desktop},null,2));
+  console.log(JSON.stringify({passed:failures.length===0,failures,exceptions,interceptedWrites,portrait,afterSwipe,motion,focusQA,openedAlbum,lastGap,desktop},null,2));
 } finally {
   socket.close();
 }

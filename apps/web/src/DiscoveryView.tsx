@@ -163,72 +163,37 @@ function asPreviewTrack(candidate: DiscoveryCandidate): PreviewTrack {
 }
 
 function DiscoveryTrackCard({
-  candidate,
-  currentPreviewMbid,
-  playing,
-  phase,
-  rejecting,
-  taste,
-  onPlay,
-  onQuickAdd,
-  onFeedback,
-  onBadSource,
+  candidate, currentPreviewMbid, playing, phase, onPlay,
 }: {
   candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
   playing: boolean;
   phase?: ReturnType<typeof downloadPhase>;
-  rejecting: boolean;
-  taste: TasteState;
   onPlay: (candidate: DiscoveryCandidate) => void;
-  onQuickAdd: (candidate: DiscoveryCandidate) => void;
-  onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
-  onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
-  const currentFeedback = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
   const isPlaying = currentPreviewMbid === candidate.recording_mbid && playing;
-  const canRejectSource = candidate.source === "youtube_dig";
   const [coverFailed, setCoverFailed] = useState(false);
   const coverId = candidate.release_mbid && /^[0-9a-f-]{36}$/i.test(candidate.release_mbid) ? candidate.release_mbid : null;
   const cover = coverId && !coverFailed ? `https://coverartarchive.org/release/${encodeURIComponent(coverId)}/front-250` : null;
-  const working = phase === "queued" || phase === "searching" || phase === "downloading";
+  const busy = phase === "queued" || phase === "searching" || phase === "downloading";
   return (
     <article className="discovery-cover-card">
-      <button
-        className="discovery-cover-art"
-        type="button"
+      <button className="discovery-cover-art" type="button"
         onClick={() => onPlay(candidate)}
         onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
-        title={`Play ${candidate.artist} — ${candidate.title}`}
-        aria-label={`Play ${candidate.title}`}
-      >
+        title={`Play ${candidate.artist} - ${candidate.title}`}
+        aria-label={`Play ${candidate.title}`}>
         {cover ? <img src={cover} loading="lazy" alt="" onError={() => setCoverFailed(true)} /> : (
           <span className="discovery-cover-fallback" aria-hidden="true">{candidate.artist.slice(0, 2).toUpperCase()}</span>
         )}
-        <span className={isPlaying ? "discovery-cover-play is-playing" : "discovery-cover-play"} aria-hidden="true">{isPlaying ? "Ⅱ" : "▶"}</span>
+        <span className={isPlaying ? "discovery-cover-play is-playing" : "discovery-cover-play"} aria-hidden="true">
+          {isPlaying ? "Ⅱ" : "▶"}
+        </span>
+        {busy && <span className="waxloom-discovery-download-dot" title="Download in progress" aria-label="Download in progress" />}
       </button>
       <div className="discovery-cover-copy">
         <strong title={candidate.title}>{candidate.title}</strong>
         <small title={candidate.artist}>{candidate.artist}</small>
-      </div>
-      <div className="discovery-cover-actions">
-        <button
-          className={`discovery-cover-download ${working ? "is-working" : ""} ${phase === "indexed" || phase === "existing" ? "is-complete" : ""}`}
-          type="button"
-          disabled={working || phase === "indexed" || phase === "existing"}
-          title={phase === "failed" ? "Retry download" : phase === "downloading" ? "Downloading and indexing" : phase === "queued" ? "Queued" : phase === "indexed" ? "Saved in library" : "Download into library"}
-          aria-label={`Download ${candidate.title} to library`}
-          onClick={() => onQuickAdd(candidate)}
-        >{phase === "indexed" || phase === "existing" ? "✓" : working ? "◌" : phase === "failed" ? "!" : "+"}</button>
-        <button className={currentFeedback === 1 ? "discovery-cover-vote discovery-cover-like is-liked" : "discovery-cover-vote discovery-cover-like"}
-          type="button" aria-label={`More like ${candidate.title}`} title="More like this"
-          onClick={() => onFeedback(candidate, currentFeedback === 1 ? 0 : 1)}>Like</button>
-        <button className={currentFeedback === -1 ? "discovery-cover-vote discovery-cover-less is-less" : "discovery-cover-vote discovery-cover-less"}
-          type="button" aria-label={`Less like ${candidate.title}`} title="Show less like this"
-          onClick={() => onFeedback(candidate, currentFeedback === -1 ? 0 : -1)}>Less</button>
-        {canRejectSource ? <button className="discovery-cover-reject" type="button" disabled={rejecting}
-          aria-label={`Report ${candidate.title} as non-music`} title="Not music / bad source"
-          onClick={() => onBadSource(candidate)}>×</button> : <span className="discovery-cover-action-space" aria-hidden="true" />}
       </div>
     </article>
   );
@@ -247,28 +212,62 @@ function DiscoveryShelf({
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
   onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
-  if (items.length === 0) return <p className="muted">Preparing musical discoveries…</p>;
-  const renderTrack = (candidate: DiscoveryCandidate) => (
-    <DiscoveryTrackCard
-      key={candidate.recording_mbid} candidate={candidate}
-      currentPreviewMbid={currentPreviewMbid} playing={playing}
-      phase={downloadPhase(candidate.recording_mbid)}
-      rejecting={rejectingMbid === candidate.recording_mbid} taste={taste}
-      onPlay={(track) => onPlayQueue(items, track)}
-      onQuickAdd={onQuickAdd} onFeedback={onFeedback} onBadSource={onBadSource}
-    />
-  );
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  if (items.length === 0) return <p className="muted">Preparing musical discoveries.</p>;
+
+  const candidate = items[Math.min(selectedIndex, items.length - 1)] ?? items[0];
+  const phase = downloadPhase(candidate.recording_mbid);
+  const busy = phase === "queued" || phase === "searching" || phase === "downloading";
+  const complete = phase === "indexed" || phase === "existing";
+  const liked = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
   return (
     <section className="discovery-cover-shelf" aria-label="All Discovery recommendations">
       <div className="waxloom-discovery-vinyl">
-        <VinylRack count={items.length} contentKey={items[0]?.recording_mbid} label="Discover tracks in the vinyl crate" variant="discovery"
-          records={items.map((item) => ({title:item.title, artist:item.artist}))}>
-          {items.map((candidate) => (
-            <div key={candidate.recording_mbid} className="waxloom-vinyl-sleeve waxloom-vinyl-sleeve--discovery">
-              {renderTrack(candidate)}
+        <VinylRack count={items.length} contentKey={items[0]?.recording_mbid}
+          label="Discover tracks. Tap cover to play a preview, or choose actions below."
+          variant="discovery"
+          records={items.map((item) => ({ title: item.title, artist: item.artist }))}
+          onSelectionChange={(index) => { setSelectedIndex(index); setOptionsOpen(false); }}>
+          {items.map((item) => (
+            <div key={item.recording_mbid} className="waxloom-vinyl-sleeve waxloom-vinyl-sleeve--discovery">
+              <DiscoveryTrackCard candidate={item}
+                currentPreviewMbid={currentPreviewMbid} playing={playing}
+                phase={downloadPhase(item.recording_mbid)}
+                onPlay={(track) => onPlayQueue(items, track)} />
             </div>
           ))}
         </VinylRack>
+        <div className="waxloom-vinyl-context">
+          <button type="button" className="waxloom-vinyl-context-trigger"
+            aria-label={`Options for ${candidate.title}`}
+            aria-expanded={optionsOpen}
+            onClick={() => setOptionsOpen((value) => !value)}>
+            <span aria-hidden="true">···</span> {busy ? "Downloading…" : complete ? "Saved · Options" : "Options"}
+          </button>
+        </div>
+        {optionsOpen && (
+          <div className="waxloom-vinyl-context-panel" role="group" aria-label={`Actions for ${candidate.title}`}>
+            <button type="button" disabled={busy || complete}
+              onClick={() => { onQuickAdd(candidate); setOptionsOpen(false); }}>
+              {complete ? "✓ In library" : busy ? "Downloading…" : phase === "failed" ? "↻ Retry download" : "+ Download"}
+            </button>
+            <button type="button" aria-pressed={liked === 1}
+              onClick={() => { onFeedback(candidate, liked === 1 ? 0 : 1); setOptionsOpen(false); }}>
+              {liked === 1 ? "✓ Liked" : "♡ More like this"}
+            </button>
+            <button type="button" aria-pressed={liked === -1}
+              onClick={() => { onFeedback(candidate, liked === -1 ? 0 : -1); setOptionsOpen(false); }}>
+              {liked === -1 ? "✓ Less like this" : "↓ Less like this"}
+            </button>
+            {candidate.source === "youtube_dig" && (
+              <button type="button" disabled={rejectingMbid === candidate.recording_mbid}
+                onClick={() => { onBadSource(candidate); setOptionsOpen(false); }}>
+                Not music / bad source
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

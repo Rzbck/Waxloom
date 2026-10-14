@@ -1,5 +1,15 @@
 # Waxloom AI handoff
 
+## 2026-10-14 — Vinyl focus and full-player actions
+
+- Corrected Safari screenshot issues: removed decorative crate border/background and bottom facade, sleeves no longer overlap or clip their black records; fixed mobile and desktop sleeve spacing to 30px and centered active cover with partial neighbors on both sides. Native scroll and CSS disc animation remain jitter-free. Final CSS overlay `vinyl-focus.css` imported last.
+- `VinylRack.tsx` updates title/artist/counter on the next animation frame after the centered disc changes (measured 15ms), rather than 150ms after scroll idle; text marquee for long titles.
+- `VinylSongs.tsx` and `DiscoveryView.tsx` remove per-cover action row. One **Options** panel below the rack handles selected record actions; special destructive Remove is available only on playlist context, Download/Like/Less/source-report in Discovery.
+- `MobilePlayerPanel.tsx` gains a fifth visible control **Dislike** alongside existing Favorite/Playlist/Instant Mix/Queue. Like/Dislike are available for previews; Playlist/Mix remain library-only. Feedback posts to existing `/api/discovery/feedback` and uses shared taste state. Desktop player also adds Dislike.
+- Extended browser QA: `qa:home` 30px neighbor gap/center/title latency/frame, `qa:mobile` 5-action player and toggle/reverse Dislike, `qa:vinyl` contextual Discovery controls, `qa:parity` playlist Options and preview Like/Dislike with no real media writes.
+- Details and Safari limitations: `docs/WAXLOOM_VINYL_FOCUS_20261014.md`.
+- Keep draft PR #15 and previous Docker image for rollback; do not merge without instruction.
+
 ## 2026-10-13 — Vinyl parity / Next regression audit (continuation)
 
 - Audit after production `cba23e4` requested by owner: no more static cover slider, true vinyl-bin visual without jitter, **Next must follow newly added songs**, consistent PC/iPhone behavior, no remaining ugly artist/playlist/song list cards.
