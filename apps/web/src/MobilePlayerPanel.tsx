@@ -108,6 +108,8 @@ export type MobilePlayerPanelProps = {
   onDislike: () => void;
   onPlaylist: () => void;
   onMix: () => void;
+  downloadPhase?: "queued" | "searching" | "downloading" | "indexed" | "existing" | "manual" | "failed";
+  onDownload: () => void;
   onQueue: () => void;
   onQueueItem: (index: number) => void;
 };
@@ -123,7 +125,7 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
     open, suspended, onClose, title, artist, album, cover, isPreview, playing, resolving,
     currentTime, duration, queue, index, shuffle, repeat, isFavorite, isDisliked, busy,
     feedback, playbackError, onPlayPause, onPrevious, onNext, onSeek,
-    onShuffle, onRepeat, onFavorite, onDislike, onPlaylist, onMix, onQueue, onQueueItem,
+    onShuffle, onRepeat, onFavorite, onDislike, onPlaylist, onMix, downloadPhase, onDownload, onQueue, onQueueItem,
   } = props;
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -249,6 +251,20 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
           <PlayerIcon name="queue" size={25} /><span>Queue</span>
         </button>
       </div>
+
+      {isPreview && (
+        <button className={`waxloom-mobile-preview-download ${downloadPhase === "indexed" || downloadPhase === "existing" ? "is-complete" : ""}`}
+          type="button"
+          aria-label="Download playing Discovery track"
+          disabled={["queued", "searching", "downloading", "indexed", "existing"].includes(downloadPhase ?? "")}
+          onClick={onDownload}>
+          <span aria-hidden="true">{downloadPhase === "indexed" || downloadPhase === "existing" ? "✓" : ["queued", "searching", "downloading"].includes(downloadPhase ?? "") ? "…" : "↓"}</span>
+          {downloadPhase === "indexed" || downloadPhase === "existing"
+            ? "Saved in library" : downloadPhase === "queued" ? "Download queued"
+            : downloadPhase === "searching" ? "Finding audio source…" : downloadPhase === "downloading" ? "Downloading and indexing…"
+            : downloadPhase === "failed" ? "Retry download" : "Download to library"}
+        </button>
+      )}
 
       {(feedback || playbackError || isPreview) && (
         <div className="waxloom-mobile-player-notice" role="status">

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -451,7 +452,11 @@ async def discovery_preview_status() -> dict[str, int]:
 
 
 @app.get("/api/discovery/previews/{recording_mbid}", name="discovery_preview_media")
-async def discovery_preview_media(recording_mbid: str) -> FileResponse:
+async def discovery_preview_media(
+    recording_mbid: str,
+    artist: str | None = Query(default=None, min_length=1, max_length=300),
+    title: str | None = Query(default=None, min_length=1, max_length=300),
+) -> FileResponse:
     candidate = preview_cache().candidate(recording_mbid)
     if candidate is None:
         feed = discovery_feed_engine.feed()
@@ -466,6 +471,22 @@ async def discovery_preview_media(recording_mbid: str) -> FileResponse:
             ),
             None,
         )
+    if candidate is None and artist and title:
+        # A Home Screen app may resume with a Discovery rotation that has
+        # expired server-side. Its selected media ID is still valid; recover
+        # the preview by verified YouTube ID or by artist/title matching.
+        # Accept only known identifier shapes; never accept an arbitrary URL.
+        if re.fullmatch(r"yt:[A-Za-z0-9_-]{11}", recording_mbid):
+            video_id = recording_mbid[3:]
+            candidate = {
+                "recording_mbid": recording_mbid,
+                "artist": artist,
+                "title": title,
+                "source": "youtube_dig",
+                "youtube_url": f"https://www.youtube.com/watch?v={video_id}",
+            }
+        elif re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", recording_mbid):
+            candidate = {"recording_mbid": recording_mbid, "artist": artist, "title": title}
     if candidate is None:
         raise HTTPException(status_code=404, detail="Discovery preview is not in the active rotation.")
     entry = await preview_cache().ensure_candidate(candidate, foreground=True)

@@ -207,7 +207,12 @@ try {
   const phoneAlbums=await checkScreen("phone-albums");
   check(phoneAlbums.albumRack && phoneAlbums.albumCount > 30, "Phone Albums should have vinyles");
   await shot("phone-albums");
-  await navigate("Playlists");const playlists=await checkScreen("phone-playlists");
+  await navigate("Playlists");
+  for (let attempt=0;attempt<22;attempt++) {
+    if (await evaluate("document.querySelectorAll('.waxloom-vinyl-display--playlist .waxloom-entity-face').length>2")) break;
+    await wait(320);
+  }
+  const playlists=await checkScreen("phone-playlists");
   check(playlists.playlistRack&&playlists.playlistSleeves>2,"Phone Playlists should use vinyl sleeves");
   await shot("phone-playlists");
   const openPlaylist=await evaluate("(()=>{const b=document.querySelector('.waxloom-vinyl-display--playlist .waxloom-entity-face');b?.click();return !!b})()");
@@ -257,11 +262,11 @@ try {
   results.playlistActions={...playlistActions,nowLiked,writesIntercepted:writes-beforeWrites};
   // Growing a 101-track playlist's record bin must not kick the user back
   // to the first sleeve or change the active playback queue.
-  const paginationBefore=await evaluate("(()=>{const r=document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-rack');r.scrollLeft=355;r.dispatchEvent(new Event('scroll'));return {left:r.scrollLeft,count:r.querySelectorAll('.waxloom-track-sleeve').length}})()");
+  const paginationBefore=await evaluate("(()=>{const r=document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-rack');if(!r)return {left:null,count:0};r.scrollLeft=355;r.dispatchEvent(new Event('scroll'));return {left:r.scrollLeft,count:r.querySelectorAll('.waxloom-track-sleeve').length}})()");
   await evaluate("document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-load-more')?.click()");
   await wait(310);
-  const paginationAfter=await evaluate("(()=>{const r=document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-rack');return {left:r.scrollLeft,count:r.querySelectorAll('.waxloom-track-sleeve').length}})()");
-  check(paginationAfter.count===paginationBefore.count+24 && Math.abs(paginationAfter.left-paginationBefore.left)<3,
+  const paginationAfter=await evaluate("(()=>{const r=document.querySelector('.waxloom-song-vinyl .waxloom-vinyl-rack');return {left:r?.scrollLeft??null,count:r?.querySelectorAll('.waxloom-track-sleeve').length??0}})()");
+  check(paginationBefore.count===24 && paginationAfter.count===paginationBefore.count+24 && Math.abs(paginationAfter.left-paginationBefore.left)<3,
     "Loading more vinyl tracks must retain the current record position");
   results.pagination={before:paginationBefore,after:paginationAfter};
   await shot("phone-playlist-detail");

@@ -10,8 +10,9 @@ import {
 } from "react";
 
 import { api } from "./api";
+import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
 import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
-import type { PlaylistSummary, PreviewTrack, Song } from "./types";
+import type { DiscoveryCandidate, PlaylistSummary, PreviewTrack, Song } from "./types";
 
 type RepeatMode = "off" | "all" | "one";
 type PlayerMode = "navidrome" | "preview";
@@ -25,7 +26,7 @@ type PlayerContextValue = {
   playSongs: (songs: Song[], startIndex?: number, options?: { ordered?: boolean }) => void;
   playNow: (song: Song) => void;
   addToQueue: (song: Song) => void;
-  playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number) => void;
+  playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number, onManualImport?: (candidate: DiscoveryCandidate) => void) => void;
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -48,6 +49,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const localSongIdRef = useRef<string | null>(null);
   const explicitQueueRef = useRef(false);
   const previewStartAtZeroRef = useRef(false);
+  const previewManualImportRef = useRef<((candidate: DiscoveryCandidate) => void) | null>(null);
+  const failedPreviewsRef = useRef<Set<string>>(new Set());
+  const previewFailureStreakRef = useRef(0);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
   const [mode, setMode] = useState<PlayerMode>("navidrome");
@@ -84,9 +88,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [playerActionBusy, setPlayerActionBusy] = useState(false);
   const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
+  const downloads = useDownloads();
 
   const currentSong = mode === "navidrome" && currentIndex >= 0 ? queue[currentIndex] ?? null : null;
   const currentPreview = mode === "preview" && previewIndex >= 0 ? previewQueue[previewIndex] ?? null : null;
+  const currentPreviewDownloadPhase = currentPreview
+    ? (downloads.find((item) => item.id === currentPreview.recording_mbid)?.phase ?? downloadPhase(currentPreview.recording_mbid))
+    : undefined;
   const tasteKey = currentPreview?.recording_mbid
     ?? (currentSong ? `library:${currentSong.id}` : null);
   const currentTaste = tasteKey ? (playerTaste[tasteKey]?.value ?? 0) : 0;
@@ -306,13 +314,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     startLocalPlayback(song);
   }, [startLocalPlayback]);
 
-  const playPreviewTracks = useCallback((tracks: PreviewTrack[], startIndex = 0) => {
+  const playPreviewTracks = useCallback((
+    tracks: PreviewTrack[], startIndex = 0,
+    onManualImport?: (candidate: DiscoveryCandidate) => void,
+  ) => {
     if (tracks.length === 0) return;
+    previewManualImportRef.current = onManualImport ?? null;
+    failedPreviewsRef.current.clear();
+    previewFailureStreakRef.current = 0;
 
     const preparedTracks = tracks.map((track) => ({
       ...track,
-      preview_url: track.preview_url
-        ?? `/api/discovery/previews/${encodeURIComponent(track.recording_mbid)}`,
+      preview_url: api.previewStreamUrl(track.recording_mbid, track.artist, track.title),
     }));
     const safeIndex = Math.max(0, Math.min(startIndex, preparedTracks.length - 1));
     const target = preparedTracks[safeIndex];
@@ -561,6 +574,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     await setCurrentTaste(playerDisliked ? 0 : -1);
   }
 
+  function downloadPlayingPreview() {
+    const candidate = currentPreview?.candidate;
+    if (!candidate) {
+      setPlayerActionMessage("Choose a Discovery track to download.");
+      return;
+    }
+    const accepted = enqueueDiscoveryDownload(candidate, (selection) => {
+      if (previewManualImportRef.current) previewManualImportRef.current(selection);
+      else setPlayerActionMessage("This source needs manual selection in Discovery.");
+    });
+    if (accepted) setPlayerActionMessage("Download queued — see Downloads for progress.");
+  }
+
   async function openPlayerPlaylists() {
     if (!currentSong) return;
     if (playlistPickerOpen) {
@@ -760,15 +786,40 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         }}
         onTimeUpdate={onTimeUpdate}
         onPlay={() => setPlaying(true)}
+        onPlaying={() => {
+          if (mode === "preview") {
+            previewFailureStreakRef.current = 0;
+            setPreviewError(null);
+          }
+        }}
         onPause={() => setPlaying(false)}
         onEnded={() => {
           submitScrobble();
           next();
         }}
         onError={() => {
-          setPlaying(false);
-          if (mode === "preview") {
-            setPreviewError("The cached Discovery preview could not be played. Press next or try again.");
+          if (mode !== "preview" || !currentPreview) {
+            // Ordinary Navidrome streams are unaffected by Discovery failover.
+            setPlaying(false);
+            return;
+          }
+          const src = audioRef.current?.currentSrc;
+          const expected = currentPreview.preview_url;
+          // Ignore a late error from a previous track after rapid Next taps.
+          if (src && expected && new URL(src, window.location.href).href
+            !== new URL(expected, window.location.href).href) return;
+
+          failedPreviewsRef.current.add(currentPreview.id);
+          previewFailureStreakRef.current += 1;
+          const nextAvailable = previewQueue.findIndex((item, index) =>
+            index > previewIndex && !failedPreviewsRef.current.has(item.id));
+          // A broken external source must not strand the whole Discovery
+          // queue. Cap consecutive automatic skips; never create a loop.
+          if (previewFailureStreakRef.current <= 3 && nextAvailable >= 0) {
+            jumpToIndex(nextAvailable);
+          } else {
+            setPlaying(false);
+            setPreviewError("These Discovery previews are unavailable right now. Try another track or refresh Discovery.");
           }
         }}
       />
@@ -945,6 +996,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             onDislike={() => void toggleDislikePlaying()}
             onPlaylist={() => void openPlayerPlaylists()}
             onMix={() => void instantMixFromPlaying()}
+            downloadPhase={currentPreviewDownloadPhase}
+            onDownload={downloadPlayingPreview}
             onQueue={() => setQueueOpen(true)}
             onQueueItem={jumpToIndex}
           />

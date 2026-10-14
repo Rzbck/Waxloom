@@ -22,6 +22,7 @@ type TasteState = Record<string, TasteEntry>;
 
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
+const BROWSER_CACHE_AGE_MS = 5 * 60 * 1000;
 const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SOURCE_REJECT_TAG = "__waxloom_source:not_music__";
 const SHELF_PAGE_SIZE = 12;
@@ -130,6 +131,8 @@ function readBrowserFeed(): DiscoveryFeedResponse | null {
     if (!raw) return null;
     const value = JSON.parse(raw) as DiscoveryFeedResponse;
     if (!value?.profile || !Array.isArray(value?.external?.items)) return null;
+    const stamp = (value as DiscoveryFeedResponse & { _cached_at?: number })._cached_at;
+    if (!stamp || Date.now() - stamp > BROWSER_CACHE_AGE_MS || stamp > Date.now() + 60000) return null;
     return value;
   } catch {
     return null;
@@ -139,7 +142,7 @@ function readBrowserFeed(): DiscoveryFeedResponse | null {
 function storeBrowserFeed(value: DiscoveryFeedResponse) {
   if (!value.profile || value.external.items.length === 0) return;
   try {
-    window.localStorage.setItem(BROWSER_CACHE_KEY, JSON.stringify(value));
+    window.localStorage.setItem(BROWSER_CACHE_KEY, JSON.stringify({ ...value, _cached_at: Date.now() }));
   } catch {
     // Browser storage is only a convenience cache.
   }
@@ -159,23 +162,27 @@ function asPreviewTrack(candidate: DiscoveryCandidate): PreviewTrack {
     title: candidate.title,
     artist: candidate.artist,
     release: candidate.release,
+    candidate,
   };
 }
 
 function DiscoveryTrackCard({
-  candidate, currentPreviewMbid, playing, phase, onPlay,
+  candidate, currentPreviewMbid, playing, phase, onPlay, onQuickAdd,
 }: {
   candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
   playing: boolean;
   phase?: ReturnType<typeof downloadPhase>;
   onPlay: (candidate: DiscoveryCandidate) => void;
+  onQuickAdd: (candidate: DiscoveryCandidate) => void;
 }) {
   const isPlaying = currentPreviewMbid === candidate.recording_mbid && playing;
   const [coverFailed, setCoverFailed] = useState(false);
   const coverId = candidate.release_mbid && /^[0-9a-f-]{36}$/i.test(candidate.release_mbid) ? candidate.release_mbid : null;
   const cover = coverId && !coverFailed ? `https://coverartarchive.org/release/${encodeURIComponent(coverId)}/front-250` : null;
   const busy = phase === "queued" || phase === "searching" || phase === "downloading";
+  const complete = phase === "indexed" || phase === "existing";
+  const status = busy ? "Downloading" : complete ? "Saved" : phase === "failed" ? "Retry download" : "Download";
   return (
     <article className="discovery-cover-card">
       <button className="discovery-cover-art" type="button"
@@ -189,7 +196,12 @@ function DiscoveryTrackCard({
         <span className={isPlaying ? "discovery-cover-play is-playing" : "discovery-cover-play"} aria-hidden="true">
           {isPlaying ? "Ⅱ" : "▶"}
         </span>
-        {busy && <span className="waxloom-discovery-download-dot" title="Download in progress" aria-label="Download in progress" />}
+      </button>
+      <button type="button"
+        className={`discovery-cover-quick-download ${busy ? "is-working" : ""} ${complete ? "is-complete" : ""} ${phase === "failed" ? "is-failed" : ""}`}
+        aria-label={`${status} ${candidate.title}`} title={`${status}: ${candidate.title}`}
+        disabled={busy || complete} onClick={() => onQuickAdd(candidate)}>
+        <span aria-hidden="true">{complete ? "✓" : busy ? "…" : phase === "failed" ? "↻" : "↓"}</span>
       </button>
       <div className="discovery-cover-copy">
         <strong title={candidate.title}>{candidate.title}</strong>
@@ -234,7 +246,7 @@ function DiscoveryShelf({
               <DiscoveryTrackCard candidate={item}
                 currentPreviewMbid={currentPreviewMbid} playing={playing}
                 phase={downloadPhase(item.recording_mbid)}
-                onPlay={(track) => onPlayQueue(items, track)} />
+                onPlay={(track) => onPlayQueue(items, track)} onQuickAdd={onQuickAdd} />
             </div>
           ))}
         </VinylRack>
@@ -308,11 +320,14 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       if (!cancelled) void readFeed();
     };
     window.addEventListener("focus", onFocus);
+    const onVisibility = () => { if (!document.hidden && !cancelled) void readFeed(); };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
@@ -356,7 +371,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   function playDiscoveryQueue(items: DiscoveryCandidate[], candidate: DiscoveryCandidate) {
     const queue = items.map(asPreviewTrack);
     const index = Math.max(0, items.findIndex((item) => item.recording_mbid === candidate.recording_mbid));
-    player.playPreviewTracks(queue, index);
+    player.playPreviewTracks(queue, index, onImportCandidate);
   }
 
   function updateFeedback(candidate: DiscoveryCandidate, value: -1 | 0 | 1) {

@@ -225,3 +225,84 @@
 
 /* Desktop now-playing Dislike is distinct from Favorites. */
 .player-tools .player-quick-action.is-less { color: #f5b5c8; border-color: #aa647b; background: #482b3b; }
+
+/* A single visible Download action sits ON the Discovery artwork. It never
+   nests inside the Play button, moves the cover, or opens the Options drawer.
+   Other actions remain in Options or the full player. */
+.waxloom-discovery-vinyl .discovery-cover-card { position: relative !important; }
+.waxloom-discovery-vinyl .discovery-cover-quick-download {
+  position: absolute;
+  right: 9px;
+  top: 9px;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 39px;
+  height: 39px;
+  min-width: 39px;
+  min-height: 39px;
+  padding: 0;
+  border: 1.5px solid #d1a6ef;
+  border-radius: 12px;
+  background: #4b325dcf;
+  color: #ffeefa;
+  box-shadow: 0 2px 11px #0008;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(7px);
+}
+.waxloom-discovery-vinyl .discovery-cover-quick-download:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.waxloom-discovery-vinyl .discovery-cover-quick-download.is-working {
+  color: #ffe4af;
+  border-color: #e6c58b;
+  background: #544638e6;
+  animation: waxloom-dl-breathe 1.2s ease-in-out infinite alternate;
+}
+.waxloom-discovery-vinyl .discovery-cover-quick-download.is-complete {
+  color: #c8fbd6;
+  border-color: #75cba2;
+  background: #254a38e6;
+  animation: none;
+}
+.waxloom-discovery-vinyl .discovery-cover-quick-download.is-failed {
+  color: #ffd5db;
+  border-color: #e78c9d;
+  background: #5a2e3ce6;
+}
+.waxloom-discovery-vinyl .discovery-cover-quick-download:disabled {
+  opacity: .92;
+  cursor: default;
+}
+.waxloom-mobile-player .waxloom-mobile-preview-download {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid #9b75bb;
+  border-radius: 11px;
+  color: #f2dfff;
+  background: #463153;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.waxloom-mobile-player .waxloom-mobile-preview-download span { font-size: 22px; line-height: .9; }
+.waxloom-mobile-player .waxloom-mobile-preview-download.is-complete {
+  border-color: #619b7b;
+  background: #25483a;
+  color: #bcf4d2;
+}
+.waxloom-mobile-player .waxloom-mobile-preview-download:disabled {
+  cursor: default;
+  opacity: .85;
+}

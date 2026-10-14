@@ -296,6 +296,11 @@ export const api = {
   }),
   scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
 
+  // The client retains track identity across Home Screen app suspensions, but
+  // Discovery recommendations rotate every 20 minutes. Send identity metadata
+  // so the API can rebuild a *missing* preview without accepting arbitrary URLs.
+  previewStreamUrl: (id: string, artist: string, title: string) =>
+    `/api/discovery/previews/${encodeURIComponent(id)}?${new URLSearchParams({ artist, title })}`,
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
   coverUrl: (coverId?: string, size = 300) => mediaCoverUrl(coverId, size),
 };
