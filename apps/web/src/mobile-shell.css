@@ -156,6 +156,9 @@
     gap: 3px;
     align-items: center;
   }
+  .player-dock-preview .waxloom-mobile-mini {
+    grid-template-columns: minmax(0, 1fr) 40px 48px 42px;
+  }
   .waxloom-mobile-mini button {
     border: 0;
     border-radius: 9px;
@@ -195,6 +198,15 @@
     overflow: hidden;
   }
   .waxloom-mobile-mini-chevron { flex: 0 0 17px; color: #a68dbf; transform: rotate(180deg); }
+  .waxloom-mobile-mini-download {
+    display: grid;
+    place-items: center;
+    height: 44px;
+    color: #dac2f1;
+    background: #443553;
+    font-size: 24px;
+    font-weight: 700;
+  }
   .waxloom-mobile-mini-play {
     display: grid;
     place-items: center;

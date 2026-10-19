@@ -50,8 +50,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const explicitQueueRef = useRef(false);
   const previewStartAtZeroRef = useRef(false);
   const previewManualImportRef = useRef<((candidate: DiscoveryCandidate) => void) | null>(null);
-  const failedPreviewsRef = useRef<Set<string>>(new Set());
-  const previewFailureStreakRef = useRef(0);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
   const [mode, setMode] = useState<PlayerMode>("navidrome");
@@ -100,6 +98,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const currentTaste = tasteKey ? (playerTaste[tasteKey]?.value ?? 0) : 0;
   const playerDisliked = currentTaste === -1;
   const playerLiked = currentPreview ? currentTaste === 1 : playerStarred;
+  useEffect(() => {
+    const syncTaste = () => {
+      try {
+        const value = JSON.parse(localStorage.getItem("waxloom.discovery.taste.v1") ?? "{}");
+        setPlayerTaste(value && typeof value === "object" ? value : {});
+      } catch { setPlayerTaste({}); }
+    };
+    window.addEventListener("waxloom:discovery-taste", syncTaste);
+    window.addEventListener("storage", syncTaste);
+    return () => {
+      window.removeEventListener("waxloom:discovery-taste", syncTaste);
+      window.removeEventListener("storage", syncTaste);
+    };
+  }, []);
   useEffect(() => {
     setPlayerStarred(Boolean(currentSong?.starred));
     playlistRequestRef.current += 1;
@@ -320,9 +332,6 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   ) => {
     if (tracks.length === 0) return;
     previewManualImportRef.current = onManualImport ?? null;
-    failedPreviewsRef.current.clear();
-    previewFailureStreakRef.current = 0;
-
     const preparedTracks = tracks.map((track) => ({
       ...track,
       preview_url: api.previewStreamUrl(track.recording_mbid, track.artist, track.title),
@@ -519,6 +528,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (mode === "preview" && currentPreview && previewError) {
+      // A new URL bypasses the browser's failed media element/cache state.
+      setPreviewQueue((items) => items.map((item) => item.id === currentPreview.id
+        ? { ...item, preview_url: `${api.previewStreamUrl(item.recording_mbid, item.artist, item.title)}&retry=${Date.now()}` }
+        : item));
+      setPreviewError(null);
+      setPlaying(true);
+      return;
+    }
     setPlaying(true);
     void audio.play().catch(() => setPlaying(false));
   }
@@ -544,20 +562,28 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (playerActionBusy || !tasteKey) return;
     const artist = currentPreview?.artist ?? currentSong?.artist ?? "Unknown artist";
     const title = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
+    const previous = playerTaste[tasteKey];
+    const tags = currentPreview?.candidate?.tags ?? previous?.tags ?? [];
+    const next = { ...playerTaste };
+    if (value === 0) delete next[tasteKey];
+    else next[tasteKey] = { value, artist, tags };
+    const publish = (updated: typeof next) => {
+      setPlayerTaste(updated);
+      try { localStorage.setItem("waxloom.discovery.taste.v1", JSON.stringify(updated)); } catch { /* private mode */ }
+      window.dispatchEvent(new Event("waxloom:discovery-taste"));
+    };
+    publish(next);
     setPlayerActionBusy(true);
     try {
-      await api.discoveryTrackFeedback(tasteKey, artist, title, value);
-      setPlayerTaste((old) => {
-        const next = { ...old };
-        if (value === 0) delete next[tasteKey];
-        else next[tasteKey] = { value, artist, tags: [] };
-        try { localStorage.setItem("waxloom.discovery.taste.v1", JSON.stringify(next)); } catch { /* private mode */ }
-        return next;
-      });
+      await api.discoveryTrackFeedback(tasteKey, artist, title, value, tags);
       setPlayerActionMessage(value === -1 ? "Show less like this in Discovery"
-        : value === 1 ? "Liked — more similar discoveries"
+        : value === 1 ? "Liked - more similar discoveries"
         : "Taste feedback cleared");
     } catch (error) {
+      const rollback = { ...next };
+      if (previous) rollback[tasteKey] = previous;
+      else delete rollback[tasteKey];
+      publish(rollback);
       setPlayerActionMessage(error instanceof Error ? error.message : "Could not save taste feedback");
     } finally { setPlayerActionBusy(false); }
   }
@@ -588,7 +614,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }
 
   async function openPlayerPlaylists() {
-    if (!currentSong) return;
+    if (!currentSong && !currentPreview?.candidate) {
+      setPlayerActionMessage("Choose a track to add to a playlist.");
+      return;
+    }
     if (playlistPickerOpen) {
       playlistRequestRef.current += 1;
       setPlaylistPickerOpen(false);
@@ -637,7 +666,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [playlistPickerOpen]);
 
   async function addCurrentToPlaylist(playlist: PlaylistSummary) {
-    if (!currentSong || playerActionBusy) return;
+    if (playerActionBusy) return;
+    if (currentPreview?.candidate) {
+      const accepted = enqueueDiscoveryDownload(currentPreview.candidate, (selection) => {
+        if (previewManualImportRef.current) previewManualImportRef.current(selection);
+        else setPlayerActionMessage("Select a source manually in Discovery.");
+      }, playlist);
+      setPlaylistPickerOpen(false);
+      setPlayerActionMessage(accepted
+        ? `Download / add to ${playlist.name} queued. See Downloads for progress.`
+        : "This track is already being downloaded. Try again once it is indexed.");
+      return;
+    }
+    if (!currentSong) return;
     setPlayerActionBusy(true);
     try {
       await api.updatePlaylist(playlist.id, { song_ids_to_add: [currentSong.id] });
@@ -787,10 +828,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onTimeUpdate={onTimeUpdate}
         onPlay={() => setPlaying(true)}
         onPlaying={() => {
-          if (mode === "preview") {
-            previewFailureStreakRef.current = 0;
-            setPreviewError(null);
-          }
+          if (mode === "preview") setPreviewError(null);
         }}
         onPause={() => setPlaying(false)}
         onEnded={() => {
@@ -809,18 +847,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           if (src && expected && new URL(src, window.location.href).href
             !== new URL(expected, window.location.href).href) return;
 
-          failedPreviewsRef.current.add(currentPreview.id);
-          previewFailureStreakRef.current += 1;
-          const nextAvailable = previewQueue.findIndex((item, index) =>
-            index > previewIndex && !failedPreviewsRef.current.has(item.id));
-          // A broken external source must not strand the whole Discovery
-          // queue. Cap consecutive automatic skips; never create a loop.
-          if (previewFailureStreakRef.current <= 3 && nextAvailable >= 0) {
-            jumpToIndex(nextAvailable);
-          } else {
-            setPlaying(false);
-            setPreviewError("These Discovery previews are unavailable right now. Try another track or refresh Discovery.");
-          }
+          // Keep the selected title and queue: failing audio is not consent
+          // to skip to another recommendation.
+          setPlaying(false);
+          setPreviewError("Preview unavailable. Press Play to retry or choose another title.");
         }}
       />
 
@@ -865,7 +895,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
           {playlistPickerOpen && (
             <aside ref={playlistMenuRef} className={`player-playlist-picker ${mobileExpanded ? "waxloom-playlist-sheet" : ""}`} aria-label="Choose a playlist">
-              <strong>Add “{currentSong?.title}” to a playlist</strong>
+              <strong>{currentPreview ? `Download / add "${currentPreview.title}" to playlist` : `Add "${currentSong?.title}" to a playlist`}</strong>
               <input type="search" value={playlistQuery} autoFocus
                 onChange={(event) => setPlaylistQuery(event.target.value)}
                 placeholder="Find a playlist…" aria-label="Find a playlist" />
@@ -898,6 +928,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 </span>
                 <span className="waxloom-mobile-mini-chevron"><PlayerIcon name="chevron-down" size={22} /></span>
               </button>
+              {currentPreview && (
+                <button className="waxloom-mobile-mini-download" type="button" onClick={downloadPlayingPreview}
+                  disabled={["queued", "searching", "downloading", "indexed", "existing"].includes(currentPreviewDownloadPhase ?? "")}
+                  aria-label="Download playing Discovery track"
+                  title="Download playing Discovery track">
+                  {currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing" ? "✓"
+                    : ["queued", "searching", "downloading"].includes(currentPreviewDownloadPhase ?? "") ? "…" : "↓"}
+                </button>
+              )}
               <button className="waxloom-mobile-mini-play" type="button" onClick={togglePlayback}
                 disabled={mode === "preview" && Boolean(previewResolving)}
                 aria-label={playing ? "Pause" : "Play"}>
@@ -948,13 +987,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 aria-label={playerDisliked ? "Clear dislike" : "Dislike playing song"}
                 title={playerDisliked ? "Clear dislike" : "Show less like this"}>↓</button>
               <button ref={playlistButtonRef} className="icon-button player-quick-action" type="button"
-                onClick={() => void openPlayerPlaylists()} disabled={!currentSong || playerActionBusy}
-                title={currentSong ? "Add playing song to playlist" : "Download Discovery preview to library first"}
+                onClick={() => void openPlayerPlaylists()} disabled={(!currentSong && !currentPreview?.candidate) || playerActionBusy}
+                title={currentPreview ? "Download this preview and add it to a playlist" : "Add playing song to playlist"}
                 aria-label="Add playing song to playlist">＋</button>
               <button className="icon-button player-quick-action" type="button"
                 onClick={() => void instantMixFromPlaying()} disabled={!currentSong || playerActionBusy}
                 title={currentSong ? "Instant mix from this song" : "Download Discovery preview to library first"}
                 aria-label="Instant mix from playing song">✦</button>
+              {currentPreview && (
+                <button className="icon-button player-quick-action player-download-action" type="button"
+                  onClick={downloadPlayingPreview}
+                  disabled={["queued", "searching", "downloading", "indexed", "existing"].includes(currentPreviewDownloadPhase ?? "")}
+                  title={currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing"
+                    ? "Already saved in library" : "Download playing Discovery track to library"}
+                  aria-label="Download playing Discovery track">
+                  {currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing" ? "✓" : "↓"}
+                </button>
+              )}
               <button className="icon-button" type="button" onClick={() => setQueueOpen((value) => !value)} aria-label="Queue">☷ {activeQueue.length}</button>
               <span>🔊</span>
               <input className="volume-slider" type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="Volume" />
