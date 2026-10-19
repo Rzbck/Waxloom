@@ -226,6 +226,7 @@ function DiscoveryShelf({
   onBadSource: (candidate: DiscoveryCandidate) => void;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [followRequest, setFollowRequest] = useState(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
   if (items.length === 0) return <p className="muted">Preparing musical discoveries.</p>;
 
@@ -241,13 +242,16 @@ function DiscoveryShelf({
           label="Discover tracks. Tap cover to play a preview, or choose actions below."
           variant="discovery"
           records={items.map((item) => ({ title: item.title, artist: item.artist }))}
+          followIndex={items.findIndex((item) => item.recording_mbid === currentPreviewMbid)}
+          followRequest={followRequest}
           onSelectionChange={(index) => { setSelectedIndex(index); setOptionsOpen(false); }}>
           {items.map((item) => (
             <div key={item.recording_mbid} className="waxloom-vinyl-sleeve waxloom-vinyl-sleeve--discovery">
               <DiscoveryTrackCard candidate={item}
                 currentPreviewMbid={currentPreviewMbid} playing={playing}
                 phase={downloadPhase(item.recording_mbid)}
-                onPlay={(track) => onPlayQueue(items, track)} onQuickAdd={onQuickAdd} />
+                onPlay={(track) => { setFollowRequest((value) => value + 1); onPlayQueue(items, track); }}
+                onQuickAdd={onQuickAdd} />
             </div>
           ))}
         </VinylRack>
