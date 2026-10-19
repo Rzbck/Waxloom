@@ -11,7 +11,8 @@
     "qa:home": "node scripts/home-smoke.mjs",
     "qa:vinyl": "node scripts/vinyl-everywhere-smoke.mjs",
     "qa:parity": "node scripts/parity-qa.mjs",
-    "qa:discovery": "node scripts/discovery-playback-smoke.mjs"
+    "qa:discovery": "node scripts/discovery-playback-smoke.mjs",
+    "qa:discovery-actions": "node scripts/discovery-actions-smoke.mjs"
   },
   "dependencies": {
     "react": "19.3.0",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
 import { VinylRack } from "./VinylRack";
 
@@ -22,7 +22,7 @@ type TasteState = Record<string, TasteEntry>;
 
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
-const BROWSER_CACHE_AGE_MS = 5 * 60 * 1000;
+const BROWSER_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SOURCE_REJECT_TAG = "__waxloom_source:not_music__";
 const SHELF_PAGE_SIZE = 12;
@@ -53,6 +53,7 @@ function writeTaste(value: TasteState): void {
   } catch {
     // Taste storage is a local convenience layer.
   }
+  window.dispatchEvent(new Event("waxloom:discovery-taste"));
 }
 
 function tasteAdjustment(candidate: DiscoveryCandidate, taste: TasteState): number {
@@ -293,49 +294,60 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const [notice, setNotice] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshFromRef = useRef<string | null>(null);
   const downloads = useDownloads();
 
-  async function readFeed() {
-    try {
-      const value = await api.discoveryFeed();
-      setFeedStatus(value.status);
-      if (value.profile && value.external.items.length > 0) {
-        setBundle(value);
-        storeBrowserFeed(value);
-      }
-      if (value.error && !bundle) setError(value.error);
-    } catch (caught) {
-      if (!bundle) setError(caught instanceof Error ? caught.message : "Discovery feed is unavailable.");
-    }
-  }
-
+  // Read status while waiting for a manually requested refresh, but never
+  // silently replace the crate when the server rotates its feed.
   useEffect(() => {
     let cancelled = false;
-    void readFeed();
-    const timer = window.setInterval(() => {
-      if (!cancelled) void readFeed();
-    }, 30_000);
-
-    const onFocus = () => {
-      if (!cancelled) void readFeed();
+    const readFeed = async () => {
+      try {
+        const value = await api.discoveryFeed();
+        if (cancelled) return;
+        setFeedStatus(value.status);
+        if (value.profile && value.external.items.length > 0) {
+          const version = `${value.rotation_id ?? ""}:${value.generated_at ?? ""}`;
+          if (!bundle || (refreshing && version !== refreshFromRef.current && value.status === "ready")) {
+            storeBrowserFeed(value);
+            setBundle(value);
+            if (refreshing) {
+              setRefreshing(false);
+              setNotice("New Discovery selection is ready.");
+            }
+          }
+        } else if (value.error) {
+          setError(value.error);
+        }
+      } catch (caught) {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : "Discovery feed is unavailable.");
+      }
     };
-    window.addEventListener("focus", onFocus);
-    const onVisibility = () => { if (!document.hidden && !cancelled) void readFeed(); };
-    document.addEventListener("visibilitychange", onVisibility);
+    void readFeed();
+    // Initial-feed recovery and explicitly requested refresh only.
+    if (!bundle || refreshing) {
+      const timer = window.setInterval(() => { void readFeed(); }, 5_000);
+      return () => { cancelled = true; window.clearInterval(timer); };
+    }
+    return () => { cancelled = true; };
+  }, [Boolean(bundle), refreshing]);
 
+  useEffect(() => {
+    const onTaste = () => setTaste(readTaste());
+    window.addEventListener("waxloom:discovery-taste", onTaste);
+    window.addEventListener("storage", onTaste);
     return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("waxloom:discovery-taste", onTaste);
+      window.removeEventListener("storage", onTaste);
     };
   }, []);
 
-  // Show every available recommendation at once in a horizontal, two-row
-  // viewport. No source labels, mood tabs, More tracks, or page pagination.
+  // Once displayed, changing taste never shuffles or removes covers mid-listen.
+  // Fresh ranking is applied when a newly requested Discovery feed is accepted.
   const recommendations = useMemo(
-    () => diversify(activeCandidates(bundle?.external.items ?? [], taste), 3),
-    [bundle, taste],
+    () => diversify(activeCandidates(bundle?.external.items ?? [], readTaste()), 3),
+    [bundle],
   );
 
   useEffect(() => {
@@ -360,9 +372,11 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     setNotice(null);
     setError(null);
     try {
+      refreshFromRef.current = `${bundle?.rotation_id ?? ""}:${bundle?.generated_at ?? ""}`;
       await api.refreshDiscoveryFeed();
+      setRefreshing(true);
       setFeedStatus("refreshing");
-      setNotice("A fresh recommendation pool is being prepared in the background. The current feed stays usable.");
+      setNotice("Preparing new discoveries. Your current tracks stay in place until the new selection is ready.");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not queue a Discovery refresh.");
     }
@@ -375,19 +389,13 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   }
 
   function updateFeedback(candidate: DiscoveryCandidate, value: -1 | 0 | 1) {
-    setTaste((current) => {
-      const next = { ...current };
-      if (value === 0) delete next[candidate.recording_mbid];
-      else {
-        next[candidate.recording_mbid] = {
-          value,
-          artist: candidate.artist,
-          tags: candidate.tags ?? [],
-        };
-      }
-      writeTaste(next);
-      return next;
-    });
+    const next = { ...readTaste() };
+    if (value === 0) delete next[candidate.recording_mbid];
+    else next[candidate.recording_mbid] = {
+      value, artist: candidate.artist, tags: candidate.tags ?? [],
+    };
+    writeTaste(next);
+    setTaste(next);
 
     setNotice(value > 0
       ? "Taste updated — Waxloom will favor nearby artists and tags."
@@ -396,7 +404,6 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
         : "Taste feedback cleared.");
 
     void api.discoveryFeedback(candidate, value)
-      .then(() => readFeed())
       .catch((caught) => {
         setError(caught instanceof Error ? caught.message : "Could not persist Discovery feedback.");
       });
@@ -437,10 +444,10 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     try {
       await api.discoveryFeedback(sourceFeedback, -1);
       setNotice("Bad source removed — this does not change your musical taste, and this video will stay excluded.");
-      await readFeed();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not save the bad-source report.");
-      await readFeed();
+      setBundle(bundle);
+      if (bundle) storeBrowserFeed(bundle);
     } finally {
       setRejecting(null);
     }
@@ -465,7 +472,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
         <div className="discovery-fit-controls">
           {downloads.some((item) => ["queued", "searching", "downloading"].includes(item.phase))
             ? <small>{downloads.filter((item) => ["queued", "searching", "downloading"].includes(item.phase)).length} downloading</small> : null}
-          <button className="secondary-action" type="button" onClick={() => void requestBackgroundRefresh()} title="Prepare fresh suggestions in the background">↻ New music</button>
+          <button className="secondary-action" type="button" disabled={refreshing} onClick={() => void requestBackgroundRefresh()} title="Replace the current selection with new suggestions when ready">↻ New music</button>
         </div>
       </header>
       {error && <div className="discovery-fit-message is-error">{error}</div>}

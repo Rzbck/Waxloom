@@ -239,7 +239,7 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
           <PlayerIcon name="thumbs-down" size={24} /><span>Dislike</span>
         </button>
         <button type="button" className="waxloom-action-playlist" aria-label="Add to playlist"
-          disabled={isPreview || busy} onClick={onPlaylist}>
+          disabled={busy} onClick={onPlaylist}>
           <PlayerIcon name="list-plus" size={25} /><span>Playlist</span>
         </button>
         <button type="button" className="waxloom-action-mix" aria-label="Instant mix"
@@ -268,7 +268,7 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
 
       {(feedback || playbackError || isPreview) && (
         <div className="waxloom-mobile-player-notice" role="status">
-          {playbackError || feedback || "Add this preview to the library for favorites, playlists and instant mixes."}
+          {playbackError || feedback || "Like this preview, download it, or add it to a playlist. Instant mixes need a library track."}
         </div>
       )}
 

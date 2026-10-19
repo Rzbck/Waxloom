@@ -1,3 +1,12 @@
+## 2026-10-19 — Discovery shelf / player action candidate (web only)
+
+- Branch: `fix/discovery-player-actions-20261019`, based on `fix/discovery-library-pipeline-20261013` at `ad285daeb0d11e0b4284f07811645763447926d6`. No promotion to `main`; the separate pipeline worktree remains untouched.
+- Discovery retains its rendered recommendation order during playback, likes, focus changes and background server rotation. A new pool replaces it only after explicit **New music** and a ready new feed. Cached artwork shelf survives page revisits for up to 24 hours.
+- Player and Discovery share preview Like/Less state; player likes apply instantly with rollback on API failure. A failed preview no longer automatically skips tracks, and Play retries the selected title.
+- Both desktop and phone mini players offer direct preview download. Preview-to-playlist chooses a real Navidrome playlist, imports the source (with user authorization), waits for the exact indexed song and adds its ID via the playlist API. Download tray reports indexing/addition errors; retries reuse already downloaded audio. Ambiguous sources still require manual import.
+- **AUTOMATED GATE PASS**: TypeScript/Vite web production build, synthetic isolated Chrome QA on desktop and mobile (mocked media/downloads/playlist/feedback, 390px and 320px), and public-repository security gate. No real music or playlist was modified by QA.
+- **IMPLEMENTED / NOT USER VALIDATED**: real server/audio, user-authorized download, Safari/PWA, Navidrome delayed indexing and actual playlists need validation on the exact candidate. Rollback is the base commit above; keep existing production deployment untouched. **NEXT TEST**: run the branch in an isolated runtime, play/like/save a real Discovery recommendation and confirm Navidrome playlist membership.
+
 # Waxloom AI handoff
 
 ## 2026-10-14 — Safari Discovery preview 404 and missing download button
