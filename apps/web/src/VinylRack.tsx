@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode, type UIEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent } from "react";
 import { api } from "./api";
 import { MarqueeText } from "./MobilePlayerPanel";
 import type { Album } from "./types";
@@ -13,7 +13,7 @@ export function albumTitle(album: Album): string {
  * The visual lift is optional and respects reduced-motion preferences.
  */
 export function VinylRack({
-  children, count, label, variant = "album", contentKey, records, onSelectionChange,
+  children, count, label, variant = "album", contentKey, records, onSelectionChange, followIndex, followRequest,
 }: {
   children: ReactNode;
   count: number;
@@ -22,12 +22,17 @@ export function VinylRack({
   contentKey?: string;
   records?: { title: string; artist?: string }[];
   onSelectionChange?: (index: number) => void;
+  /** Discovery only: playback follows the selected recording, including queue Next/Previous. */
+  followIndex?: number;
+  followRequest?: number;
 }) {
   const rackRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<number | null>(null);
   const idleRef = useRef<number | null>(null);
   const geometryRef = useRef<{ sleeves: HTMLElement[]; centers: number[]; width: number } | null>(null);
   const selectedIndexRef = useRef(0);
+  const dragRef = useRef<{ pointerId: number; startX: number; startScroll: number; dragged: boolean } | null>(null);
+  const suppressClickRef = useRef(false);
   const contentRef = useRef(contentKey);
   const onSelectionRef = useRef(onSelectionChange);
   onSelectionRef.current = onSelectionChange;
@@ -106,6 +111,95 @@ export function VinylRack({
     };
   }, [contentKey, count, updateActive]);
 
+  // The native browser default interprets a mouse wheel vertically, while
+  // this rack has only horizontal overflow. Keep native trackpad X gestures
+  // and allow vertical page scroll when already at either end.
+  useEffect(() => {
+    const rack = rackRef.current;
+    if (!rack) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.ctrlKey || event.metaKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      const unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? rack.clientWidth : 1;
+      const movement = event.deltaY * unit;
+      const maxScroll = Math.max(0, rack.scrollWidth - rack.clientWidth);
+      if ((movement > 0 && rack.scrollLeft >= maxScroll - 1)
+        || (movement < 0 && rack.scrollLeft <= 1) || !movement) return;
+      event.preventDefault();
+      rack.scrollLeft = Math.max(0, Math.min(maxScroll, rack.scrollLeft + movement));
+    };
+    rack.addEventListener("wheel", onWheel, { passive: false });
+    return () => rack.removeEventListener("wheel", onWheel);
+  }, []);
+
+  function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+    dragRef.current = {
+      pointerId: event.pointerId, startX: event.clientX,
+      startScroll: event.currentTarget.scrollLeft, dragged: false,
+    };
+  }
+
+  function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const movement = event.clientX - drag.startX;
+    if (!drag.dragged && Math.abs(movement) < 7) return; // Still a real cover click.
+    if (!drag.dragged) {
+      drag.dragged = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.currentTarget.dataset.dragging = "true";
+    }
+    event.preventDefault();
+    event.currentTarget.scrollLeft = drag.startScroll - movement;
+  }
+
+  function endPointerDrag(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    dragRef.current = null;
+    delete event.currentTarget.dataset.dragging;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    if (drag.dragged) {
+      // A drag ending over an album cover must never accidentally play it.
+      suppressClickRef.current = true;
+      window.setTimeout(() => { suppressClickRef.current = false; }, 0);
+    }
+  }
+
+  function onClickCapture(event: ReactMouseEvent<HTMLDivElement>) {
+    if (!suppressClickRef.current) return;
+    event.preventDefault();
+    event.stopPropagation();
+    suppressClickRef.current = false;
+  }
+
+  // Keep the selected sleeve, footer label and Options pointing at the same
+  // recording as the player. Sync immediately, not after smooth-scroll ticks.
+  useEffect(() => {
+    if (followIndex === undefined || followIndex < 0 || followIndex >= count) return;
+    const frame = requestAnimationFrame(() => {
+      const rack = rackRef.current;
+      if (!rack) return;
+      const sleeves = [...rack.querySelectorAll<HTMLElement>(".waxloom-vinyl-sleeve")];
+      const sleeve = sleeves[followIndex];
+      if (!sleeve) return;
+      const center = sleeve.offsetLeft + sleeve.offsetWidth / 2;
+      rack.scrollLeft = Math.max(0, Math.min(
+        rack.scrollWidth - rack.clientWidth, center - rack.clientWidth / 2,
+      ));
+      sleeves.forEach((item, index) => {
+        if (index === followIndex) item.setAttribute("data-centered", "true");
+        else item.removeAttribute("data-centered");
+      });
+      selectedIndexRef.current = followIndex;
+      setSelectedIndex(followIndex);
+      onSelectionRef.current?.(followIndex);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [followIndex, followRequest, contentKey, count]);
+
   function shift(delta: -1 | 1) {
     const rack = rackRef.current;
     const geo = geometryRef.current;
@@ -125,6 +219,9 @@ export function VinylRack({
     <div className={`waxloom-vinyl-display waxloom-vinyl-display--${variant}`}>
       <div className="waxloom-vinyl-crate">
         <div id={id} className="waxloom-vinyl-rack" ref={rackRef} onScroll={onScroll}
+          onPointerDown={onPointerDown} onPointerMove={onPointerMove}
+          onPointerUp={endPointerDrag} onPointerCancel={endPointerDrag}
+          onClickCapture={onClickCapture}
           tabIndex={0} role="region" aria-label={label}>
           {children}
         </div>

@@ -306,3 +306,18 @@
   cursor: default;
   opacity: .85;
 }
+
+
+/* Desktop: grab the record bin directly; wheel is handled as horizontal
+   input while the pointer is above the rack. No overlays on playable covers. */
+@media (hover: hover) and (pointer: fine) {
+  .waxloom-vinyl-rack { cursor: grab; }
+  .waxloom-vinyl-rack[data-dragging="true"] {
+    cursor: grabbing;
+    user-select: none;
+  }
+  .waxloom-vinyl-rack[data-dragging="true"] * {
+    user-select: none;
+    pointer-events: none;
+  }
+}
