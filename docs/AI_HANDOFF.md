@@ -1,3 +1,11 @@
+## 2026-10-19 — Owner-directed production web deployment
+
+- Exact **runtime web source SHA**: 86762fd5f042c85c62c624df230cd8c08894b3af on fix/discovery-vinyl-sync-20261019; includes the earlier preview actions candidate a226a6d.
+- **AUTOMATED GATE PASS** on runtime SHA: web build, full synthetic desktop/mobile browser controls+playlist regression, repo security gate, tracked-only Docker release context, isolated nginx+API release QA (HTTP 200/health OK).
+- **DEPLOYED / NOT USER VALIDATED**: owner explicitly requested direct production deployment; waxloom-web now serves image waxloom-web:vinylsync-86762fd and the expected production JS asset. HTTP 200, API health OK, API container image unchanged. No main merge.
+- Rollback: previous image waxloom-web:ad285da remains available and the pre-deploy compose/nginx snapshots are saved outside Git in Waxloom's local backup folder. Never commit backups, env or user library material.
+- **NEXT TEST**: owner validates wheel, mouse drag, centered playing cover, options/title sync and downloaded-preview actions in their actual browser/Safari. Stacked PRs remain draft until explicitly promoted.
+
 ## 2026-10-19 — Vinyl input and playback selection follow-up (web)
 
 - Candidate branch: fix/discovery-vinyl-sync-20261019, based on fix/discovery-player-actions-20261019 at a226a6d098054cb03466b42840a29cb3c9f3048f.
