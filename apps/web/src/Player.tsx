@@ -152,8 +152,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const startLocalPlayback = useCallback((song: Song, event = "play-click") => {
     const clickedAt = Date.now();
-    traceLocalPlayer(event, song.id, clickedAt);
-
+    performance.mark("waxloom-local-play-click");
     const audio = audioRef.current;
     if (!audio) return;
 
@@ -175,6 +174,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           setPlaying(false);
         }
       });
+    // Fire-and-forget diagnostics cannot occupy a connection ahead of audio.
+    window.setTimeout(() => { if (localSongIdRef.current === song.id) traceLocalPlayer(event, song.id, clickedAt); }, 1200);
   }, [traceLocalPlayer]);
 
   useEffect(() => {
@@ -307,7 +308,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [mode, currentPreview?.preview_url, playing]);
 
   useEffect(() => {
-    if (!restoreDone || mode !== "navidrome") return;
+    if (!restoreDone || mode !== "navidrome" || !currentSong || queue.length === 0) return;
     const id = window.setTimeout(() => {
       void api
         .savePlayQueue(
@@ -324,7 +325,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (mode !== "navidrome" || !currentSong) return;
     const id = window.setInterval(() => {
       const audio = audioRef.current;
-      if (!audio) return;
+      if (!audio || audio.paused || document.visibilityState === "hidden") return;
       void api
         .savePlayQueue(
           queue.map((song) => song.id),
@@ -332,7 +333,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           Math.max(0, Math.round(audio.currentTime * 1000)),
         )
         .catch(() => undefined);
-    }, 15000);
+    }, 60000);
     return () => window.clearInterval(id);
   }, [queue, currentSong?.id, mode]);
 
@@ -896,6 +897,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             try {
               performance.measure("waxloom-discovery-time-to-playing", "waxloom-discovery-play-click");
             } catch { /* mark absent after audio resume */ }
+          } else if (mode === "navidrome") {
+            try {
+              performance.measure("waxloom-local-time-to-playing", "waxloom-local-play-click");
+              if (performance.getEntriesByName("waxloom-shuffle-click", "mark").length) {
+                performance.measure("waxloom-shuffle-time-to-playing", "waxloom-shuffle-click");
+                performance.clearMarks("waxloom-shuffle-click");
+              }
+            } catch { /* mark absent on saved-queue restore */ }
           }
         }}
         onPause={() => {

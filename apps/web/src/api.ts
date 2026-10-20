@@ -179,20 +179,40 @@ async function prewarmYoutubePreviews(
   await Promise.all(workers);
 }
 
-function warmLibraryNavigation(): void {
-  // Warm only cheap library indexes. Never preload album tracks from local
-  // storage: album details are fetched on demand and then cached.
-  void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
-  void loadArtistsCached().catch(() => undefined);
+
+// A slow Navidrome queue write must never let multiple snapshots compete
+// with streaming. Only the most recent pending snapshot is retained.
+type QueueSnapshot = { ids: string[]; current: string | null; position: number };
+let queuedSnapshot: QueueSnapshot | null = null;
+let activeQueueSave: Promise<void> | null = null;
+function coalescedQueueSave(ids: string[], current: string | null, position: number): Promise<{ ok: boolean }> {
+  queuedSnapshot = { ids: [...ids], current, position };
+  if (!activeQueueSave) {
+    activeQueueSave = (async () => {
+      let error: unknown = null;
+      while (queuedSnapshot) {
+        const snapshot = queuedSnapshot;
+        queuedSnapshot = null;
+        try {
+          await request<{ ok: boolean }>("/api/player/queue", {
+            method: "PUT",
+            body: JSON.stringify(snapshot),
+          });
+          error = null;
+        } catch (caught) {
+          error = caught;
+        }
+      }
+      if (error) throw error;
+    })().finally(() => { activeQueueSave = null; });
+  }
+  return activeQueueSave.then(() => ({ ok: true }));
 }
 
-
 export const api = {
-  health: async () => {
-    const value = await request<Health>("/api/health");
-    warmLibraryNavigation();
-    return value;
-  },
+  // Health checks must not silently start two heavy library-index queries
+  // alongside Home's essential shuffle and album calls.
+  health: () => request<Health>("/api/health"),
   navidromeHealth: () => request<IntegrationHealth>("/api/integrations/navidrome/health"),
   audiomuseHealth: () => request<IntegrationHealth>("/api/integrations/audiomuse/health"),
 
@@ -236,10 +256,8 @@ export const api = {
   deletePlaylist: (id: string) => request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   playQueue: () => request<PlayQueueResponse>("/api/player/queue"),
-  savePlayQueue: (ids: string[], current: string | null, position = 0) => request<{ ok: boolean }>("/api/player/queue", {
-    method: "PUT",
-    body: JSON.stringify({ ids, current, position }),
-  }),
+  savePlayQueue: (ids: string[], current: string | null, position = 0) =>
+    coalescedQueueSave(ids, current, position),
 
   localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack> & { source?: "audiomuse" | "library_fallback" }>(
     `/api/discovery/local-similar/${encodeURIComponent(songId)}?count=${count}`,
