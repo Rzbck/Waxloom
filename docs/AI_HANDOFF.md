@@ -1,3 +1,18 @@
+## 2026-10-20 - Owner-directed web production rollout: smooth vinyl snap and player actions
+
+- DEPLOYED / NOT USER VALIDATED: owner explicitly instructed deployment to production via PC Bridge. Runtime source SHA: 58532bc87001217fd1e899b769a249081be9ceb0 (branch fix/vinyl-settled-snap-player-20261020). Production image waxloom-web:snap-58532bc serves the verified JS asset, HTTP 200, API health OK; API image unchanged (waxloom-api:ad285da). No merge to main.
+- AUTOMATED GATE PASS: isolated 1400px Chrome mouse wheel and physical pointer release 0px nearest-cover offset, 0px title/Options offset; full preview likes, safe mocked imports and playlists, mobile 390/320px; TypeScript/Vite build, Docker clean git-archive build, isolated proxy smoke, repo security gate. Actual tactile feedback and browser local file download still need user verification.
+- ROLLBACK: old web image waxloom-web:vinylsync-86762fd preserved. Production compose and nginx snapshots saved outside Git. No API rebuild and no user media touched.
+
+## 2026-10-20 - Desktop vinyl settle, aligned captions and direct downloads
+
+- Workstream: fix/vinyl-settled-snap-player-20261020, based on 9ad58f4 (current web production ancestry). Only dedicated isolated worktree changed; earlier worktrees untouched.
+- Desktop wheel and mouse-drag preserve free native movement, then a debounced smooth JS snap to nearest sleeve (155ms idle / immediate after drag release); touch-native Safari remains unsnapped to avoid prior jitter regressions.
+- Shared vinyl title and counter use a three-column grid with truly axis-centered title; Options aligned on same axis. Current playing track still follows the correct Discovery sleeve.
+- Desktop player actions use clearly differentiated SVG thumbs-up/thumbs-down, playlist and mix symbols. Direct Download now works for a library song via existing same-origin stream as a browser file download; Discovery preview still imports to Navidrome using the existing authorized download queue. Expanded mobile full-screen player download for local tracks.
+- AUTOMATED GATE PASS (synthetic): build + headless Chrome desktop mouse drag/wheel tests, 0px snap and title/Options offsets, preview likes, download-to-playlist, responsive mobile 390/320px, no live music altered.
+- IMPLEMENTED / NOT USER VALIDATED: test actual tactile wheel/mouse and Chrome local file download after production rollout. Web-only; backend and main branch left untouched. Rollback previous web image.
+
 ## 2026-10-19 — Owner-directed production web deployment
 
 - Exact **runtime web source SHA**: 86762fd5f042c85c62c624df230cd8c08894b3af on fix/discovery-vinyl-sync-20261019; includes the earlier preview actions candidate a226a6d.

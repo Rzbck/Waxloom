@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 
 type PlayerIconName =
   | "play" | "pause" | "previous" | "next" | "heart" | "list-plus"
-  | "sparkles" | "queue" | "shuffle" | "repeat" | "repeat-one" | "chevron-down" | "music" | "thumbs-down";
+  | "sparkles" | "queue" | "shuffle" | "repeat" | "repeat-one" | "chevron-down" | "music" | "thumbs-down" | "thumbs-up" | "download";
 
 export function PlayerIcon({ name, size = 22 }: { name: PlayerIconName; size?: number }) {
   const paths: Record<PlayerIconName, ReactNode> = {
@@ -12,6 +12,8 @@ export function PlayerIcon({ name, size = 22 }: { name: PlayerIconName; size?: n
     next: <><path d="m5 4 10 8-10 8V4ZM19 5v14" /><path d="m6 6 8 6-8 6" fill="currentColor" stroke="none" /></>,
     heart: <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8Z" />,
     "thumbs-down": <><path d="M17 14V2M9 18l1-4H5.2a2 2 0 0 1-1.9-2.6l2.9-8A2 2 0 0 1 8.1 2H20v12h-5l-4.5 7a2 2 0 0 1-2.3 0 2 2 0 0 1-1-2.4L9 18Z" /></>,
+    "thumbs-up": <path d="M7 10v12M15 6l-1 4h4.8a2 2 0 0 1 1.9 2.6l-2.9 8A2 2 0 0 1 15.9 22H4V10h5l4.5-7a2 2 0 0 1 2.3 0 2 2 0 0 1 1 2.4L15 6Z" />,
+    download: <><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4" /></>,
     "list-plus": <><path d="M4 6h12M4 12h9M4 18h8M19 12v8m-4-4h8" /></>,
     sparkles: <><path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2ZM20 17l.8 2.2L23 20l-2.2.8L20 23l-.8-2.2L17 20l2.2-.8L20 17Z" /></>,
     queue: <><path d="M4 5h16M4 10h16M4 15h9M16 17v5l5-2.5-5-2.5Z" /></>,
@@ -231,7 +233,7 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
         <button type="button" className={isFavorite ? "waxloom-action-favorite is-active" : "waxloom-action-favorite"}
           aria-label={isPreview ? (isFavorite ? "Unlike preview" : "Like preview") : (isFavorite ? "Remove from favorites" : "Add to favorites")} aria-pressed={isFavorite}
           disabled={busy} onClick={onFavorite}>
-          <PlayerIcon name="heart" size={25} /><span>{isPreview ? "Like" : "Favorite"}</span>
+          <PlayerIcon name="thumbs-up" size={25} /><span>{isPreview ? "Like" : "Favorite"}</span>
         </button>
         <button type="button" className={isDisliked ? "waxloom-action-less is-active" : "waxloom-action-less"}
           aria-label={isDisliked ? "Clear dislike" : "Dislike this song"} aria-pressed={isDisliked}
@@ -252,17 +254,17 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
         </button>
       </div>
 
-      {isPreview && (
+      {(
         <button className={`waxloom-mobile-preview-download ${downloadPhase === "indexed" || downloadPhase === "existing" ? "is-complete" : ""}`}
           type="button"
-          aria-label="Download playing Discovery track"
-          disabled={["queued", "searching", "downloading", "indexed", "existing"].includes(downloadPhase ?? "")}
+          aria-label={isPreview ? "Download playing Discovery track" : "Download playing song"}
+          disabled={isPreview && ["queued", "searching", "downloading", "indexed", "existing"].includes(downloadPhase ?? "")}
           onClick={onDownload}>
           <span aria-hidden="true">{downloadPhase === "indexed" || downloadPhase === "existing" ? "✓" : ["queued", "searching", "downloading"].includes(downloadPhase ?? "") ? "…" : "↓"}</span>
           {downloadPhase === "indexed" || downloadPhase === "existing"
             ? "Saved in library" : downloadPhase === "queued" ? "Download queued"
             : downloadPhase === "searching" ? "Finding audio source…" : downloadPhase === "downloading" ? "Downloading and indexing…"
-            : downloadPhase === "failed" ? "Retry download" : "Download to library"}
+            : downloadPhase === "failed" ? "Retry download" : isPreview ? "Download to library" : "Download audio file"}
         </button>
       )}
 

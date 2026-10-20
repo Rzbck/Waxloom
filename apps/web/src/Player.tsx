@@ -613,6 +613,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (accepted) setPlayerActionMessage("Download queued — see Downloads for progress.");
   }
 
+  function downloadPlayingTrack() {
+    if (currentPreview) {
+      downloadPlayingPreview();
+      return;
+    }
+    if (!currentSong) return;
+    const safe = (value: string) => value.replace(/[^\p{L}\p{N} .()_-]/gu, "").trim().slice(0, 110);
+    const suffix = currentSong.suffix?.replace(/[^a-z0-9]/gi, "").slice(0, 8) || "mp3";
+    const link = document.createElement("a");
+    link.href = api.streamUrl(currentSong.id);
+    link.download = `${safe(currentSong.artist ?? "Unknown artist")} - ${safe(currentSong.title ?? "Track")}.${suffix}`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setPlayerActionMessage("Audio download started.");
+  }
+
   async function openPlayerPlaylists() {
     if (!currentSong && !currentPreview?.candidate) {
       setPlayerActionMessage("Choose a track to add to a playlist.");
@@ -978,32 +995,35 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </div>
 
             <div className="player-tools">
-              <button className={playerLiked ? "icon-button player-quick-action is-favorite" : "icon-button player-quick-action"}
-                type="button" onClick={() => void handleLikePlaying()}
-                title={currentPreview ? "Like this Discovery preview" : (playerStarred ? "Remove from favorites" : "Like / favorite playing song")}
-                aria-label="Favorite playing song" disabled={(!currentSong && !currentPreview) || playerActionBusy}>♥</button>
-              <button className={playerDisliked ? "icon-button player-quick-action is-less" : "icon-button player-quick-action"}
+              <button className={playerLiked ? "icon-button player-quick-action player-like-action is-favorite" : "icon-button player-quick-action player-like-action"}
+                type="button" onClick={() => void handleLikePlaying()} aria-pressed={playerLiked}
+                title={playerLiked ? "Unlike this song" : "Like this song — more similar music"}
+                aria-label="Favorite playing song" disabled={(!currentSong && !currentPreview) || playerActionBusy}><PlayerIcon name="thumbs-up" size={19} /></button>
+              <button className={playerDisliked ? "icon-button player-quick-action player-dislike-action is-less" : "icon-button player-quick-action player-dislike-action"}
                 type="button" onClick={() => void toggleDislikePlaying()} disabled={playerActionBusy}
+                aria-pressed={playerDisliked}
                 aria-label={playerDisliked ? "Clear dislike" : "Dislike playing song"}
-                title={playerDisliked ? "Clear dislike" : "Show less like this"}>↓</button>
+                title={playerDisliked ? "Clear dislike" : "Dislike — show less like this"}><PlayerIcon name="thumbs-down" size={19} /></button>
               <button ref={playlistButtonRef} className="icon-button player-quick-action" type="button"
                 onClick={() => void openPlayerPlaylists()} disabled={(!currentSong && !currentPreview?.candidate) || playerActionBusy}
                 title={currentPreview ? "Download this preview and add it to a playlist" : "Add playing song to playlist"}
-                aria-label="Add playing song to playlist">＋</button>
+                aria-label="Add playing song to playlist"><PlayerIcon name="list-plus" size={19} /></button>
               <button className="icon-button player-quick-action" type="button"
                 onClick={() => void instantMixFromPlaying()} disabled={!currentSong || playerActionBusy}
                 title={currentSong ? "Instant mix from this song" : "Download Discovery preview to library first"}
-                aria-label="Instant mix from playing song">✦</button>
-              {currentPreview && (
-                <button className="icon-button player-quick-action player-download-action" type="button"
-                  onClick={downloadPlayingPreview}
-                  disabled={["queued", "searching", "downloading", "indexed", "existing"].includes(currentPreviewDownloadPhase ?? "")}
-                  title={currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing"
-                    ? "Already saved in library" : "Download playing Discovery track to library"}
-                  aria-label="Download playing Discovery track">
-                  {currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing" ? "✓" : "↓"}
-                </button>
-              )}
+                aria-label="Instant mix from playing song"><PlayerIcon name="sparkles" size={19} /></button>
+              <button className="icon-button player-quick-action player-download-action" type="button"
+                onClick={downloadPlayingTrack}
+                disabled={!currentSong && (!currentPreview?.candidate || ["queued", "searching", "downloading", "indexed", "existing"].includes(currentPreviewDownloadPhase ?? ""))}
+                title={currentPreview
+                  ? (currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing"
+                      ? "Already saved in library" : "Download this Discovery track to library")
+                  : "Download audio file to this computer"}
+                aria-label={currentPreview ? "Download playing Discovery track" : "Download playing song"}>
+                {currentPreview && (currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing") ? "✓"
+                  : currentPreview && ["queued", "searching", "downloading"].includes(currentPreviewDownloadPhase ?? "") ? "…"
+                  : <PlayerIcon name="download" size={19} />}
+              </button>
               <button className="icon-button" type="button" onClick={() => setQueueOpen((value) => !value)} aria-label="Queue">☷ {activeQueue.length}</button>
               <span>🔊</span>
               <input className="volume-slider" type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="Volume" />
@@ -1046,7 +1066,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             onPlaylist={() => void openPlayerPlaylists()}
             onMix={() => void instantMixFromPlaying()}
             downloadPhase={currentPreviewDownloadPhase}
-            onDownload={downloadPlayingPreview}
+            onDownload={downloadPlayingTrack}
             onQueue={() => setQueueOpen(true)}
             onQueueItem={jumpToIndex}
           />

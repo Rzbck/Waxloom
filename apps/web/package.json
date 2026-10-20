@@ -13,7 +13,8 @@
     "qa:parity": "node scripts/parity-qa.mjs",
     "qa:discovery": "node scripts/discovery-playback-smoke.mjs",
     "qa:discovery-actions": "node scripts/discovery-actions-smoke.mjs",
-    "qa:vinyl-sync": "node scripts/discovery-vinyl-sync-smoke.mjs"
+    "qa:vinyl-sync": "node scripts/discovery-vinyl-sync-smoke.mjs",
+    "qa:vinyl-snap": "node scripts/discovery-vinyl-snap-smoke.mjs"
   },
   "dependencies": {
     "react": "19.3.0",
