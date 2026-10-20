@@ -1,3 +1,10 @@
+## 2026-10-20 - Owner follow-up: wheel one-notch UX deployed
+
+- DEPLOYED / NOT USER VALIDATED: PC Bridge promoted web-only runtime source SHA 8538c797e955720da38e9fd1689971f8d83b936d from fix/vinyl-wheel-one-step-20261020, image waxloom-web:wheelstep-8538c79. Actual served JS /assets/index-DS3oQ4OI.js, HTTP 200 and API health OK; the API container image did not change. Main remains unchanged.
+- AUTOMATED GATE PASS: TypeScript/Vite, synthetic isolated Chrome QA of exactly one adjacent sleeve per discrete wheel notch, multi-event bursts, opposite direction, large delta and precision-trackpad microdeltas; animation checked in-flight vs final centered position; previous player/playlist/download/mobile regressions also pass. Repository security gate PASS on runtime source SHA.
+- ROLLBACK: prior waxloom-web:snap-58532bc image retained. Pre-deployment compose and nginx snapshots saved outside Git. No music, playlist or library file was changed.
+- NEXT TEST: user directly tries real desktop wheel feel; automated gesture emulation cannot establish subjective tactile smoothness on actual physical hardware.
+
 ## 2026-10-20 - One mouse-wheel notch = one smooth vinyl
 
 - Work branch: fix/vinyl-wheel-one-step-20261020, stacked on the production web source of fix/vinyl-settled-snap-player-20261020 (docs HEAD 3aceb90, runtime source 58532bc). Main and API unchanged.
