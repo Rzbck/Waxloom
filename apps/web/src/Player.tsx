@@ -49,6 +49,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const localSongIdRef = useRef<string | null>(null);
   const explicitQueueRef = useRef(false);
   const previewStartAtZeroRef = useRef(false);
+  // User playback intent must not be overwritten by a transient pause fired
+  // when an HTMLAudioElement changes source (or an old play promise rejects).
+  const wantsPlaybackRef = useRef(false);
   const previewManualImportRef = useRef<((candidate: DiscoveryCandidate) => void) | null>(null);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
@@ -149,10 +152,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       audio.load();
     }
 
+    wantsPlaybackRef.current = true;
     setPlaying(true);
     void audio.play()
       .then(() => traceLocalPlayer("audio-playing", song.id, Date.now()))
-      .catch(() => setPlaying(false));
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (wantsPlaybackRef.current && localSongIdRef.current === song.id) {
+          wantsPlaybackRef.current = false;
+          setPlaying(false);
+        }
+      });
   }, [traceLocalPlayer]);
 
   useEffect(() => {
@@ -269,8 +279,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     if (playing) {
-      void audio.play().catch(() => setPlaying(false));
-    } else {
+      void audio.play().catch((error: unknown) => {
+        // AbortError is expected when a newer track supersedes a pending
+        // play() promise. Only real current-source failures stop playback.
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (wantsPlaybackRef.current && audio.getAttribute("src") === currentPreview.preview_url) {
+          wantsPlaybackRef.current = false;
+          setPlaying(false);
+          setPreviewError("Audio source unavailable. Choose another track or press Play to retry.");
+        }
+      });
+    } else if (!audio.paused) {
       audio.pause();
     }
   }, [mode, currentPreview?.preview_url, playing]);
@@ -344,35 +363,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
 
     if (samePreview) {
-      const shouldPause = playing || Boolean(audio && !audio.paused && !audio.ended);
-      if (shouldPause) {
-        audio?.pause();
-        setPlaying(false);
-      } else {
-        setPlaying(true);
-        if (audio && target.preview_url) {
-          void audio.play().catch(() => setPlaying(false));
-        }
-      }
+      const shouldPause = wantsPlaybackRef.current;
+      wantsPlaybackRef.current = !shouldPause;
+      setPlaying(!shouldPause);
+      if (shouldPause) audio?.pause();
       return;
     }
 
     previewStartAtZeroRef.current = true;
-    if (audio && target.preview_url) {
-      localSongIdRef.current = null;
-      audio.pause();
-      if (audio.getAttribute("src") !== target.preview_url) {
-        audio.src = target.preview_url;
-        audio.load();
-      }
-      try {
-        audio.currentTime = 0;
-      } catch {
-        // loadedmetadata performs the hard reset for the new cached preview.
-      }
-      void audio.play().catch(() => setPlaying(false));
-    }
-
+    wantsPlaybackRef.current = true;
+    // Exactly one source switch, performed by the preview effect AFTER
+    // React commits mode/index. Calling audio.play() here as well caused
+    // duplicate play/pause events and stale AbortError state updates.
     setCurrentTime(0);
     setDuration(target.duration ?? 0);
     setMode("preview");
@@ -418,6 +420,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     if (nextIndex === null) {
+      wantsPlaybackRef.current = false;
       setPlaying(false);
       audioRef.current?.pause();
       return;
@@ -425,6 +428,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     if (mode === "preview") {
       const audio = audioRef.current;
+      wantsPlaybackRef.current = true;
       previewStartAtZeroRef.current = true;
       audio?.pause();
       if (audio) {
@@ -458,6 +462,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     const previousIndex = activeIndex - 1;
     if (mode === "preview") {
+      wantsPlaybackRef.current = true;
       previewStartAtZeroRef.current = true;
       audio?.pause();
       if (audio) {
@@ -517,7 +522,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (playing) {
+    if (wantsPlaybackRef.current) {
+      wantsPlaybackRef.current = false;
       audio.pause();
       setPlaying(false);
       return;
@@ -534,11 +540,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         ? { ...item, preview_url: `${api.previewStreamUrl(item.recording_mbid, item.artist, item.title)}&retry=${Date.now()}` }
         : item));
       setPreviewError(null);
+      wantsPlaybackRef.current = true;
       setPlaying(true);
       return;
     }
+    wantsPlaybackRef.current = true;
     setPlaying(true);
-    void audio.play().catch(() => setPlaying(false));
+    // Preview source effect owns the actual play() call; do not race it.
+    if (mode !== "preview") {
+      void audio.play().catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (wantsPlaybackRef.current) {
+          wantsPlaybackRef.current = false;
+          setPlaying(false);
+        }
+      });
+    }
   }
 
   async function toggleCurrentFavorite() {
@@ -760,6 +777,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!preview) return;
     const audio = audioRef.current;
     previewStartAtZeroRef.current = true;
+    wantsPlaybackRef.current = true;
     audio?.pause();
     if (audio) {
       try { audio.currentTime = 0; } catch { /* Metadata not yet loaded. */ }
@@ -787,8 +805,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
       ["nexttrack", () => next()],
       ["previoustrack", () => previous()],
-      ["play", () => { void audioRef.current?.play(); }],
-      ["pause", () => { audioRef.current?.pause(); }],
+      ["play", () => {
+        wantsPlaybackRef.current = true;
+        setPlaying(true);
+      }],
+      ["pause", () => {
+        wantsPlaybackRef.current = false;
+        audioRef.current?.pause();
+        setPlaying(false);
+      }],
     ];
     for (const [action, handler] of actions) {
       try { session.setActionHandler(action, handler); } catch { /* Unsupported iOS action. */ }
@@ -843,11 +868,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
         }}
         onTimeUpdate={onTimeUpdate}
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          if (wantsPlaybackRef.current) setPlaying(true);
+          else audioRef.current?.pause();
+        }}
         onPlaying={() => {
           if (mode === "preview") setPreviewError(null);
         }}
-        onPause={() => setPlaying(false)}
+        onPause={() => {
+          if (!wantsPlaybackRef.current) setPlaying(false);
+        }}
         onEnded={() => {
           submitScrobble();
           next();
@@ -855,6 +885,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onError={() => {
           if (mode !== "preview" || !currentPreview) {
             // Ordinary Navidrome streams are unaffected by Discovery failover.
+            wantsPlaybackRef.current = false;
             setPlaying(false);
             return;
           }
@@ -866,6 +897,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
           // Keep the selected title and queue: failing audio is not consent
           // to skip to another recommendation.
+          wantsPlaybackRef.current = false;
           setPlaying(false);
           setPreviewError("Preview unavailable. Press Play to retry or choose another title.");
         }}
