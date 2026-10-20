@@ -290,3 +290,30 @@ body:has(.player-dock) .app-shell-discovery .content {
     padding-bottom: 4px !important;
   }
 }
+
+/* Independent neutral action, never a dislike. */
+.waxloom-discovery-vinyl .discovery-cover-neutral-remove {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 9;
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 1px solid #83758a;
+  border-radius: 50%;
+  background: #18141ae8;
+  color: #f2e9f3;
+  font-size: 21px;
+  line-height: 1;
+  cursor: pointer;
+}
+.waxloom-discovery-vinyl .discovery-cover-neutral-remove:hover,
+.waxloom-discovery-vinyl .discovery-cover-neutral-remove:focus-visible {
+  background: #503b58;
+  border-color: #d1a9e3;
+}
+
+.waxloom-discovery-vinyl .discovery-cover-card { position: relative; }

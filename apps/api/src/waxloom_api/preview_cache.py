@@ -127,6 +127,12 @@ class DiscoveryPreviewCache:
         self._blocked: set[str] = set()
         self._failed_until: dict[str, float] = {}
         self._failure_reasons: dict[str, str] = {}
+        # The same verified M4A is inspected on every feed poll, preview GET,
+        # status and provider lookup. Repeated synchronous Windows-bind-mounted
+        # JSON/stat calls can stall the FastAPI event loop for seconds.
+        # Memoize POSITIVE immutable entries briefly. Expiration revalidates
+        # the real files; explicit eviction and prune invalidate immediately.
+        self._ready_memo: dict[str, tuple[PreviewCacheEntry, float]] = {}
         self._runner: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
 
@@ -232,6 +238,11 @@ class DiscoveryPreviewCache:
     def ready(self, recording_mbid: str | None) -> PreviewCacheEntry | None:
         if not recording_mbid:
             return None
+        memo = self._ready_memo.get(recording_mbid)
+        if memo and memo[1] > time.monotonic():
+            return memo[0]
+        if memo:
+            self._ready_memo.pop(recording_mbid, None)
         entry_dir = self._entry_dir(recording_mbid)
         metadata_path = entry_dir / "metadata.json"
         try:
@@ -256,7 +267,7 @@ class DiscoveryPreviewCache:
         source_candidate = payload.get("source_candidate")
         if not isinstance(source_candidate, dict):
             source_candidate = {}
-        return PreviewCacheEntry(
+        result = PreviewCacheEntry(
             recording_mbid=recording_mbid,
             artist=str(payload.get("artist") or ""),
             title=str(payload.get("title") or ""),
@@ -266,6 +277,8 @@ class DiscoveryPreviewCache:
             source_candidate=dict(source_candidate),
             created_epoch=float(payload.get("created_epoch") or 0.0),
         )
+        self._ready_memo[recording_mbid] = (result, time.monotonic() + 15)
+        return result
 
     def preview_url(self, recording_mbid: str) -> str:
         path = f"/api/discovery/previews/{quote(recording_mbid, safe='')}"
@@ -396,6 +409,7 @@ class DiscoveryPreviewCache:
 
     async def evict(self, recording_mbid: str) -> None:
         self._blocked.add(recording_mbid)
+        self._ready_memo.pop(recording_mbid, None)
         self._active.pop(recording_mbid, None)
         self._recent.pop(recording_mbid, None)
         self._resolved_sources.pop(recording_mbid, None)
@@ -479,6 +493,7 @@ class DiscoveryPreviewCache:
             if expires <= now and mbid not in active
         ]
         for mbid in expired:
+            self._ready_memo.pop(mbid, None)
             self._recent.pop(mbid, None)
             self._resolved_sources.pop(mbid, None)
             self._cancel_candidate_tasks(mbid)
@@ -491,6 +506,8 @@ class DiscoveryPreviewCache:
             key for key in reserve_ids if isinstance(key, str) and key
         }
         await asyncio.to_thread(self._remove_unknown_entries, retained)
+        for old_key in set(self._ready_memo).difference(retained):
+            self._ready_memo.pop(old_key, None)
 
         for mbid, candidate in active.items():
             if self.ready(mbid) is not None:

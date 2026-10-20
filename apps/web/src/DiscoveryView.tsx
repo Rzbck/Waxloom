@@ -25,6 +25,22 @@ type TasteState = Record<string, TasteEntry>;
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
 const BROWSER_CACHE_AGE_MS = 2 * 60 * 1000;
 const TASTE_KEY = "waxloom.discovery.taste.v1";
+// Local presentation-only suppression; NEVER sent to taste feedback.
+const DISMISSED_KEY = "waxloom.discovery.dismissed.v1";
+const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
+function readDismissed(): Record<string, number> {
+  try {
+    const value = JSON.parse(window.localStorage.getItem(DISMISSED_KEY) || "{}") as Record<string, number>;
+    if (!value || typeof value !== "object") return {};
+    const now = Date.now();
+    return Object.fromEntries(Object.entries(value).filter(([key, at]) =>
+      key.length > 0 && typeof at === "number" && at <= now && now - at < DISMISS_TTL_MS));
+  } catch { return {}; }
+}
+function storeDismissed(value: Record<string, number>) {
+  try { window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(value)); } catch { /* optional */ }
+}
+
 const SOURCE_REJECT_TAG = "__waxloom_source:not_music__";
 const SHELF_PAGE_SIZE = 12;
 const SHELF_TARGET_SIZE = 20;
@@ -185,7 +201,7 @@ function asPreviewTrack(candidate: DiscoveryCandidate): PreviewTrack {
 }
 
 function DiscoveryTrackCard({
-  candidate, currentPreviewMbid, playing, phase, owned, onPlay, onQuickAdd,
+  candidate, currentPreviewMbid, playing, phase, owned, onPlay, onQuickAdd, onDismiss,
 }: {
   candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
@@ -194,6 +210,7 @@ function DiscoveryTrackCard({
   owned: boolean | null;
   onPlay: (candidate: DiscoveryCandidate) => void;
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
+  onDismiss: (candidate: DiscoveryCandidate) => void;
 }) {
   const isPlaying = currentPreviewMbid === candidate.recording_mbid && playing;
   const [coverFailed, setCoverFailed] = useState(false);
@@ -216,6 +233,12 @@ function DiscoveryTrackCard({
           {isPlaying ? "Ⅱ" : "▶"}
         </span>
       </button>
+      <button type="button" className="discovery-cover-neutral-remove"
+        title={"Remove " + candidate.title + " from Discovery without changing taste"}
+        aria-label={"Remove " + candidate.title + " from Discovery"}
+        onClick={() => onDismiss(candidate)}>
+        <span aria-hidden="true">×</span>
+      </button>
       {owned === false && !complete && (
       <button type="button"
         className={`discovery-cover-quick-download ${busy ? "is-working" : ""} ${complete ? "is-complete" : ""} ${phase === "failed" ? "is-failed" : ""}`}
@@ -233,7 +256,7 @@ function DiscoveryTrackCard({
 }
 
 function DiscoveryShelf({
-  items, currentPreviewMbid, playing, rejectingMbid, taste, ownership, onPlayQueue, onQuickAdd, onFeedback, onBadSource,
+  items, currentPreviewMbid, playing, rejectingMbid, taste, ownership, onPlayQueue, onQuickAdd, onFeedback, onBadSource, onDismiss,
 }: {
   items: DiscoveryCandidate[];
   currentPreviewMbid: string | null;
@@ -245,6 +268,7 @@ function DiscoveryShelf({
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
   onBadSource: (candidate: DiscoveryCandidate) => void;
+  onDismiss: (candidate: DiscoveryCandidate) => void;
 }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [followRequest, setFollowRequest] = useState(0);
@@ -288,7 +312,7 @@ function DiscoveryShelf({
                 phase={downloadPhase(item.recording_mbid)}
                 owned={ownership.get(item.recording_mbid) === undefined ? null : ownership.get(item.recording_mbid) === "present"}
                 onPlay={(track) => { setFollowRequest((value) => value + 1); onPlayQueue(items, track); }}
-                onQuickAdd={onQuickAdd} />
+                onQuickAdd={onQuickAdd} onDismiss={onDismiss} />
             </div>
           ))}
         </VinylRack>
@@ -316,6 +340,10 @@ function DiscoveryShelf({
               onClick={() => { onFeedback(candidate, liked === -1 ? 0 : -1); setOptionsOpen(false); }}>
               {liked === -1 ? "✓ Less like this" : "↓ Less like this"}
             </button>
+            <button type="button"
+              onClick={() => { onDismiss(candidate); setOptionsOpen(false); }}>
+              × Remove from Discovery (neutral)
+            </button>
             {candidate.source === "youtube_dig" && (
               <button type="button" disabled={rejectingMbid === candidate.recording_mbid}
                 onClick={() => { onBadSource(candidate); setOptionsOpen(false); }}>
@@ -337,6 +365,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const [notice, setNotice] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
+  const [dismissed, setDismissed] = useState<Record<string, number>>(() => readDismissed());
   const [refreshing, setRefreshing] = useState(false);
   const refreshFromRef = useRef<string | null>(null);
   const pageRef = useRef(0);
@@ -439,7 +468,9 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const recommendations = useMemo(() => {
     const raw = bundle?.external.items ?? [];
     const version = feedVersion(bundle);
-    const ranked = diversify(activeCandidates(raw, taste), 3);
+    const ranked = diversify(activeCandidates(
+      raw.filter((candidate) => dismissed[candidate.recording_mbid] === undefined), taste,
+    ), 3);
     const previous = stableRecommendationsRef.current;
     if (!previous || previous.version !== version) {
       stableRecommendationsRef.current = { version, items: ranked };
@@ -466,7 +497,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     }
     stableRecommendationsRef.current = { version, items: kept };
     return kept;
-  }, [bundle, taste]);
+  }, [bundle, taste, dismissed]);
   // Keep a small playable reserve off-screen: Less replaces its sleeve
   // immediately and New music can offer unseen tracks without a download.
   // Reserve size is based on the raw pool, not the filtered count, so
@@ -530,6 +561,16 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     const queue = items.map(asPreviewTrack);
     const index = Math.max(0, items.findIndex((item) => item.recording_mbid === candidate.recording_mbid));
     player.playPreviewTracks(queue, index, onImportCandidate);
+  }
+
+  function dismissNeutral(candidate: DiscoveryCandidate) {
+    const next = { ...readDismissed(), [candidate.recording_mbid]: Date.now() };
+    storeDismissed(next);
+    setDismissed(next);
+    setNotice("Removed from Discovery for 24 hours. No like, dislike or taste signal was recorded.");
+    setError(null);
+    // The ready reserve already contains additional playable recommendations.
+    // Never call backend taste feedback or remove audio from the library.
   }
 
   function updateFeedback(candidate: DiscoveryCandidate, value: -1 | 0 | 1) {
@@ -627,7 +668,8 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
           rejectingMbid={rejecting} taste={taste} ownership={ownership}
           onPlayQueue={playDiscoveryQueue} onQuickAdd={addToLibrary}
           onFeedback={updateFeedback}
-          onBadSource={(candidate) => void rejectBadSource(candidate)} />
+          onBadSource={(candidate) => void rejectBadSource(candidate)}
+          onDismiss={dismissNeutral} />
       ) : <div className="discovery-fit-message">Preparing the first discoveries…</div>}
     </div>
   );

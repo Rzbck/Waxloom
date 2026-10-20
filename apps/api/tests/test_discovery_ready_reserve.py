@@ -93,3 +93,29 @@ async def test_cache_keeps_finished_previews_from_offscreen_pool(tmp_path, monke
     })
     assert "synthetic-current" in retained_seen[-1]
     assert "synthetic-offscreen" in retained_seen[-1]
+
+@pytest.mark.asyncio
+async def test_ready_memo_stops_repeated_metadata_io_and_evicts_safely(tmp_path):
+    from waxloom_api.preview_cache import _CACHE_VERSION
+    import json
+
+    cache = DiscoveryPreviewCache(youtube=SimpleNamespace(), feed_factory=lambda: {}, state_dir=tmp_path)
+    recording = "synthetic-play-ready"
+    entry = cache._entry_dir(recording)
+    entry.mkdir(parents=True, exist_ok=True)
+    (entry / "source.m4a").write_bytes(b"s" * 160_000)
+    (entry / "preview.m4a").write_bytes(b"a" * 160_000)
+    payload = {
+        "version": _CACHE_VERSION, "recording_mbid": recording,
+        "artist": "Synthetic", "title": "Cached",
+        "source_url": "https://www.youtube.com/watch?v=aaaaabbbbb0",
+        "source_path": "source.m4a", "playback_path": "preview.m4a",
+    }
+    (entry / "metadata.json").write_text(json.dumps(payload), encoding="utf-8")
+    first = cache.ready(recording)
+    assert first is not None and cache.ready(recording) is first
+    # A cached immutable M4A does not synchronously parse JSON for each read.
+    (entry / "metadata.json").unlink()
+    assert cache.ready(recording) is first
+    await cache.evict(recording)
+    assert cache.ready(recording) is None
