@@ -34,7 +34,8 @@ export function VinylRack({
   const programmaticSnapRef = useRef(false);
   const wheelTotalRef = useRef(0);
   const wheelLastEventRef = useRef(0);
-  const wheelLockedUntilRef = useRef(0);
+  const wheelTargetRef = useRef<number | null>(null);
+  const wheelFrameRef = useRef<number | null>(null);
   const geometryRef = useRef<{ sleeves: HTMLElement[]; centers: number[]; width: number } | null>(null);
   const selectedIndexRef = useRef(0);
   const dragRef = useRef<{ pointerId: number; startX: number; startScroll: number; dragged: boolean } | null>(null);
@@ -161,13 +162,10 @@ export function VinylRack({
     };
   }, [contentKey, count, updateActive]);
 
-  // Desktop wheel navigation is DISCRETE, not pixel scrolling:
-  // one intentional notch advances exactly one sleeve. Raw deltaY scrolling
-  // followed by a second snap caused the two jerks reported by the owner.
-  // Small trackpad deltas must first accumulate into a gesture; large mouse
-  // notches fire immediately. Lock while native compositor smooth scrolling
-  // runs so a single hardware notch cannot initiate overlapping animations.
-  // Keep native touch momentum, and avoid introducing CSS mandatory snap.
+  // Mouse wheel: each deliberate notch advances one sleeve. Unlike a
+  // 430ms input lock, quick successive notches keep their momentum and can
+  // move through many albums. Smooth trackpads accumulate their micro-deltas.
+  // Browser-driven smooth scroll targets only exact record centers.
   useEffect(() => {
     const rack = rackRef.current;
     if (!rack) return;
@@ -180,56 +178,67 @@ export function VinylRack({
       const unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? rack.clientWidth : 1;
       const amount = delta * unit;
       if (!amount) return;
-
       const now = performance.now();
-      if (now - wheelLastEventRef.current > 160
-        || Math.sign(wheelTotalRef.current) !== Math.sign(amount)) {
+      const freshGesture = now - wheelLastEventRef.current > 380;
+      if (freshGesture || Math.sign(wheelTotalRef.current) !== Math.sign(amount)) {
         wheelTotalRef.current = 0;
       }
+      if (freshGesture) {
+        const center = rack.scrollLeft + geo.width / 2;
+        wheelTargetRef.current = geo.centers.reduce((best, point, index) =>
+          Math.abs(point - center) < Math.abs(geo.centers[best] - center) ? index : best, 0);
+      }
       wheelLastEventRef.current = now;
-      const direction = Math.sign(amount);
-      const center = rack.scrollLeft + geo.width / 2;
-      const nearest = geo.centers.reduce((best, point, index) =>
-        Math.abs(point - center) < Math.abs(geo.centers[best] - center) ? index : best, 0);
-      const next = Math.max(0, Math.min(geo.centers.length - 1, nearest + direction));
-      if (next === nearest && now >= wheelLockedUntilRef.current) return;
-
-      // This gesture belongs to the rack, not to vertical page scrolling.
-      // Prevent default before the lock check to swallow extra notch events.
       if (event.cancelable) event.preventDefault();
-      if (now < wheelLockedUntilRef.current) return;
-
       wheelTotalRef.current += amount;
-      // Mouse wheels usually emit >48px (or line/page units) per notch.
-      // Precision trackpads send small, frequent delta values instead.
       const threshold = event.deltaMode === 0 ? 48 : 1;
       if (Math.abs(wheelTotalRef.current) < threshold) return;
+      const steps = Math.max(1, Math.round(Math.abs(wheelTotalRef.current) / 120));
+      const direction = Math.sign(wheelTotalRef.current);
       wheelTotalRef.current = 0;
-      wheelLockedUntilRef.current = now + 430;
+      wheelTargetRef.current = Math.max(0, Math.min(
+        geo.centers.length - 1, (wheelTargetRef.current ?? selectedIndexRef.current) + direction * steps,
+      ));
       programmaticSnapRef.current = true;
       if (snapTimerRef.current !== null) clearTimeout(snapTimerRef.current);
       if (snapReleaseRef.current !== null) clearTimeout(snapReleaseRef.current);
-      const left = Math.max(0, Math.min(
-        rack.scrollWidth - rack.clientWidth, geo.centers[next] - geo.width / 2,
-      ));
-      // A single browser-managed ease is smoother than repeated scrollLeft
-      // writes plus a delayed corrective animation.
-      rack.scrollTo({
-        left,
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
-      });
+      // Coalesce burst events within a render frame; never throw notches away.
+      if (wheelFrameRef.current === null) {
+        wheelFrameRef.current = requestAnimationFrame(() => {
+          wheelFrameRef.current = null;
+          const target = wheelTargetRef.current ?? 0;
+          const nextGeo = geometryRef.current;
+          if (!nextGeo) return;
+          const left = Math.max(0, Math.min(
+            rack.scrollWidth - rack.clientWidth, nextGeo.centers[target] - nextGeo.width / 2,
+          ));
+          rack.scrollTo({
+            left,
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+          });
+        });
+      }
       snapReleaseRef.current = window.setTimeout(() => {
         programmaticSnapRef.current = false;
+        // Browser compositor normally arrives exactly at its commanded
+        // center. Correct any fractional leftover without creating a second
+        // visible movement.
+        snapToNearest();
         updateActive();
-      }, 550);
+      }, 700);
     };
     rack.addEventListener("wheel", onWheel, { passive: false });
-    return () => rack.removeEventListener("wheel", onWheel);
-  }, [updateActive]);
+    return () => {
+      rack.removeEventListener("wheel", onWheel);
+      if (wheelFrameRef.current !== null) cancelAnimationFrame(wheelFrameRef.current);
+    };
+  }, [snapToNearest, updateActive]);
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.pointerType !== "mouse" || event.button !== 0) return;
     programmaticSnapRef.current = false;
+    wheelTargetRef.current = null;
+    wheelLastEventRef.current = 0;
     if (snapTimerRef.current !== null) clearTimeout(snapTimerRef.current);
     if (snapReleaseRef.current !== null) clearTimeout(snapReleaseRef.current);
     dragRef.current = {

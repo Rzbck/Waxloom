@@ -11,6 +11,7 @@ import {
 
 import { api } from "./api";
 import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
+import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
 import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
 import type { DiscoveryCandidate, PlaylistSummary, PreviewTrack, Song } from "./types";
 
@@ -90,12 +91,22 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
   const downloads = useDownloads();
+  const owned = useLibraryPresence();
 
   const currentSong = mode === "navidrome" && currentIndex >= 0 ? queue[currentIndex] ?? null : null;
   const currentPreview = mode === "preview" && previewIndex >= 0 ? previewQueue[previewIndex] ?? null : null;
   const currentPreviewDownloadPhase = currentPreview
     ? (downloads.find((item) => item.id === currentPreview.recording_mbid)?.phase ?? downloadPhase(currentPreview.recording_mbid))
     : undefined;
+  const canDownloadCurrent = Boolean(
+    currentPreview?.candidate
+    && owned.get(currentPreview.recording_mbid) === "absent"
+    && !["indexed", "existing"].includes(currentPreviewDownloadPhase ?? ""),
+  );
+  useEffect(() => {
+    if (!currentPreview?.candidate) return;
+    verifyLibraryPresence([currentPreview.candidate]);
+  }, [currentPreview?.recording_mbid]);
   const tasteKey = currentPreview?.recording_mbid
     ?? (currentSong ? `library:${currentSong.id}` : null);
   const currentTaste = tasteKey ? (playerTaste[tasteKey]?.value ?? 0) : 0;
@@ -961,7 +972,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 && <small>Refine your search to see more playlists.</small>}
             </aside>
           )}
-          <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""}`}>
+          <footer className={`player-dock ${canDownloadCurrent ? "player-dock-preview" : ""}`}>
             <div className="waxloom-mobile-mini">
               <button className="waxloom-mobile-mini-info" type="button"
                 onClick={() => setMobileExpanded(true)}
@@ -977,7 +988,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 </span>
                 <span className="waxloom-mobile-mini-chevron"><PlayerIcon name="chevron-down" size={22} /></span>
               </button>
-              {currentPreview && (
+              {canDownloadCurrent && (
                 <button className="waxloom-mobile-mini-download" type="button" onClick={downloadPlayingPreview}
                   disabled={["queued", "searching", "downloading", "indexed", "existing"].includes(currentPreviewDownloadPhase ?? "")}
                   aria-label="Download playing Discovery track"
@@ -1002,7 +1013,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               <div className="player-track-copy">
                 <strong>{activeTitle}</strong>
                 <span>{activeArtist}</span>
-                {mode === "preview" && <small>Discovery preview · not in your library</small>}
+                {mode === "preview" && <small>{owned.get(currentPreview?.recording_mbid ?? "") === "present" ? "Already in your library" : "Discovery preview"}</small>}
               </div>
             </div>
 
@@ -1044,6 +1055,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 onClick={() => void instantMixFromPlaying()} disabled={!currentSong || playerActionBusy}
                 title={currentSong ? "Instant mix from this song" : "Download Discovery preview to library first"}
                 aria-label="Instant mix from playing song"><PlayerIcon name="sparkles" size={19} /></button>
+              {canDownloadCurrent && (
               <button className="icon-button player-quick-action player-download-action" type="button"
                 onClick={downloadPlayingTrack}
                 disabled={!currentSong && (!currentPreview?.candidate || ["queued", "searching", "downloading", "indexed", "existing"].includes(currentPreviewDownloadPhase ?? ""))}
@@ -1056,6 +1068,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                   : currentPreview && ["queued", "searching", "downloading"].includes(currentPreviewDownloadPhase ?? "") ? "…"
                   : <PlayerIcon name="download" size={19} />}
               </button>
+              )}
               <button className="icon-button" type="button" onClick={() => setQueueOpen((value) => !value)} aria-label="Queue">☷ {activeQueue.length}</button>
               <span>🔊</span>
               <input className="volume-slider" type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="Volume" />
@@ -1098,6 +1111,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             onPlaylist={() => void openPlayerPlaylists()}
             onMix={() => void instantMixFromPlaying()}
             downloadPhase={currentPreviewDownloadPhase}
+            showDownload={canDownloadCurrent}
             onDownload={downloadPlayingTrack}
             onQueue={() => setQueueOpen(true)}
             onQueueItem={jumpToIndex}

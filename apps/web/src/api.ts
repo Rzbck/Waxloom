@@ -185,6 +185,16 @@ function warmLibraryNavigation(): void {
   void loadArtistsCached().catch(() => undefined);
 }
 
+const previewAudioWarmups = new Set<string>();
+function prefetchReadyAudio(mbid: string, artist: string, title: string) {
+  const url = "/api/discovery/previews/" + encodeURIComponent(mbid)
+    + "?artist=" + encodeURIComponent(artist) + "&title=" + encodeURIComponent(title);
+  if (previewAudioWarmups.has(url)) return;
+  previewAudioWarmups.add(url);
+  void fetch(url, { headers: { Range: "bytes=0-32767" } })
+    .catch(() => { previewAudioWarmups.delete(url); });
+}
+
 export const api = {
   health: async () => {
     const value = await request<Health>("/api/health");
@@ -250,6 +260,7 @@ export const api = {
       result_count: resultCount,
     }),
   }),
+  prefetchDiscoveryAudio: prefetchReadyAudio,
   discoveryFeed: (page = 0) => request<DiscoveryFeedResponse>("/api/discovery/feed?page=" + Math.max(0, Math.floor(page))),
   discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
   refreshDiscoveryFeed: () => request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
