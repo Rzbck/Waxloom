@@ -18,7 +18,8 @@
     "qa:vinyl-wheel": "node scripts/discovery-vinyl-wheel-smoke.mjs",
     "qa:discovery-fill": "node scripts/discovery-feed-fill-smoke.mjs",
     "qa:discovery-stability": "node scripts/discovery-stability-smoke.mjs",
-    "qa:discovery-fast-play": "node scripts/discovery-fast-play-smoke.mjs"
+    "qa:discovery-fast-play": "node scripts/discovery-fast-play-smoke.mjs",
+    "qa:vinyl-one-motion": "node scripts/discovery-one-motion-smoke.mjs"
   },
   "dependencies": {
     "react": "19.3.0",

@@ -249,6 +249,17 @@ function DiscoveryShelf({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [followRequest, setFollowRequest] = useState(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  // Do not start HTTP requests for every transient sleeve crossed by a
+  // fast wheel fling. Prefetch only the final selected vinyl after settling.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      for (const item of items.slice(selectedIndex, selectedIndex + 2)) {
+        api.prefetchDiscoveryAudio(item.recording_mbid, item.artist, item.title);
+      }
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [items, selectedIndex]);
+
   if (items.length === 0) return <p className="muted">Preparing musical discoveries.</p>;
 
   const candidate = items[Math.min(selectedIndex, items.length - 1)] ?? items[0];
@@ -267,12 +278,9 @@ function DiscoveryShelf({
           followIndex={items.findIndex((item) => item.recording_mbid === currentPreviewMbid)}
           followRequest={followRequest}
           onSelectionChange={(index) => {
-             setSelectedIndex(index); setOptionsOpen(false);
-             // Warm the focused sleeve and its neighbour during browsing.
-             for (const item of items.slice(index, index + 2)) {
-               api.prefetchDiscoveryAudio(item.recording_mbid, item.artist, item.title);
-             }
-           }}>
+            setSelectedIndex(index);
+            setOptionsOpen(false);
+          }}>
           {items.map((item) => (
             <div key={item.recording_mbid} className="waxloom-vinyl-sleeve waxloom-vinyl-sleeve--discovery">
               <DiscoveryTrackCard candidate={item}

@@ -386,3 +386,17 @@
 }
 .player-tools .player-download-action { color: #d2b6fb; }
 .player-tools .player-download-action:disabled { opacity: .5; cursor: default; }
+
+/* Desktop wheel and pointer-drag are driven by ONE scrollLeft animation in
+   VinylRack. Chrome's scroll-linked pseudo-disc animation would animate
+   dozens of off-screen sleeves on every scroll tick and fight frame budget.
+   Keep static decorative records while browsing on desktop. Mobile keeps
+   its native Safari compositor behaviour, untouched. */
+@media (hover: hover) and (pointer: fine) {
+  .waxloom-vinyl-rack .waxloom-vinyl-sleeve::before {
+    animation: none !important;
+    animation-timeline: auto !important;
+    transition: none !important;
+    transform: none !important;
+  }
+}
