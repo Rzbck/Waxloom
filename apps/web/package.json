@@ -20,7 +20,8 @@
     "qa:discovery-stability": "node scripts/discovery-stability-smoke.mjs",
     "qa:discovery-fast-play": "node scripts/discovery-fast-play-smoke.mjs",
     "qa:vinyl-one-motion": "node scripts/discovery-one-motion-smoke.mjs",
-    "qa:discovery-instant": "node scripts/discovery-instant-neutral-smoke.mjs"
+    "qa:discovery-instant": "node scripts/discovery-instant-neutral-smoke.mjs",
+    "qa:home-fluidity": "node scripts/home-shuffle-fluidity-smoke.mjs"
   },
   "dependencies": {
     "react": "19.3.0",

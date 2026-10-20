@@ -1,4 +1,4 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api";
 import { DiscoveryView } from "./DiscoveryView";
@@ -74,6 +74,14 @@ export default function App() {
 
   const [homeAlbums, setHomeAlbums] = useState<Album[]>([]);
   const [homeSongs, setHomeSongs] = useState<Song[]>([]);
+  const [shuffling, setShuffling] = useState(false);
+  // Ready random queue lives off-screen. A user's Shuffle never waits for
+  // a fresh Navidrome request once Home has loaded its first suggestions.
+  const randomPoolRef = useRef<Song[]>([]);
+  const randomRequestRef = useRef<Promise<Song[]> | null>(null);
+  const shuffleTimerRef = useRef<number | null>(null);
+  const shuffleHomeTimerRef = useRef<number | null>(null);
+  const shufflePendingRef = useRef(false);
   const [recentSongs, setRecentSongs] = useState<Song[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
   const [albumMode, setAlbumMode] = useState("newest");
@@ -99,6 +107,10 @@ export default function App() {
       .catch(() => setNavidromeHealth({ status: "unavailable", message: "Navidrome health check failed." }));
     void loadHome();
     void loadPlaylists(false);
+    return () => {
+      if (shuffleTimerRef.current !== null) window.clearTimeout(shuffleTimerRef.current);
+      if (shuffleHomeTimerRef.current !== null) window.clearTimeout(shuffleHomeTimerRef.current);
+    };
   }, []);
 
   // External imports (Shazam/Waxloom) refresh automatically on desktop and phone.
@@ -134,25 +146,42 @@ export default function App() {
     }
   }
 
-  async function loadHome() {
-    setLoading(true);
-    try {
-      const [albumPayload, songPayload] = await Promise.all([api.albums("newest", 18), api.randomSongs(16)]);
-      setHomeAlbums(albumPayload.items);
-      setHomeSongs(songPayload.items);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not load Navidrome library.");
-    } finally {
-      setLoading(false);
-    }
+  function requestRandomPool(): Promise<Song[]> {
+    if (randomRequestRef.current) return randomRequestRef.current;
+    // A single request is shared by app startup, shuffle and background refill.
+    const job = api.randomSongs(40)
+      .then((payload) => {
+        const songs = payload.items.filter((item) => Boolean(item.id));
+        if (songs.length > 0) randomPoolRef.current = songs;
+        return songs;
+      })
+      .finally(() => {
+        if (randomRequestRef.current === job) randomRequestRef.current = null;
+      });
+    randomRequestRef.current = job;
+    return job;
+  }
+
+  function loadHome() {
+    // Independent sections: a slow album query must not freeze the Shuffle
+    // button or hide the already available random tracks.
+    void api.albums("newest", 18)
+      .then((payload) => setHomeAlbums(payload.items))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load latest albums."));
+    void requestRandomPool()
+      .then((songs) => { if (songs.length) setHomeSongs(songs.slice(0, 16)); })
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load random tracks."));
   }
 
   async function shuffleSomething() {
-    setLoading(true);
+    if (shufflePendingRef.current) return;
+    shufflePendingRef.current = true;
     setError(null);
+    const available = randomPoolRef.current.length ? randomPoolRef.current : homeSongs;
+    // This fast path needs NO await, no global loading spinner and no network.
+    if (!available.length) setShuffling(true);
     try {
-      const payload = await api.randomSongs(40);
-      const songs = payload.items;
+      const songs = available.length ? available : await requestRandomPool();
       if (songs.length === 0) {
         setError("Navidrome returned no random tracks.");
         return;
@@ -161,12 +190,26 @@ export default function App() {
       if (songs.length > 1 && songs[index]?.id === player.currentSong?.id) {
         index = (index + 1) % songs.length;
       }
-      setHomeSongs(songs.slice(0, 16));
+      performance.mark("waxloom-shuffle-click");
       player.playSongs(songs, index);
+      // Album art repaints should not compete with the first audio frame.
+      if (shuffleHomeTimerRef.current !== null) window.clearTimeout(shuffleHomeTimerRef.current);
+      shuffleHomeTimerRef.current = window.setTimeout(() => {
+        shuffleHomeTimerRef.current = null;
+        setHomeSongs(songs.slice(0, 16));
+      }, 350);
+      // Refill only AFTER the audio start has had bandwidth priority.
+      // Repeated quick taps still play instantly from the existing pool.
+      if (shuffleTimerRef.current !== null) window.clearTimeout(shuffleTimerRef.current);
+      shuffleTimerRef.current = window.setTimeout(() => {
+        shuffleTimerRef.current = null;
+        void requestRandomPool().catch(() => undefined);
+      }, 2200);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not shuffle the library.");
     } finally {
-      setLoading(false);
+      shufflePendingRef.current = false;
+      setShuffling(false);
     }
   }
 
@@ -436,7 +479,7 @@ export default function App() {
         {view === "home" && (
           <div className="workspace-stack">
             <section className="home-quickbar" aria-label="Quick music actions">
-              <button className="primary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>⤨ Shuffle</button>
+              <button className="primary-action" type="button" onClick={() => void shuffleSomething()} disabled={shuffling}>⤨ Shuffle</button>
               <button className="secondary-action" type="button" onClick={() => navigate("discovery")}>✦ Discover</button>
               <span className="home-quickbar-status" title="Integration details are available in the status indicator above">
                 <span className={navidromeHealth?.status === "ok" ? "dot dot-on" : "dot"} />
@@ -464,7 +507,7 @@ export default function App() {
             </section>
 
             <section>
-              <div className="section-toolbar"><div><p className="eyebrow">Random</p><h2>Play something</h2></div><button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={loading}>Fresh shuffle</button></div>
+              <div className="section-toolbar"><div><p className="eyebrow">Random</p><h2>Play something</h2></div><button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={shuffling}>Fresh shuffle</button></div>
               <SongTable songs={homeSongs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
             </section>
             </div>
