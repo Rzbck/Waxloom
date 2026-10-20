@@ -32,6 +32,9 @@ export function VinylRack({
   const snapTimerRef = useRef<number | null>(null);
   const snapReleaseRef = useRef<number | null>(null);
   const programmaticSnapRef = useRef(false);
+  const wheelTotalRef = useRef(0);
+  const wheelLastEventRef = useRef(0);
+  const wheelLockedUntilRef = useRef(0);
   const geometryRef = useRef<{ sleeves: HTMLElement[]; centers: number[]; width: number } | null>(null);
   const selectedIndexRef = useRef(0);
   const dragRef = useRef<{ pointerId: number; startX: number; startScroll: number; dragged: boolean } | null>(null);
@@ -158,28 +161,71 @@ export function VinylRack({
     };
   }, [contentKey, count, updateActive]);
 
-  // The native browser default interprets a mouse wheel vertically, while
-  // this rack has only horizontal overflow. Keep native trackpad X gestures
-  // and allow vertical page scroll when already at either end.
+  // Desktop wheel navigation is DISCRETE, not pixel scrolling:
+  // one intentional notch advances exactly one sleeve. Raw deltaY scrolling
+  // followed by a second snap caused the two jerks reported by the owner.
+  // Small trackpad deltas must first accumulate into a gesture; large mouse
+  // notches fire immediately. Lock while native compositor smooth scrolling
+  // runs so a single hardware notch cannot initiate overlapping animations.
+  // Keep native touch momentum, and avoid introducing CSS mandatory snap.
   useEffect(() => {
     const rack = rackRef.current;
     if (!rack) return;
     const onWheel = (event: WheelEvent) => {
-      if (event.ctrlKey || event.metaKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) return;
+      if (event.ctrlKey || event.metaKey
+        || !window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+      const geo = geometryRef.current;
+      if (!geo || geo.centers.length < 2) return;
+      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
       const unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? rack.clientWidth : 1;
-      const movement = event.deltaY * unit;
-      const maxScroll = Math.max(0, rack.scrollWidth - rack.clientWidth);
-      if ((movement > 0 && rack.scrollLeft >= maxScroll - 1)
-        || (movement < 0 && rack.scrollLeft <= 1) || !movement) return;
-      event.preventDefault();
-      programmaticSnapRef.current = false;
+      const amount = delta * unit;
+      if (!amount) return;
+
+      const now = performance.now();
+      if (now - wheelLastEventRef.current > 160
+        || Math.sign(wheelTotalRef.current) !== Math.sign(amount)) {
+        wheelTotalRef.current = 0;
+      }
+      wheelLastEventRef.current = now;
+      const direction = Math.sign(amount);
+      const center = rack.scrollLeft + geo.width / 2;
+      const nearest = geo.centers.reduce((best, point, index) =>
+        Math.abs(point - center) < Math.abs(geo.centers[best] - center) ? index : best, 0);
+      const next = Math.max(0, Math.min(geo.centers.length - 1, nearest + direction));
+      if (next === nearest && now >= wheelLockedUntilRef.current) return;
+
+      // This gesture belongs to the rack, not to vertical page scrolling.
+      // Prevent default before the lock check to swallow extra notch events.
+      if (event.cancelable) event.preventDefault();
+      if (now < wheelLockedUntilRef.current) return;
+
+      wheelTotalRef.current += amount;
+      // Mouse wheels usually emit >48px (or line/page units) per notch.
+      // Precision trackpads send small, frequent delta values instead.
+      const threshold = event.deltaMode === 0 ? 48 : 1;
+      if (Math.abs(wheelTotalRef.current) < threshold) return;
+      wheelTotalRef.current = 0;
+      wheelLockedUntilRef.current = now + 430;
+      programmaticSnapRef.current = true;
+      if (snapTimerRef.current !== null) clearTimeout(snapTimerRef.current);
       if (snapReleaseRef.current !== null) clearTimeout(snapReleaseRef.current);
-      rack.scrollLeft = Math.max(0, Math.min(maxScroll, rack.scrollLeft + movement));
-      scheduleSnap();
+      const left = Math.max(0, Math.min(
+        rack.scrollWidth - rack.clientWidth, geo.centers[next] - geo.width / 2,
+      ));
+      // A single browser-managed ease is smoother than repeated scrollLeft
+      // writes plus a delayed corrective animation.
+      rack.scrollTo({
+        left,
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+      });
+      snapReleaseRef.current = window.setTimeout(() => {
+        programmaticSnapRef.current = false;
+        updateActive();
+      }, 550);
     };
     rack.addEventListener("wheel", onWheel, { passive: false });
     return () => rack.removeEventListener("wheel", onWheel);
-  }, [scheduleSnap]);
+  }, [updateActive]);
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
     if (event.pointerType !== "mouse" || event.button !== 0) return;
