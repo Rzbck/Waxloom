@@ -10,6 +10,7 @@ import type {
   PreviewTrack,
 } from "./types";
 
+import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
 import "./discovery.css";
 
 type TasteEntry = {
@@ -22,7 +23,7 @@ type TasteState = Record<string, TasteEntry>;
 
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
-const BROWSER_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
+const BROWSER_CACHE_AGE_MS = 2 * 60 * 1000;
 const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SOURCE_REJECT_TAG = "__waxloom_source:not_music__";
 const SHELF_PAGE_SIZE = 12;
@@ -184,12 +185,13 @@ function asPreviewTrack(candidate: DiscoveryCandidate): PreviewTrack {
 }
 
 function DiscoveryTrackCard({
-  candidate, currentPreviewMbid, playing, phase, onPlay, onQuickAdd,
+  candidate, currentPreviewMbid, playing, phase, owned, onPlay, onQuickAdd,
 }: {
   candidate: DiscoveryCandidate;
   currentPreviewMbid: string | null;
   playing: boolean;
   phase?: ReturnType<typeof downloadPhase>;
+  owned: boolean | null;
   onPlay: (candidate: DiscoveryCandidate) => void;
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
 }) {
@@ -204,7 +206,7 @@ function DiscoveryTrackCard({
     <article className="discovery-cover-card">
       <button className="discovery-cover-art" type="button"
         onClick={() => onPlay(candidate)}
-        onPointerEnter={() => api.prefetchYoutubePreview(candidate.artist, candidate.title)}
+        onPointerEnter={() => api.prefetchDiscoveryAudio(candidate.recording_mbid, candidate.artist, candidate.title)}
         title={`Play ${candidate.artist} - ${candidate.title}`}
         aria-label={`Play ${candidate.title}`}>
         {cover ? <img src={cover} loading="lazy" alt="" onError={() => setCoverFailed(true)} /> : (
@@ -214,12 +216,14 @@ function DiscoveryTrackCard({
           {isPlaying ? "Ⅱ" : "▶"}
         </span>
       </button>
+      {owned === false && !complete && (
       <button type="button"
         className={`discovery-cover-quick-download ${busy ? "is-working" : ""} ${complete ? "is-complete" : ""} ${phase === "failed" ? "is-failed" : ""}`}
         aria-label={`${status} ${candidate.title}`} title={`${status}: ${candidate.title}`}
-        disabled={busy || complete} onClick={() => onQuickAdd(candidate)}>
+        disabled={busy} onClick={() => onQuickAdd(candidate)}>
         <span aria-hidden="true">{complete ? "✓" : busy ? "…" : phase === "failed" ? "↻" : "↓"}</span>
       </button>
+      )}
       <div className="discovery-cover-copy">
         <strong title={candidate.title}>{candidate.title}</strong>
         <small title={candidate.artist}>{candidate.artist}</small>
@@ -229,13 +233,14 @@ function DiscoveryTrackCard({
 }
 
 function DiscoveryShelf({
-  items, currentPreviewMbid, playing, rejectingMbid, taste, onPlayQueue, onQuickAdd, onFeedback, onBadSource,
+  items, currentPreviewMbid, playing, rejectingMbid, taste, ownership, onPlayQueue, onQuickAdd, onFeedback, onBadSource,
 }: {
   items: DiscoveryCandidate[];
   currentPreviewMbid: string | null;
   playing: boolean;
   rejectingMbid: string | null;
   taste: TasteState;
+  ownership: ReadonlyMap<string, "present" | "absent">;
   onPlayQueue: (items: DiscoveryCandidate[], candidate: DiscoveryCandidate) => void;
   onQuickAdd: (candidate: DiscoveryCandidate) => void;
   onFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => void;
@@ -250,6 +255,7 @@ function DiscoveryShelf({
   const phase = downloadPhase(candidate.recording_mbid);
   const busy = phase === "queued" || phase === "searching" || phase === "downloading";
   const complete = phase === "indexed" || phase === "existing";
+  const mayDownload = !complete && ownership.get(candidate.recording_mbid) === "absent";
   const liked = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
   return (
     <section className="discovery-cover-shelf" aria-label="All Discovery recommendations">
@@ -260,12 +266,19 @@ function DiscoveryShelf({
           records={items.map((item) => ({ title: item.title, artist: item.artist }))}
           followIndex={items.findIndex((item) => item.recording_mbid === currentPreviewMbid)}
           followRequest={followRequest}
-          onSelectionChange={(index) => { setSelectedIndex(index); setOptionsOpen(false); }}>
+          onSelectionChange={(index) => {
+             setSelectedIndex(index); setOptionsOpen(false);
+             // Warm the focused sleeve and its neighbour during browsing.
+             for (const item of items.slice(index, index + 2)) {
+               api.prefetchDiscoveryAudio(item.recording_mbid, item.artist, item.title);
+             }
+           }}>
           {items.map((item) => (
             <div key={item.recording_mbid} className="waxloom-vinyl-sleeve waxloom-vinyl-sleeve--discovery">
               <DiscoveryTrackCard candidate={item}
                 currentPreviewMbid={currentPreviewMbid} playing={playing}
                 phase={downloadPhase(item.recording_mbid)}
+                owned={ownership.get(item.recording_mbid) === undefined ? null : ownership.get(item.recording_mbid) === "present"}
                 onPlay={(track) => { setFollowRequest((value) => value + 1); onPlayQueue(items, track); }}
                 onQuickAdd={onQuickAdd} />
             </div>
@@ -281,10 +294,12 @@ function DiscoveryShelf({
         </div>
         {optionsOpen && (
           <div className="waxloom-vinyl-context-panel" role="group" aria-label={`Actions for ${candidate.title}`}>
-            <button type="button" disabled={busy || complete}
+            {mayDownload && (
+            <button type="button" disabled={busy}
               onClick={() => { onQuickAdd(candidate); setOptionsOpen(false); }}>
               {complete ? "✓ In library" : busy ? "Downloading…" : phase === "failed" ? "↻ Retry download" : "+ Download"}
             </button>
+            )}
             <button type="button" aria-pressed={liked === 1}
               onClick={() => { onFeedback(candidate, liked === 1 ? 0 : 1); setOptionsOpen(false); }}>
               {liked === 1 ? "✓ Liked" : "♡ More like this"}
@@ -318,6 +333,8 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const refreshFromRef = useRef<string | null>(null);
   const pageRef = useRef(0);
   const downloads = useDownloads();
+  const ownership = useLibraryPresence();
+  const playedOnceRef = useRef(false);
 
   const bundleRef = useRef(bundle);
   bundleRef.current = bundle;
@@ -365,6 +382,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             } else {
               setNotice("Preparing new discoveries. Your current tracks stay visible until more previews are ready.");
             }
+          } else if (!playedOnceRef.current && !refreshing
+              && current.generated_at !== value.generated_at && enough) {
+            // A stale browser shelf may reference previews no longer cached.
+            // Replace it before first Play, never disrupt a running preview.
+            setBundle(value);
+            storeBrowserFeed(value);
           } else if (value.generated_at === current.generated_at
               && value.external.items.some((item) => !current.external.items.some((previous) => previous.recording_mbid === item.recording_mbid))) {
             const seen = new Set(current.external.items.map((item) => item.recording_mbid));
@@ -444,22 +467,20 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     Math.max(12, Math.min(SHELF_TARGET_SIZE, (bundle?.external.items.length ?? 0) - 6)));
 
   useEffect(() => {
-    const source = bundle?.external.items ?? [];
-    if (source.length === 0) return;
-
-    const seen = new Set<string>();
-    const ordered: DiscoveryCandidate[] = [];
-    for (const candidate of [...recommendations, ...source]) {
-      if (seen.has(candidate.recording_mbid)) continue;
-      seen.add(candidate.recording_mbid);
-      ordered.push(candidate);
-    }
-
+    const visible = recommendations.slice(0, visibleTarget);
+    verifyLibraryPresence(visible);
+    // Warm only the first three audio streams via bounded HTTP byte ranges,
+    // not unrelated YouTube searches when a user hovers an album cover.
     const timer = window.setTimeout(() => {
-      void api.prewarmYoutubePreviews(ordered.slice(0, 60), 2);
-    }, 450);
+      for (const item of visible.slice(0, 3)) {
+        api.prefetchDiscoveryAudio(item.recording_mbid, item.artist, item.title);
+      }
+    }, 120);
     return () => window.clearTimeout(timer);
-  }, [bundle?.rotation_id, bundle?.generated_at]);
+  }, [recommendations, visibleTarget]);
+
+  // Provider audio is now warmed by the server independently. Running 60
+  // extra YouTube searches on entering Discovery starved initial playback.
 
   async function requestBackgroundRefresh() {
     if (refreshing) return;
@@ -497,6 +518,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   }
 
   function playDiscoveryQueue(items: DiscoveryCandidate[], candidate: DiscoveryCandidate) {
+    playedOnceRef.current = true;
     const queue = items.map(asPreviewTrack);
     const index = Math.max(0, items.findIndex((item) => item.recording_mbid === candidate.recording_mbid));
     player.playPreviewTracks(queue, index, onImportCandidate);
@@ -594,7 +616,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       {bundle ? (
         <DiscoveryShelf items={recommendations.slice(0, visibleTarget)}
           currentPreviewMbid={currentPreviewMbid} playing={player.playing}
-          rejectingMbid={rejecting} taste={taste}
+          rejectingMbid={rejecting} taste={taste} ownership={ownership}
           onPlayQueue={playDiscoveryQueue} onQuickAdd={addToLibrary}
           onFeedback={updateFeedback}
           onBadSource={(candidate) => void rejectBadSource(candidate)} />

@@ -1,5 +1,6 @@
 import { useSyncExternalStore, useState } from "react";
 import { api } from "./api";
+import { noteLibraryImport } from "./libraryPresence";
 import type { DiscoveryCandidate, PlaylistSummary } from "./types";
 
 export type DownloadPhase = "queued" | "searching" | "downloading" | "indexed" | "existing" | "manual" | "failed";
@@ -153,6 +154,7 @@ async function run(job: Job) {
     change(id, "downloading", "Downloading, preparing and indexing in Navidrome");
     const result = await api.youtubeImport(candidate.artist, candidate.title, best.url, null, true);
     const songId = result.song?.id;
+    noteLibraryImport(id);
     const completedPhase: DownloadPhase = result.status === "already_local" ? "existing" : "indexed";
     change(id, completedPhase,
       result.status === "already_local" ? "Already in your library"

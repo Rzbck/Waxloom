@@ -110,6 +110,7 @@ export type MobilePlayerPanelProps = {
   onDislike: () => void;
   onPlaylist: () => void;
   onMix: () => void;
+  showDownload?: boolean;
   downloadPhase?: "queued" | "searching" | "downloading" | "indexed" | "existing" | "manual" | "failed";
   onDownload: () => void;
   onQueue: () => void;
@@ -127,7 +128,7 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
     open, suspended, onClose, title, artist, album, cover, isPreview, playing, resolving,
     currentTime, duration, queue, index, shuffle, repeat, isFavorite, isDisliked, busy,
     feedback, playbackError, onPlayPause, onPrevious, onNext, onSeek,
-    onShuffle, onRepeat, onFavorite, onDislike, onPlaylist, onMix, downloadPhase, onDownload, onQueue, onQueueItem,
+    onShuffle, onRepeat, onFavorite, onDislike, onPlaylist, onMix, downloadPhase, showDownload, onDownload, onQueue, onQueueItem,
   } = props;
   const panelRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
