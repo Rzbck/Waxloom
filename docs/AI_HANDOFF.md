@@ -1,3 +1,11 @@
+## 2026-10-20 - Discovery New music only shows two previews: browser shelf recovery
+
+- ROOT CAUSE: GET /api/discovery/feed limits visible candidates to previews with cached, valid M4A. Immediately after a feed refresh, only a few tracks are audio-ready while the backend keeps warming more. The web accepted the first ready snapshot, even if only 2 tracks, and stopped polling. A two-track cached browser snapshot could then persist for the 24-hour cache period.
+- Web-only workstream fix/discovery-feed-fill-20261020, stacked on fix/vinyl-wheel-one-step-20261020. Manual New music waits until at least min(12, source-pool size) playable tracks are ready before replacing an existing shelf. The existing selection remains visible during preparation, and refresh failures preserve it and unlock the refresh button.
+- Cached/initial partial shelves stay hydrated by 5s polling until a usable selection is ready. New previews in the same rotation append without shuffling earlier covers or changing the currently playing title/Options.
+- AUTOMATED GATE PASS (synthetic): browser smoke seeds an older two-track cache and verifies progression 2 -> 7 -> 18 without reordering, then a new ready 2-track refresh is held while the 18-track shelf stays intact, then accepted when 18 are ready. It also validates preview likes, playlists/import mocks, desktop wheel/drag sync and 390/320 mobile behavior; no live music writes.
+- IMPLEMENTED / NOT USER VALIDATED: the backend still filters non-playable previews to avoid broken Play requests; source availability constrains the minimum actual ready track count. Confirm actual Safari/PC with New music after releasing. Backend and user media remain untouched.
+
 ## 2026-10-20 - Owner follow-up: wheel one-notch UX deployed
 
 - DEPLOYED / NOT USER VALIDATED: PC Bridge promoted web-only runtime source SHA 8538c797e955720da38e9fd1689971f8d83b936d from fix/vinyl-wheel-one-step-20261020, image waxloom-web:wheelstep-8538c79. Actual served JS /assets/index-DS3oQ4OI.js, HTTP 200 and API health OK; the API container image did not change. Main remains unchanged.

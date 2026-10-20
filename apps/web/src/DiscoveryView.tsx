@@ -27,6 +27,22 @@ const TASTE_KEY = "waxloom.discovery.taste.v1";
 const SOURCE_REJECT_TAG = "__waxloom_source:not_music__";
 const SHELF_PAGE_SIZE = 12;
 const SHELF_TARGET_SIZE = 20;
+// A ready server snapshot can expose only a couple of M4A previews while the
+// larger candidate pool is still warming. Do not lock that partial shelf.
+const MIN_READY_DISCOVERIES = 12;
+
+function readyTarget(value: DiscoveryFeedResponse): number {
+  const external = value.external as typeof value.external & { pool_count?: number };
+  const pool = external.pool_count;
+  return Math.min(MIN_READY_DISCOVERIES, Math.max(1,
+    typeof pool === "number" && pool > 0 ? pool : MIN_READY_DISCOVERIES,
+  ));
+}
+
+function feedVersion(value: DiscoveryFeedResponse | null): string {
+  return String(value?.rotation_id ?? "") + ":" + String(value?.generated_at ?? "");
+}
+
 
 function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
@@ -302,8 +318,14 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const refreshFromRef = useRef<string | null>(null);
   const downloads = useDownloads();
 
-  // Read status while waiting for a manually requested refresh, but never
-  // silently replace the crate when the server rotates its feed.
+  const bundleRef = useRef(bundle);
+  bundleRef.current = bundle;
+  const hydrationPending = bundle !== null
+    && bundle.external.items.length < readyTarget(bundle);
+
+  // Poll only when manually refreshing or when a persisted shelf was captured
+  // before its background preview downloads finished. Retain the current
+  // shelf until the new one has enough independently playable previews.
   useEffect(() => {
     let cancelled = false;
     const readFeed = async () => {
@@ -311,15 +333,48 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
         const value = await api.discoveryFeed();
         if (cancelled) return;
         setFeedStatus(value.status);
+        // The backend retains its previous snapshot on refresh failure.
+        // Do not leave New music disabled forever when that happens.
+        if (value.error) {
+          setError(value.error);
+          if (refreshing) {
+            setRefreshing(false);
+            setNotice("New music could not refresh. Your previous tracks are still available.");
+          }
+          return;
+        }
         if (value.profile && value.external.items.length > 0) {
-          const version = `${value.rotation_id ?? ""}:${value.generated_at ?? ""}`;
-          if (!bundle || (refreshing && version !== refreshFromRef.current && value.status === "ready")) {
-            storeBrowserFeed(value);
+          const current = bundleRef.current;
+          const enough = value.external.items.length >= readyTarget(value);
+          const newVersion = feedVersion(value);
+          const oldVersion = feedVersion(current);
+          const isFreshRefresh = refreshing && value.status === "ready"
+            && value.generated_at !== refreshFromRef.current;
+          if (!current) {
+            // First visit can display a partial batch, but must keep
+            // checking: "ready" refers to the feed, not preview readiness.
             setBundle(value);
-            if (refreshing) {
+            storeBrowserFeed(value);
+          } else if (refreshing) {
+            if (isFreshRefresh && enough) {
+              setBundle(value);
+              storeBrowserFeed(value);
               setRefreshing(false);
               setNotice("New Discovery selection is ready.");
+            } else {
+              setNotice("Preparing new discoveries. Your current tracks stay visible until more previews are ready.");
             }
+          } else if (value.external.items.length > current.external.items.length
+              && (newVersion === oldVersion || current.external.items.length < readyTarget(current))) {
+            const seen = new Set(current.external.items.map((item) => item.recording_mbid));
+            const extras = value.external.items.filter((item) => !seen.has(item.recording_mbid));
+            const updated: DiscoveryFeedResponse = newVersion === oldVersion
+              ? { ...value, external: { ...value.external,
+                  items: [...current.external.items, ...extras],
+                  count: current.external.items.length + extras.length } }
+              : value;
+            setBundle(updated);
+            storeBrowserFeed(updated);
           }
         } else if (value.error) {
           setError(value.error);
@@ -329,13 +384,12 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       }
     };
     void readFeed();
-    // Initial-feed recovery and explicitly requested refresh only.
-    if (!bundle || refreshing) {
+    if (!bundle || refreshing || hydrationPending) {
       const timer = window.setInterval(() => { void readFeed(); }, 5_000);
       return () => { cancelled = true; window.clearInterval(timer); };
     }
     return () => { cancelled = true; };
-  }, [Boolean(bundle), refreshing]);
+  }, [Boolean(bundle), refreshing, hydrationPending]);
 
   useEffect(() => {
     const onTaste = () => setTaste(readTaste());
@@ -349,10 +403,38 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
 
   // Once displayed, changing taste never shuffles or removes covers mid-listen.
   // Fresh ranking is applied when a newly requested Discovery feed is accepted.
-  const recommendations = useMemo(
-    () => diversify(activeCandidates(bundle?.external.items ?? [], readTaste()), 3),
-    [bundle],
-  );
+  const stableRecommendationsRef = useRef<{ version: string; items: DiscoveryCandidate[] } | null>(null);
+  const recommendations = useMemo(() => {
+    const raw = bundle?.external.items ?? [];
+    const version = feedVersion(bundle);
+    const ranked = diversify(activeCandidates(raw, readTaste()), 3);
+    const previous = stableRecommendationsRef.current;
+    if (!previous || previous.version !== version) {
+      stableRecommendationsRef.current = { version, items: ranked };
+      return ranked;
+    }
+    // New warmed previews must be appended, not jump ahead of a playing
+    // cover and desynchronize the player's vinyl, title and Options.
+    const allowed = new Map(raw.map((candidate) => [candidate.recording_mbid, candidate]));
+    const kept = previous.items
+      .filter((item) => allowed.has(item.recording_mbid))
+      .map((item) => allowed.get(item.recording_mbid) ?? item);
+    const existing = new Set(kept.map((item) => item.recording_mbid));
+    const byArtist = new Map<string, number>();
+    for (const item of kept) {
+      const artist = folded(item.artist);
+      byArtist.set(artist, (byArtist.get(artist) ?? 0) + 1);
+    }
+    for (const item of ranked) {
+      const artist = folded(item.artist);
+      if (existing.has(item.recording_mbid) || (byArtist.get(artist) ?? 0) >= 3) continue;
+      kept.push(item);
+      existing.add(item.recording_mbid);
+      byArtist.set(artist, (byArtist.get(artist) ?? 0) + 1);
+    }
+    stableRecommendationsRef.current = { version, items: kept };
+    return kept;
+  }, [bundle]);
 
   useEffect(() => {
     const source = bundle?.external.items ?? [];
@@ -376,7 +458,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     setNotice(null);
     setError(null);
     try {
-      refreshFromRef.current = `${bundle?.rotation_id ?? ""}:${bundle?.generated_at ?? ""}`;
+      refreshFromRef.current = bundle?.generated_at ?? null;
       await api.refreshDiscoveryFeed();
       setRefreshing(true);
       setFeedStatus("refreshing");
@@ -471,7 +553,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       <header className="discovery-fit-header">
         <div>
           <strong>Discovery</strong>
-          <span>{recommendations.length} tracks · {feedStatus === "ready" ? "ready" : feedStatus} · {formatFeedTime(bundle?.generated_at)}</span>
+          <span>{recommendations.length} tracks · {refreshing ? "preparing new music" : hydrationPending ? "preparing more previews" : feedStatus === "ready" ? "ready" : feedStatus} · {formatFeedTime(bundle?.generated_at)}</span>
         </div>
         <div className="discovery-fit-controls">
           {downloads.some((item) => ["queued", "searching", "downloading"].includes(item.phase))
