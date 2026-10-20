@@ -1,3 +1,10 @@
+## 2026-10-20 - Owner-directed fullstack Discovery reliability deployment
+
+- DEPLOYED / NOT USER VALIDATED: exact source SHA 7de4e550a518ed7c080e3dcf73702716a5c56c3b, production images waxloom-api:stability-7de4e55 and waxloom-web:stability-7de4e55, expected JS /assets/index-DqGCZsX1.js. Deployed API first then web through guarded compose script with rollback after isolated image smokes. No merge to main.
+- AUTOMATED GATE PASS: source SHA web build + synthetic headless Chrome QA (instant alternate ready page, Less replacing to preserve 20, player preview error/like, imports+playlist mocks, mobile, vinyl mouse wheel and caption), isolated Python Docker suite 19/19, repository security gate PASS. Standalone new API container health+safe failure counters, web proxy HTTP 200. Live API healthy, visible ready reservoir page0/page1 both had 29 distinct first candidates (127 raw pool), active cache had 29 ready of 41 with background 2 warming and 10 queued. Real three ready M4A preview HTTP byte-range checks all returned 206 with 2 bytes. API health check healthy; new API logs initial observation had zero HTTP 500/502.
+- ROLLBACK: former waxloom-api:ad285da and waxloom-web:feedfill-6c0fd8f retained; production compose and nginx originals backed up outside Git. No changes to user media library or credentials. Only code/service image promotion.
+- KNOWN LIMIT / NOT USER VALIDATED: some external source downloads are genuinely unavailable. Production aggregated failure diagnostics showed 1 missing verified source and 2 provider download failures; those need manual alternate verified source in Imports, not unverified automatic retries. Physical user Play/Pause UI feel and real failed import track still require confirmation; do not claim every source plays.
+
 ## 2026-10-20 - Discovery supply + playback reliability (API and web candidate)
 
 - Branch fix/discovery-stability-20261020 stacked on fix/discovery-feed-fill-20261020; dedicated worktree. Production deployment, image provenance and rollback must be recorded separately. Do not merge to main implicitly.
