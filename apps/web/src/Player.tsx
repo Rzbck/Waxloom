@@ -1,3 +1,4 @@
+import { prewarmedUrlOrStream } from "./previewWarmCache";
 import {
   createContext,
   type ReactNode,
@@ -364,7 +365,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     previewManualImportRef.current = onManualImport ?? null;
     const preparedTracks = tracks.map((track) => ({
       ...track,
-      preview_url: api.previewStreamUrl(track.recording_mbid, track.artist, track.title),
+      // If this verified M4A was fully buffered before click, hand it to the
+      // player immediately via an in-memory object URL. Otherwise stream the
+      // existing backend URL without awaiting any speculative download.
+      preview_url: track.recording_mbid === tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))]?.recording_mbid
+        ? (prewarmedUrlOrStream(track.recording_mbid) ?? api.previewStreamUrl(track.recording_mbid, track.artist, track.title))
+        : api.previewStreamUrl(track.recording_mbid, track.artist, track.title),
     }));
     const safeIndex = Math.max(0, Math.min(startIndex, preparedTracks.length - 1));
     const target = preparedTracks[safeIndex];
@@ -383,6 +389,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     previewStartAtZeroRef.current = true;
     wantsPlaybackRef.current = true;
+    performance.mark("waxloom-discovery-play-click");
     // Exactly one source switch, performed by the preview effect AFTER
     // React commits mode/index. Calling audio.play() here as well caused
     // duplicate play/pause events and stale AbortError state updates.
@@ -860,7 +867,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       {children}
       <audio
         ref={audioRef}
-        preload="none"
+        preload={mode === "preview" ? "auto" : "none"}
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
@@ -884,7 +891,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           else audioRef.current?.pause();
         }}
         onPlaying={() => {
-          if (mode === "preview") setPreviewError(null);
+          if (mode === "preview") {
+            setPreviewError(null);
+            try {
+              performance.measure("waxloom-discovery-time-to-playing", "waxloom-discovery-play-click");
+            } catch { /* mark absent after audio resume */ }
+          }
         }}
         onPause={() => {
           if (!wantsPlaybackRef.current) setPlaying(false);

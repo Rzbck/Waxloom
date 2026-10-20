@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 import tempfile
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
@@ -489,12 +490,26 @@ async def discovery_preview_media(
             candidate = {"recording_mbid": recording_mbid, "artist": artist, "title": title}
     if candidate is None:
         raise HTTPException(status_code=404, detail="Discovery preview is not in the active rotation.")
-    entry = await preview_cache().ensure_candidate(candidate, foreground=True)
+    # Hot path: already prepared M4A must never wait on YouTube search,
+    # downloader locks or ffmpeg. Browsable Discovery is READY-only.
+    cache = preview_cache()
+    started = time.perf_counter()
+    ready_method = getattr(cache, "ready", None)
+    entry = ready_method(recording_mbid) if callable(ready_method) else None
+    lookup_ms = (time.perf_counter() - started) * 1000
+    if entry is None:
+        entry = await cache.ensure_candidate(candidate, foreground=True)
     if entry is None:
         raise HTTPException(status_code=502, detail="Discovery preview could not be prepared.")
+    elapsed = (time.perf_counter() - started) * 1000
     return FileResponse(
         entry.playback_path,
-        headers={"Cache-Control": "private, max-age=300"},
+        headers={
+            "Cache-Control": "private, max-age=300",
+            "Server-Timing": f"cache;dur={lookup_ms:.1f},prepare;dur={elapsed:.1f}",
+            "X-Content-Type-Options": "nosniff",
+        },
+        media_type="audio/mp4",
     )
 
 

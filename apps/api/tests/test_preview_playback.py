@@ -98,3 +98,33 @@ async def test_unavailable_rotated_preview_reports_precise_failure(
         )
         assert response.status_code == 502
         assert response.json()["detail"] == "Discovery preview could not be prepared."
+
+@pytest.mark.asyncio
+async def test_already_ready_m4a_never_waits_for_provider_and_has_server_timing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    media = tmp_path / "prepared.m4a"
+    media.write_bytes(b"A" * 131072)
+
+    class ReadyCache:
+        def candidate(self, _id: str):
+            return {"recording_mbid": "synthetic-fast", "artist": "Synthetic", "title": "Immediate"}
+
+        def ready(self, _id: str):
+            return SimpleNamespace(playback_path=media)
+
+        async def ensure_candidate(self, _candidate: dict, *, foreground: bool = False):
+            raise AssertionError("ready media must not re-enter the downloader")
+
+    monkeypatch.setattr(main, "preview_cache", lambda: ReadyCache())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main.app), base_url="http://test",
+    ) as client:
+        result = await client.get(
+            "/api/discovery/previews/synthetic-fast", headers={"Range": "bytes=0-1"},
+        )
+    assert result.status_code == 206
+    assert result.headers["content-type"].startswith("audio/mp4")
+    assert "cache;dur=" in result.headers["server-timing"]
+    assert "prepare;dur=" in result.headers["server-timing"]
+    assert result.content == b"AA"
