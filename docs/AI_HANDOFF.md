@@ -1,3 +1,11 @@
+## 2026-10-20 - Single-motion vinyl wheel deployed to web production
+
+- DEPLOYED / NOT USER VALIDATED: exact runtime web source SHA e2551bd8f091313ec0f2fa3c12d78bffd8e36218 (workstream fix/vinyl-single-motion-20261020), image waxloom-web:onemotion-e2551bd, served JS /assets/index-DInpecTf.js. Live UI and asset HTTP 200. API image waxloom-api:stability-7de4e55 unchanged; API health OK / Docker health healthy at final verification. No merge to main, no media changed.
+- AUTOMATED GATE PASS: exact SHA TypeScript/Vite build, isolated mocked Chrome full playback/vinyl/mobile QA, no native scrollTo calls, no desktop pseudo-disc scroll-linked animations, 47 frames/28 distinct positions/0 reverse frames in four-notch fling, final center 0px. Native iOS touch and drag untouched. Security gate passed.
+- ROOT CAUSE FIX: single RAF critically damped scroll controller shared by wheel/arrow/pointer-release snaps, drop competing native smooth/correction timers; count changes cannot interrupt a fling or cause player-follow recenter. Disable expensive desktop pseudo-disc view timeline. Prefetch focused preview audio only after 220ms settle instead of every intermediate vinyl.
+- ROLLBACK: former web image waxloom-web:fastplay-2641573 retained; pre-rollout compose and nginx snapshots saved outside Git. API briefly reported intermittent timeout/health degradation during isolated smoke and recovered to healthy before deployment; do not mistake that external API issue for motion logic.
+- PENDING USER VALIDATION: tactile real desktop wheel fluidity, especially very fast physical flings on actual hardware. No claim that subjective smoothness is proven by synthetic Chrome alone.
+
 ## 2026-10-20 - Vinyl wheel stutter: remove competing motion controllers
 
 - Workstream fix/vinyl-single-motion-20261020 in its own clean worktree, stacked on prior deployed Discovery web source. Runtime source SHA and deployment state recorded in a follow-up entry; do not merge main.
