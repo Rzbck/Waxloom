@@ -1,3 +1,9 @@
+## 2026-10-20 - Owner-directed web production rollout: smooth vinyl snap and player actions
+
+- DEPLOYED / NOT USER VALIDATED: owner explicitly instructed deployment to production via PC Bridge. Runtime source SHA: 58532bc87001217fd1e899b769a249081be9ceb0 (branch fix/vinyl-settled-snap-player-20261020). Production image waxloom-web:snap-58532bc serves the verified JS asset, HTTP 200, API health OK; API image unchanged (waxloom-api:ad285da). No merge to main.
+- AUTOMATED GATE PASS: isolated 1400px Chrome mouse wheel and physical pointer release 0px nearest-cover offset, 0px title/Options offset; full preview likes, safe mocked imports and playlists, mobile 390/320px; TypeScript/Vite build, Docker clean git-archive build, isolated proxy smoke, repo security gate. Actual tactile feedback and browser local file download still need user verification.
+- ROLLBACK: old web image waxloom-web:vinylsync-86762fd preserved. Production compose and nginx snapshots saved outside Git. No API rebuild and no user media touched.
+
 ## 2026-10-20 - Desktop vinyl settle, aligned captions and direct downloads
 
 - Workstream: fix/vinyl-settled-snap-player-20261020, based on 9ad58f4 (current web production ancestry). Only dedicated isolated worktree changed; earlier worktrees untouched.
