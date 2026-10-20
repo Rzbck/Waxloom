@@ -321,3 +321,68 @@
     pointer-events: none;
   }
 }
+
+/* Selection must be on the true center axis, not shifted by the unequal
+   space taken by counter and arrow controls. Applies to every vinyl shelf. */
+.waxloom-vinyl-display .waxloom-vinyl-controls {
+  display: grid !important;
+  grid-template-columns: minmax(44px, 1fr) minmax(0, 320px) minmax(44px, 1fr) !important;
+  align-items: center !important;
+  width: 100%;
+}
+.waxloom-vinyl-display .waxloom-vinyl-count {
+  grid-column: 1;
+  justify-self: start;
+  min-width: 0;
+}
+.waxloom-vinyl-display .waxloom-vinyl-selected {
+  grid-column: 2;
+  justify-self: center;
+  align-items: center;
+  width: 100%;
+  max-width: 320px !important;
+  min-width: 0;
+  flex: none !important;
+  text-align: center !important;
+}
+.waxloom-vinyl-display .waxloom-vinyl-selected strong,
+.waxloom-vinyl-display .waxloom-vinyl-selected small,
+.waxloom-vinyl-display .waxloom-vinyl-selected .waxloom-marquee {
+  text-align: center !important;
+}
+.waxloom-vinyl-display .waxloom-vinyl-arrows {
+  grid-column: 3;
+  justify-self: end;
+}
+.waxloom-vinyl-context {
+  width: 100%;
+  margin-inline: auto;
+  justify-content: center !important;
+  text-align: center;
+}
+
+/* Desktop thumbs (green/red) and direct Download for any song. */
+.player-tools .player-quick-action {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 35px;
+  width: 35px;
+  min-width: 35px;
+  height: 35px;
+  padding: 0;
+  border: 1px solid rgba(202, 170, 220, .18);
+  border-radius: 9px;
+  background: rgba(255,255,255,.035);
+}
+.player-tools .player-like-action { color: #79d895; }
+.player-tools .player-dislike-action { color: #ef8991; }
+.player-tools .player-like-action.is-favorite {
+  background: rgba(65, 156, 99, .25);
+  border-color: #65c583;
+}
+.player-tools .player-dislike-action.is-less {
+  background: rgba(187, 63, 77, .25);
+  border-color: #ed707d;
+}
+.player-tools .player-download-action { color: #d2b6fb; }
+.player-tools .player-download-action:disabled { opacity: .5; cursor: default; }
