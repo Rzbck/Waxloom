@@ -1,3 +1,10 @@
+## 2026-10-20 - Discovery New music partial-shelf fix promoted to web production
+
+- DEPLOYED / NOT USER VALIDATED: owner observed only two Discovery songs after New music. Exact runtime web source SHA 6c0fd8fc56bdb78418c7c87d364ca50240242fd2 on fix/discovery-feed-fill-20261020; image waxloom-web:feedfill-6c0fd8f. Production web HTTP 200, expected built JS served, API health OK and API container image unchanged. Not merged to main.
+- AUTOMATED GATE PASS: clean exact-SHA web build, isolated Chrome synthetic 2 -> 7 -> 18 browser cache hydration, new ready-two feed held until >= 12 previews ready, existing wheel/drag/playback/like/playlist/mobile regression, repo security gate, tracked-only Docker archive and isolated nginx/API image smoke.
+- ROLLBACK: previous web image waxloom-web:wheelstep-8538c79 retained. Compose and nginx snapshots stored outside Git. No library files or real playlist content changed by the QA/deployment.
+- NEXT TEST: owner hard-refreshes Discovery and tries New music, allowing time for source previews to warm. Fewer tracks can remain when the backend cannot prepare audio; the web does not fabricate playable previews.
+
 ## 2026-10-20 - Discovery New music only shows two previews: browser shelf recovery
 
 - ROOT CAUSE: GET /api/discovery/feed limits visible candidates to previews with cached, valid M4A. Immediately after a feed refresh, only a few tracks are audio-ready while the backend keeps warming more. The web accepted the first ready snapshot, even if only 2 tracks, and stopped polling. A two-track cached browser snapshot could then persist for the 24-hour cache period.
