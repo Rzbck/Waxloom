@@ -134,7 +134,7 @@ discovery_feed_engine = DiscoveryFeedEngine(
 
 _preview_cache = DiscoveryPreviewCache(
     youtube=youtube_provider(),
-    feed_factory=discovery_feed_engine.feed,
+    feed_factory=lambda: discovery_feed_engine.feed(warm_pool=True),
     state_dir=waxloom_state_dir(),
 )
 
@@ -409,11 +409,11 @@ async def automatic_discovery(
 
 
 @app.get("/api/discovery/feed")
-async def discovery_feed() -> dict[str, object]:
+async def discovery_feed(page: int = Query(default=0, ge=0, le=999)) -> dict[str, object]:
     require_navidrome()
-    feed = discovery_feed_engine.feed()
-    await preview_cache().sync_feed(feed)
-    return discovery_feed_engine.feed(playable_only=True)
+    # The autonomous preview-cache runner warms current + upcoming rotations.
+    # GET only reads the ready reserve: page browsing must remain cheap.
+    return discovery_feed_engine.feed(playable_only=True, page=page)
 
 
 @app.get("/api/discovery/feed/status")

@@ -20,7 +20,7 @@ _DEFAULT_MAX_BYTES = 6 * 1024 * 1024 * 1024
 _RETRY_BACKOFF_SECONDS = 10 * 60
 _POLL_SECONDS = 20.0
 _CACHE_VERSION = 2
-_STALE_GRACE_SECONDS = 15 * 60
+_STALE_GRACE_SECONDS = 75 * 60
 
 
 def _normalize(value: str) -> str:
@@ -126,6 +126,7 @@ class DiscoveryPreviewCache:
         self._locks: dict[str, asyncio.Lock] = {}
         self._blocked: set[str] = set()
         self._failed_until: dict[str, float] = {}
+        self._failure_reasons: dict[str, str] = {}
         self._runner: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
 
@@ -181,6 +182,12 @@ class DiscoveryPreviewCache:
             "warming": self._warming_now,
             "queued": max(0, len(self._warm_tasks) - self._warming_now),
             "failed_recent": sum(1 for value in self._failed_until.values() if value > time.time()),
+            "no_verified_source": sum(1 for key, reason in self._failure_reasons.items()
+                if reason == "source" and self._failed_until.get(key, 0) > time.time()),
+            "download_failed": sum(1 for key, reason in self._failure_reasons.items()
+                if reason == "download" and self._failed_until.get(key, 0) > time.time()),
+            "conversion_failed": sum(1 for key, reason in self._failure_reasons.items()
+                if reason == "conversion" and self._failed_until.get(key, 0) > time.time()),
             "bytes": total_bytes,
             "max_bytes": self.max_bytes,
         }
@@ -323,6 +330,7 @@ class DiscoveryPreviewCache:
             if not foreground and await asyncio.to_thread(self._cache_bytes) >= self.max_bytes:
                 return None
 
+            stage = "source"
             try:
                 source_candidate = await self._source_for(candidate)
                 if source_candidate is None:
@@ -331,6 +339,7 @@ class DiscoveryPreviewCache:
                 entry_dir = self._entry_dir(recording_mbid)
                 await asyncio.to_thread(shutil.rmtree, entry_dir, True)
                 payload_root = entry_dir / "payload"
+                stage = "download"
                 source_path = await asyncio.to_thread(
                     self.youtube.download_selected,
                     artist=artist,
@@ -338,6 +347,7 @@ class DiscoveryPreviewCache:
                     source_url=source_url,
                     output_root=payload_root,
                 )
+                stage = "conversion"
                 playback_path = await asyncio.to_thread(self._playback_compatible, source_path, entry_dir)
 
                 if recording_mbid in self._blocked or (
@@ -374,10 +384,12 @@ class DiscoveryPreviewCache:
                 temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
                 temporary.replace(metadata)
                 self._failed_until.pop(recording_mbid, None)
+                self._failure_reasons.pop(recording_mbid, None)
                 return self.ready(recording_mbid)
             except asyncio.CancelledError:
                 raise
             except Exception:
+                self._failure_reasons[recording_mbid] = stage
                 self._failed_until[recording_mbid] = time.time() + _RETRY_BACKOFF_SECONDS
                 await asyncio.to_thread(shutil.rmtree, self._entry_dir(recording_mbid), True)
                 return None
@@ -472,7 +484,12 @@ class DiscoveryPreviewCache:
             self._cancel_candidate_tasks(mbid)
             await asyncio.to_thread(shutil.rmtree, self._entry_dir(mbid), True)
 
-        retained = set(active) | set(self._recent)
+        # A finished preview belongs to the background ready reserve even
+        # if the vinyl is off-screen in the current twenty-minute rotation.
+        reserve_ids = external.get("reserve_ids") if isinstance(external, dict) else []
+        retained = set(active) | set(self._recent) | {
+            key for key in reserve_ids if isinstance(key, str) and key
+        }
         await asyncio.to_thread(self._remove_unknown_entries, retained)
 
         for mbid, candidate in active.items():

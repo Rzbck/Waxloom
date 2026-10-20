@@ -316,6 +316,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const [taste, setTaste] = useState<TasteState>(() => readTaste());
   const [refreshing, setRefreshing] = useState(false);
   const refreshFromRef = useRef<string | null>(null);
+  const pageRef = useRef(0);
   const downloads = useDownloads();
 
   const bundleRef = useRef(bundle);
@@ -364,15 +365,16 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
             } else {
               setNotice("Preparing new discoveries. Your current tracks stay visible until more previews are ready.");
             }
-          } else if (value.external.items.length > current.external.items.length
-              && (newVersion === oldVersion || current.external.items.length < readyTarget(current))) {
+          } else if (value.generated_at === current.generated_at
+              && value.external.items.some((item) => !current.external.items.some((previous) => previous.recording_mbid === item.recording_mbid))) {
             const seen = new Set(current.external.items.map((item) => item.recording_mbid));
             const extras = value.external.items.filter((item) => !seen.has(item.recording_mbid));
-            const updated: DiscoveryFeedResponse = newVersion === oldVersion
-              ? { ...value, external: { ...value.external,
-                  items: [...current.external.items, ...extras],
-                  count: current.external.items.length + extras.length } }
-              : value;
+            const updated: DiscoveryFeedResponse = {
+              ...current, external: { ...current.external,
+                items: [...current.external.items, ...extras],
+                count: current.external.items.length + extras.length,
+              },
+            };
             setBundle(updated);
             storeBrowserFeed(updated);
           }
@@ -384,11 +386,10 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       }
     };
     void readFeed();
-    if (!bundle || refreshing || hydrationPending) {
-      const timer = window.setInterval(() => { void readFeed(); }, 5_000);
-      return () => { cancelled = true; window.clearInterval(timer); };
-    }
-    return () => { cancelled = true; };
+    // Background preview preparation continues even when the page is closed.
+    // Periodic inexpensive reads keep the visible reserve freshly populated.
+    const timer = window.setInterval(() => { void readFeed(); }, refreshing || hydrationPending ? 5_000 : 12_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [Boolean(bundle), refreshing, hydrationPending]);
 
   useEffect(() => {
@@ -407,7 +408,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   const recommendations = useMemo(() => {
     const raw = bundle?.external.items ?? [];
     const version = feedVersion(bundle);
-    const ranked = diversify(activeCandidates(raw, readTaste()), 3);
+    const ranked = diversify(activeCandidates(raw, taste), 3);
     const previous = stableRecommendationsRef.current;
     if (!previous || previous.version !== version) {
       stableRecommendationsRef.current = { version, items: ranked };
@@ -415,7 +416,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     }
     // New warmed previews must be appended, not jump ahead of a playing
     // cover and desynchronize the player's vinyl, title and Options.
-    const allowed = new Map(raw.map((candidate) => [candidate.recording_mbid, candidate]));
+    const allowed = new Map(ranked.map((candidate) => [candidate.recording_mbid, candidate]));
     const kept = previous.items
       .filter((item) => allowed.has(item.recording_mbid))
       .map((item) => allowed.get(item.recording_mbid) ?? item);
@@ -434,7 +435,13 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     }
     stableRecommendationsRef.current = { version, items: kept };
     return kept;
-  }, [bundle]);
+  }, [bundle, taste]);
+  // Keep a small playable reserve off-screen: Less replaces its sleeve
+  // immediately and New music can offer unseen tracks without a download.
+  // Reserve size is based on the raw pool, not the filtered count, so
+  // removing one disliked song cannot make the shelf itself shrink.
+  const visibleTarget = Math.min(recommendations.length,
+    Math.max(12, Math.min(SHELF_TARGET_SIZE, (bundle?.external.items.length ?? 0) - 6)));
 
   useEffect(() => {
     const source = bundle?.external.items ?? [];
@@ -455,16 +462,37 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   }, [bundle?.rotation_id, bundle?.generated_at]);
 
   async function requestBackgroundRefresh() {
+    if (refreshing) return;
     setNotice(null);
     setError(null);
+    const current = bundleRef.current;
+    const displayed = new Set(recommendations.slice(0, visibleTarget)
+      .map((item) => item.recording_mbid));
     try {
-      refreshFromRef.current = bundle?.generated_at ?? null;
+      // Browsing the prewarmed reserve is instant and does not re-run
+      // multi-provider harvesting with every New music click.
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const page = ++pageRef.current;
+        const value = await api.discoveryFeed(page);
+        const novel = value.external.items
+          .slice(0, SHELF_TARGET_SIZE).filter((item) => !displayed.has(item.recording_mbid));
+        if (novel.length >= Math.min(6, Math.max(1, value.external.items.length - SHELF_TARGET_SIZE))) {
+          setBundle(value);
+          storeBrowserFeed(value);
+          setFeedStatus(value.status);
+          setNotice("New music from the ready-to-play reserve.");
+          return;
+        }
+      }
+      // The finite ready-to-play reserve was exhausted. Preserve the
+      // current shelf while the background provider harvest runs.
+      refreshFromRef.current = current?.generated_at ?? null;
       await api.refreshDiscoveryFeed();
       setRefreshing(true);
       setFeedStatus("refreshing");
-      setNotice("Preparing new discoveries. Your current tracks stay in place until the new selection is ready.");
+      setNotice("More music is being prepared in the background. Keep listening to your current selection.");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not queue a Discovery refresh.");
+      setError(caught instanceof Error ? caught.message : "Could not browse new Discovery music.");
     }
   }
 
@@ -553,7 +581,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       <header className="discovery-fit-header">
         <div>
           <strong>Discovery</strong>
-          <span>{recommendations.length} tracks · {refreshing ? "preparing new music" : hydrationPending ? "preparing more previews" : feedStatus === "ready" ? "ready" : feedStatus} · {formatFeedTime(bundle?.generated_at)}</span>
+          <span>{visibleTarget} tracks · {refreshing ? "preparing new music" : hydrationPending ? "preparing more previews" : feedStatus === "ready" ? "ready" : feedStatus} · {formatFeedTime(bundle?.generated_at)}</span>
         </div>
         <div className="discovery-fit-controls">
           {downloads.some((item) => ["queued", "searching", "downloading"].includes(item.phase))
@@ -564,7 +592,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
       {error && <div className="discovery-fit-message is-error">{error}</div>}
       {notice && <div className="discovery-fit-message">{notice}</div>}
       {bundle ? (
-        <DiscoveryShelf items={recommendations}
+        <DiscoveryShelf items={recommendations.slice(0, visibleTarget)}
           currentPreviewMbid={currentPreviewMbid} playing={player.playing}
           rejectingMbid={rejecting} taste={taste}
           onPlayQueue={playDiscoveryQueue} onQuickAdd={addToLibrary}

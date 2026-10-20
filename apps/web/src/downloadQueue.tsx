@@ -162,7 +162,17 @@ async function run(job: Job) {
     );
     if (hasPlaylistTarget(id)) await finishPlaylists(candidate, songId, completedPhase);
   } catch (error) {
-    change(id, "failed", error instanceof Error ? error.message : "Download failed");
+    const detail = error instanceof Error ? error.message : "Download failed";
+    if (/Import failed|No verified music source|\b502\b/i.test(detail)) {
+      // A failed automatic provider source must never silently retry the
+      // same possibly incorrect recording. Let the listener select a
+      // verified alternative; keep the failed state actionable.
+      change(id, "manual", "Automatic source failed. Select another source in Imports.");
+      playlistTargets.delete(id);
+      manual(candidate);
+    } else {
+      change(id, "failed", detail);
+    }
   }
 }
 function pump() {

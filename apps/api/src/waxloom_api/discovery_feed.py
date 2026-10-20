@@ -439,8 +439,11 @@ class DiscoveryFeedEngine:
 
         return selected
 
-    def _rotated_items(self, items: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-        slot = int(time.time() // self._rotation_seconds)
+    def _rotated_items(
+        self, items: list[dict[str, Any]], slot: int | None = None,
+    ) -> tuple[list[dict[str, Any]], int]:
+        if slot is None:
+            slot = int(time.time() // self._rotation_seconds)
         rotation_items = self._rotation_pool(items, slot)
 
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -507,7 +510,9 @@ class DiscoveryFeedEngine:
 
         return output[: self._visible_size], slot
 
-    def feed(self, *, playable_only: bool = False) -> dict[str, Any]:
+    def feed(
+        self, *, playable_only: bool = False, warm_pool: bool = False, page: int = 0,
+    ) -> dict[str, Any]:
         if self._snapshot is None:
             return {
                 "status": self._status,
@@ -525,22 +530,66 @@ class DiscoveryFeedEngine:
         external = snapshot.setdefault("external", {})
         source_items = [item for item in external.get("items") or [] if isinstance(item, dict)]
         visible, rotation_id = self._rotated_items(source_items)
-
         before_playable_filter = len(visible)
-        if playable_only:
-            visible = [
-                item
-                for item in visible
-                if self._preview_ready(item)
+        page = max(0, min(page, 999))
+
+        if warm_pool:
+            # Warm the CURRENT and NEXT rotation while the application is
+            # idle. Do not wait until the rotation replaces the visible list.
+            # Warm the full current view plus at most 12 from the next rotation.
+            next_items, _ = self._rotated_items(source_items, rotation_id + 1)
+            seen: set[str] = set()
+            warm: list[dict[str, Any]] = []
+            warm_limit = min(72, len(visible) + 12)
+            for item in [*visible, *next_items]:
+                key = str(item.get("recording_mbid") or "")
+                if key and key not in seen:
+                    warm.append(item)
+                    seen.add(key)
+                if len(warm) >= warm_limit:
+                    break
+            visible = warm
+            # Preserve completed previews from the full candidate pool.
+            # Only the prioritised rows trigger active network warming.
+            external["reserve_ids"] = [
+                str(item.get("recording_mbid") or "") for item in source_items
             ]
+        elif playable_only:
+            # Every GET must expose the entire READY reserve (not only the
+            # chosen 20-minute rotation), so New music and dislikes can
+            # immediately replace a cover with already-playable audio.
+            seen: set[str] = set()
+            playable: list[dict[str, Any]] = []
+            candidates = [*visible, *sorted(source_items, key=self._candidate_score, reverse=True)]
+            for item in candidates:
+                key = str(item.get("recording_mbid") or "")
+                artist = str(item.get("artist") or "")
+                title = str(item.get("title") or "")
+                if not key or key in seen or self._feedback.exact(key) < 0:
+                    continue
+                if self._feedback.was_imported(key, artist=artist, title=title):
+                    continue
+                seen.add(key)
+                if self._preview_ready(item):
+                    playable.append(self._feedback.annotate(item))
+            if playable and page:
+                # An alternative page is instant and never requires a fresh
+                # multi-provider refresh. Pages can overlap when reserve is
+                # smaller than the visible shelf; no fake audio is generated.
+                offset = (page * 12) % len(playable)
+                playable = playable[offset:] + playable[:offset]
+            visible = playable[:self._visible_size]
+            if page:
+                rotation_id = rotation_id * 1000 + page
 
         external["items"] = visible
         external["count"] = len(visible)
         external["pool_count"] = len(source_items)
         external["unplayable_hidden"] = (
-            before_playable_filter - len(visible)
-            if playable_only
-            else 0
+            max(0, before_playable_filter - sum(
+                1 for item in self._rotated_items(source_items)[0] if self._preview_ready(item)
+            ))
+            if playable_only else 0
         )
 
         next_refresh = None

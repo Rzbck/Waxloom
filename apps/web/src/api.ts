@@ -250,7 +250,7 @@ export const api = {
       result_count: resultCount,
     }),
   }),
-  discoveryFeed: () => request<DiscoveryFeedResponse>("/api/discovery/feed"),
+  discoveryFeed: (page = 0) => request<DiscoveryFeedResponse>("/api/discovery/feed?page=" + Math.max(0, Math.floor(page))),
   discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
   refreshDiscoveryFeed: () => request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
   discoveryFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => request<{ ok: boolean; likes: number; dislikes: number; total: number }>("/api/discovery/feedback", {
