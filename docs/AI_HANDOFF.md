@@ -1,3 +1,18 @@
+## 2026-10-20 - Owner follow-up: wheel one-notch UX deployed
+
+- DEPLOYED / NOT USER VALIDATED: PC Bridge promoted web-only runtime source SHA 8538c797e955720da38e9fd1689971f8d83b936d from fix/vinyl-wheel-one-step-20261020, image waxloom-web:wheelstep-8538c79. Actual served JS /assets/index-DS3oQ4OI.js, HTTP 200 and API health OK; the API container image did not change. Main remains unchanged.
+- AUTOMATED GATE PASS: TypeScript/Vite, synthetic isolated Chrome QA of exactly one adjacent sleeve per discrete wheel notch, multi-event bursts, opposite direction, large delta and precision-trackpad microdeltas; animation checked in-flight vs final centered position; previous player/playlist/download/mobile regressions also pass. Repository security gate PASS on runtime source SHA.
+- ROLLBACK: prior waxloom-web:snap-58532bc image retained. Pre-deployment compose and nginx snapshots saved outside Git. No music, playlist or library file was changed.
+- NEXT TEST: user directly tries real desktop wheel feel; automated gesture emulation cannot establish subjective tactile smoothness on actual physical hardware.
+
+## 2026-10-20 - One mouse-wheel notch = one smooth vinyl
+
+- Work branch: fix/vinyl-wheel-one-step-20261020, stacked on the production web source of fix/vinyl-settled-snap-player-20261020 (docs HEAD 3aceb90, runtime source 58532bc). Main and API unchanged.
+- Desktop VinylRack wheel interaction now navigates exactly one adjacent sleeve per accepted notch, using a single compositor-managed smooth scroll rather than raw scrollLeft writes plus a second corrective snap. A brief 430ms input lock absorbs burst events; smaller precision-trackpad deltas accumulate until one notch-equivalent threshold. Wheel deltaMode is normalized, directions and boundary are handled, Ctrl/Meta zoom gestures are ignored.
+- Native touch scrolling and mouse-pointer drag with release snap remain unchanged. Reduced-motion preference selects instant movement. Browser QA asserts intermediate smooth-motion frame, exact one sleeve in either direction even for large deltas/multi-event bursts, precise trackpad handling and zero final axis offset.
+- AUTOMATED GATE PASS: synthetic mocked Chrome QA covers the new wheel protocol and the previous playback/like/download/playlist/mobile tests; TypeScript/Vite build and public repo security gate. Physical owner mouse feel requires USER VALIDATED feedback.
+- Production rollout should update web only, with old image and compose/nginx snapshots retained for rollback, and verify served JS, HTTP 200 and unchanged API image. No commit/merge to main.
+
 ## 2026-10-20 - Owner-directed web production rollout: smooth vinyl snap and player actions
 
 - DEPLOYED / NOT USER VALIDATED: owner explicitly instructed deployment to production via PC Bridge. Runtime source SHA: 58532bc87001217fd1e899b769a249081be9ceb0 (branch fix/vinyl-settled-snap-player-20261020). Production image waxloom-web:snap-58532bc serves the verified JS asset, HTTP 200, API health OK; API image unchanged (waxloom-api:ad285da). No merge to main.
