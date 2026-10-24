@@ -1,0 +1,102 @@
+/* Centered vinyl focus: one metadata block, a modest lift, one scroll motor.
+   Do not transform sleeve layout (it defines scroll geometry), and do not
+   attach transforms to every scrolling photo. Only a changed center face
+   transitions; the record is a separate decorative pseudo-element. */
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-sleeve :is(.waxloom-track-copy, .waxloom-vinyl-label, .waxloom-entity-copy) {
+  display: none !important;
+}
+
+/* Center footer is the SINGLE visible track/album/artist metadata block.
+   Every sleeve still has an accessible name for screen readers and buttons. */
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-crate {
+  height: 249px !important;
+}
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-rack {
+  padding-top: 61px !important;
+  padding-bottom: 14px !important;
+}
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-sleeve {
+  position: relative;
+  isolation: isolate;
+}
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-sleeve[data-centered="true"] {
+  z-index: 4;
+}
+
+/* The record starts almost inside the sleeve and gently rises only for
+   the centered item, identically on desktop and iPhone. Earlier view-timeline
+   declarations fought the selected state, leaving every record half outside. */
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-rack .waxloom-vinyl-sleeve::before {
+  top: -14px !important;
+  animation: none !important;
+  animation-timeline: auto !important;
+  transform: none !important;
+  transition: top 290ms cubic-bezier(.18, .8, .21, 1) !important;
+}
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-rack .waxloom-vinyl-sleeve[data-centered="true"]::before {
+  top: -51px !important;
+}
+
+/* Enlarge the selected artwork ~7%. Leave the actual sleeve / scroll center
+   unchanged and never obscure Play, Options or adjacent tap targets. */
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-sleeve > :is(.waxloom-track-face, .waxloom-vinyl-face, .waxloom-entity-face) {
+  transform: scale(1) !important;
+  transform-origin: center center !important;
+  transition: transform 290ms cubic-bezier(.18, .8, .21, 1),
+              box-shadow 290ms ease, border-color 290ms ease !important;
+}
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-sleeve[data-centered="true"] > :is(.waxloom-track-face, .waxloom-vinyl-face, .waxloom-entity-face) {
+  transform: scale(1.075) !important;
+  box-shadow: 0 0 0 2px rgba(206, 153, 235, .53), 0 9px 23px #000b !important;
+}
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-selected strong {
+  font-size: 13px;
+}
+:is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+    .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+  .waxloom-vinyl-selected small {
+  font-size: 11px;
+}
+
+/* Small phones: retain the single selection footer and actual Play target.
+   30px sleeve gap allows the 12px total centered enlargement without overlap. */
+@media (max-width: 820px) {
+  :is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+      .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+    .waxloom-vinyl-crate { height: 239px !important; }
+  :is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+      .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+    .waxloom-vinyl-selected strong { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+      .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+    .waxloom-vinyl-rack .waxloom-vinyl-sleeve::before {
+    transition: none !important;
+  }
+  :is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
+      .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
+    .waxloom-vinyl-sleeve > :is(.waxloom-track-face, .waxloom-vinyl-face, .waxloom-entity-face) {
+    transition: none !important;
+  }
+}

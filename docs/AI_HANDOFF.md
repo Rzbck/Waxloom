@@ -1,3 +1,10 @@
+## 2026-10-24 — Vinyl single caption and animated MediaSession Next
+
+- User feedback: current Home repeats every song's title, artist, album under its sleeve and again under the central selection. Users want a slightly larger center sleeve with a visibly emerging black record, and an animated Next rather than immediate teleport.
+- Dedicated isolated branch `fix/vinyl-center-motion-20261024` based on live `9a9c3d3`. CSS removes duplicate per-card captions for track, album, artist, playlist racks while preserving the single centered details; Discovery unchanged. Center art +7.5%, only selected disc rises, reduced-motion respected, fixed scroll geometry/touch/ARIA.
+- Player follow now calls the same 1-rAF critically damped `moveToIndex` motion already used by arrows instead of writing `scrollLeft` directly. This does not change Navidrome/Autoplay/iOS audio internals.
+- Browser measurements: 162 px artwork becomes 174.15 px; selected disc top -51 px, others -14 px. Arrow scroll and Media Session Next both pass through intermediate animation frames, then center on correct song. Detailed test, rollout and rollback: `docs/VINYL_CENTER_FOCUS_NEXT_MOTION_20261024.md`.
+
 ## 2026-10-24 — Song-first Home and Smart Autoplay (Next from media controls)
 
 - User asked to remove duplicate Home album/Fresh Tracks sections, make Home track-based and maintain continuous music for single-track albums/playlists in every view. Based on actually deployed Web `37a5d3a`, not old main; work isolated in `fix/ios-media-next-continuation-20261024`.

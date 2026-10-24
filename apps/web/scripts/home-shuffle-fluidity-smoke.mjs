@@ -93,12 +93,18 @@ try{
     '(function(){ const s=navigator.mediaSession; if(!s)return; const old=s.setActionHandler.bind(s); s.setActionHandler=function(name,handler){window.__qaMediaHandlers=window.__qaMediaHandlers||{};window.__qaMediaHandlers[name]=handler;return old(name,handler)}; })()'
   });
   await rpc("Fetch.enable",{patterns:[{urlPattern:"http://127.0.0.1:8136/api/*",requestStage:"Request"}]});
+  // Explicit desktop width before navigation, then switch to real phone sizes.
+  await rpc("Emulation.setDeviceMetricsOverride",{width:1440,height:900,deviceScaleFactor:1,mobile:false});
   await rpc("Page.navigate",{url:site});
   await wait(1100);
   const initial=await evaluate('({shuffleDisabled:document.querySelector(".home-quickbar .primary-action")?.disabled,homeTracks:document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-sleeve").length,sectionCount:document.querySelectorAll(".waxloom-mobile-home > section").length,status:document.readyState})');
   check(counts.albums===0,"Home must NOT fetch and duplicate full album previews");
   check(initial.homeTracks===2,"Home displays the two latest actual songs");
   check(initial.sectionCount===1,"Home must have a single main collection");
+  const desktopFocus=await evaluate('({hidden:[...document.querySelectorAll(".waxloom-home-desktop .waxloom-track-copy")].every(x=>getComputedStyle(x).display==="none"),selected:document.querySelector(".waxloom-home-desktop .waxloom-vinyl-selected")?.textContent,face:document.querySelector(".waxloom-home-desktop .waxloom-track-sleeve[data-centered=true] .waxloom-track-face")?.getBoundingClientRect().width,crates:document.querySelector(".waxloom-home-desktop .waxloom-vinyl-crate")?.getBoundingClientRect().height})');
+  check(desktopFocus.hidden && desktopFocus.selected?.includes("Cafe Azul"),"Desktop should have one visible centered metadata block");
+  check(desktopFocus.face>170 && desktopFocus.face<185,"Desktop centered art should be subtly enlarged");
+  check(desktopFocus.crates<270,"Desktop Home should remove old duplicated caption space");
   check(counts.random===1,"Home should ask Navidrome for exactly one ready shuffle pool");
   check(counts.artists===0,"Home bootstrap still warms unrelated artist index");
   check(initial.shuffleDisabled===false,"Slow latest albums must not disable Shuffle");
@@ -134,6 +140,56 @@ try{
     "Home must have exactly one real-song vinyl collection");
   check(home.cards.length===2 && home.cards[0].includes("Cafe Azul") && home.cards[1].includes("Dusk"),
     "Clicking a Home vinyl must refer to an actual song, not a single-track album");
+  // Mobile: the duplicate per-cover artist/album labels must NOT render,
+  // while the SINGLE selected caption remains visible and readable.
+  const phoneFocus=await evaluate('(()=>{const root=document.querySelector(".waxloom-mobile-home-crate");const rack=root?.querySelector(".waxloom-vinyl-rack");const sleeve=root?.querySelector(".waxloom-track-sleeve[data-centered=true]");return {copiesHidden:[...root.querySelectorAll(".waxloom-track-copy")].every(x=>getComputedStyle(x).display==="none"),caption:root.querySelector(".waxloom-vinyl-selected")?.textContent,face:sleeve?.querySelector(".waxloom-track-face")?.getBoundingClientRect().width,discTop:parseFloat(getComputedStyle(sleeve,"::before").top),otherTop:parseFloat(getComputedStyle(root.querySelectorAll(".waxloom-track-sleeve")[1],"::before").top),width:document.documentElement.scrollWidth,viewport:innerWidth,crateHeight:root.querySelector(".waxloom-vinyl-crate")?.getBoundingClientRect().height}})()');
+  check(phoneFocus.copiesHidden && phoneFocus.caption?.includes("Cafe Azul"),
+    "Mobile must display metadata only in the centered caption, no repeated 3-line labels");
+  check(phoneFocus.face>170 && phoneFocus.face<185,
+    "Mobile central album art must enlarge ~7.5% without changing sleeve width");
+  check(phoneFocus.discTop<phoneFocus.otherTop-23,
+    "Only selected record must emerge visibly above adjacent covers");
+  check(phoneFocus.width<=phoneFocus.viewport+1 && phoneFocus.crateHeight<260,
+    "Enlarged mobile cover must not create horizontal page overflow or excess height");
+
+  // Responsive acceptance: enlarged center image must stay truly centered,
+  // without horizontal page overflow, from narrow phones to tablet width.
+  const responsiveWidths=[];
+  for (const width of [320,375,430,768]) {
+    await rpc("Emulation.setDeviceMetricsOverride",{width,height:844,deviceScaleFactor:1,mobile:true});
+    await wait(155);
+    const state=await evaluate('(()=>{const root=document.querySelector(".waxloom-mobile-home-crate");const sleeve=root?.querySelector(".waxloom-track-sleeve[data-centered=true] .waxloom-track-face");const bounds=sleeve?.getBoundingClientRect();return {viewport:innerWidth,page:document.documentElement.scrollWidth,coverCenter:bounds?(bounds.left+bounds.right)/2:null,captionCount:root?.querySelectorAll(".waxloom-vinyl-selected").length,hidden:[...root.querySelectorAll(".waxloom-track-copy")].every(x=>getComputedStyle(x).display==="none")}})()');
+    responsiveWidths.push(state);
+    check(state.page<=width+1 && Math.abs(state.coverCenter-width/2)<2 && state.captionCount===1 && state.hidden,
+      "Responsive vinyl focus must stay centered without duplicate labels or overflow at "+width+"px");
+  }
+  await rpc("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await wait(155);
+
+  // The arrows and MediaSession NEXT must share the SAME smooth spring,
+  // never teleport the centered vinyl. Sample an in-between frame and end.
+  await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-arrows button")[1]?.click()');
+  await wait(83);
+  const arrowMiddle=await evaluate('document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft');
+  await wait(510);
+  const arrowEnd=await evaluate('document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft');
+  check(arrowMiddle>3 && arrowMiddle<arrowEnd-9 && arrowEnd>165,
+    "Arrow vinyl transition must have intermediate animated positions instead of jumping");
+  await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-arrows button")[0]?.click()');
+  await wait(510);
+  await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-face")[0]?.click()');
+  await wait(160);
+  const audioFirst=await evaluate('document.querySelector("audio")?.getAttribute("src")');
+  check(audioFirst?.includes("qa-home-untagged"),"First record should play its own title");
+  await evaluate('window.__qaMediaHandlers?.nexttrack?.()');
+  await wait(83);
+  const mediaMiddle=await evaluate('document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft');
+  await wait(530);
+  const mediaEnd=await evaluate('({scroll:document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft,center:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-sleeve")].findIndex(x=>x.getAttribute("data-centered")==="true"),audio:document.querySelector("audio")?.getAttribute("src")})');
+  check(mediaMiddle>3 && mediaMiddle<mediaEnd.scroll-9 && mediaEnd.scroll>165 && mediaEnd.center===1,
+    "Media Session NEXT must animate progressively to center exactly like arrows");
+  check(mediaEnd.audio?.includes("qa-home-named"),
+    "Animated Next must not change which recording actually plays");
   await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-face")[1]?.click()');
   await wait(260);
   const playingSong=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),current:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-sleeve")].findIndex(x=>x.classList.contains("is-current")),autoplay:document.querySelector(".waxloom-autoplay-tool")?.getAttribute("aria-pressed"),handler:typeof window.__qaMediaHandlers?.nexttrack})');
@@ -207,7 +263,7 @@ try{
   const explicitNextOff=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),paused:document.querySelector("audio")?.paused})');
   check(explicitNextOff.src?.includes("qa-random-") && !explicitNextOff.paused,
     "Explicit Next must play more library music even if passive Autoplay is off");
-  const result={passed:failures.length===0,failures,errors,initial,first,elapsedMs:elapsed,continued,albumStart,genreNext,playlistStart,playlistNext,natural,autoplayOff,explicitNextOff,counts,writes:writes.length,maxConcurrentSaves:maxSaves};
+  const result={passed:failures.length===0,failures,errors,initial,desktopFocus,phoneFocus,responsiveWidths,arrowMiddle,arrowEnd,mediaMiddle,mediaEnd,first,elapsedMs:elapsed,continued,albumStart,genreNext,playlistStart,playlistNext,natural,autoplayOff,explicitNextOff,counts,writes:writes.length,maxConcurrentSaves:maxSaves};
   console.log(JSON.stringify(result,null,2));
   if(failures.length||errors.length)process.exitCode=1;
 }finally{ws.close()}
