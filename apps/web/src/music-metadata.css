@@ -1,0 +1,54 @@
+/* One consistent, semantically labeled metadata presentation.
+   No mutation of Navidrome tags or new network requests. */
+.waxloom-vinyl-face .waxloom-vinyl-kind {
+  position: absolute; z-index: 3; inset: 8px auto auto 8px;
+  padding: 3px 6px; border: 1px solid #ad91bfa8; border-radius: 5px;
+  background: #18111fdb; color: #f5e9ff;
+  font-size: 9px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  pointer-events: none;
+}
+.waxloom-vinyl-label {
+  gap: 2px;
+}
+.waxloom-vinyl-label .waxloom-vinyl-detail,
+.waxloom-track-copy .waxloom-track-album,
+.waxloom-home-track-card .waxloom-home-track-album,
+.waxloom-vinyl-selected .waxloom-vinyl-selected-detail {
+  color: #a995b7;
+  font-size: 9px;
+  font-weight: 500;
+}
+.waxloom-track-copy {
+  min-height: 47px; height: auto; padding-top: 5px; padding-bottom: 4px;
+}
+.waxloom-detail-identity {
+  display: grid; gap: 5px; margin: 9px 0 12px; min-width: 0;
+}
+.waxloom-detail-identity p {
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px;
+  margin: 0; font-size: 12px;
+}
+.waxloom-detail-identity p > span {
+  min-width: 44px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: .07em; color: #a995b7; flex: 0 0 auto;
+}
+.waxloom-detail-identity p > strong {
+  font-size: 12px; font-weight: 650; color: #f2e7f6;
+  min-width: 0; overflow-wrap: anywhere;
+}
+.waxloom-mobile-player-metadata .waxloom-mobile-metadata-kind {
+  display: block; color: #ac95bb;
+  font-size: 9px; line-height: 1; font-weight: 750; letter-spacing: .09em;
+}
+@media (max-width: 820px) {
+  .waxloom-vinyl-label { gap: 2px; }
+  .waxloom-vinyl-label .waxloom-vinyl-detail { font-size: 9px; }
+  .waxloom-home-track-card .waxloom-home-track-album {
+    display: block; max-width: 100%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .waxloom-vinyl-display--album .waxloom-vinyl-crate { height: 265px; }
+}
+@media (max-width: 380px) and (max-height: 680px) {
+  .waxloom-mobile-player-metadata .waxloom-mobile-metadata-kind { font-size: 8px; }
+}

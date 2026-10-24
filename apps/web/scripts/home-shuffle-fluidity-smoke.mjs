@@ -130,6 +130,25 @@ try{
   const secondAlbum=await evaluate('({audio:document.querySelector("audio")?.getAttribute("src"),playing:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].findIndex(x=>x.classList.contains("is-current")),center:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].findIndex(x=>x.getAttribute("data-centered")==="true")})');
   check(secondAlbum.audio?.includes("qa-home-named") && secondAlbum.playing===1 && secondAlbum.center===1,
     "Second vinyl must center on the now-playing album");
+  // General metadata semantics: a recording must not masquerade as an album,
+  // and every role uses a dedicated field rather than combined raw strings.
+  const meta=await evaluate('({cards:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].slice(0,2).map(x=>({kind:x.querySelector(".waxloom-vinyl-kind")?.textContent,lines:[...x.querySelectorAll(".waxloom-vinyl-label > *")].map(y=>y.textContent)})),recent:[...document.querySelectorAll(".waxloom-home-track-card")].slice(0,2).map(x=>x.textContent)})');
+  check(meta.cards[0]?.kind==="Track" && meta.cards[0]?.lines[0]==="Cafe Azul"
+    && meta.cards[0]?.lines[1]?.includes("Artist") && meta.cards[0]?.lines[2]?.includes("Album"),
+    "Untagged single must expose Track, Artist and untagged Album as distinct fields");
+  check(meta.cards[1]?.kind==="Album" && meta.cards[1]?.lines[0]==="BRIGHT LIGHT"
+    && meta.cards[1]?.lines[1]?.includes("Artist") && meta.cards[1]?.lines[2]?.includes("Track")
+    && meta.cards[1]?.lines[2]?.includes("Dusk"),
+    "Tagged one-track release must distinguish Album, Artist, and Track");
+  check(meta.recent.some(x=>x.includes("Artist") && x.includes("Album")),
+    "Mobile recent track cards must distinguish artist and album");
+  await evaluate('document.querySelector(".waxloom-mobile-mini-info")?.click()');
+  await wait(220);
+  const fullPlayer=await evaluate('({header:document.querySelector(".waxloom-mobile-player-head-title")?.textContent,meta:document.querySelector(".waxloom-mobile-player-metadata")?.textContent})');
+  check(fullPlayer.header?.includes("Album") && fullPlayer.header?.includes("BRIGHT LIGHT")
+    && fullPlayer.meta?.includes("TRACK") && fullPlayer.meta?.includes("Artist")
+    && fullPlayer.meta?.includes("Dusk"),
+    "Mobile full player must distinguish the actual Track, Artist and Album");
   const result={passed:failures.length===0,failures,errors,initial,first,elapsedMs:elapsed,counts,writes:writes.length,maxConcurrentSaves:maxSaves};
   console.log(JSON.stringify(result,null,2));
   if(failures.length||errors.length)process.exitCode=1;

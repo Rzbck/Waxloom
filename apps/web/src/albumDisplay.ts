@@ -1,36 +1,80 @@
 import type { Album, Song } from "./types";
 
-// A single imported track may have no usable album tag. In that case the
-// sleeve must name the actual recording rather than displaying "[Unknown Album]".
-// Never rename or write Navidrome metadata: these are presentation-only labels.
-export function isUnknownAlbumName(name?: string): boolean {
-  return !name || /^\s*\[?unknown album\]?\s*$/i.test(name.trim());
+// Presentation-only metadata policy. Missing album/artist tags must never be
+// silently replaced with a song title (or written back to Navidrome).
+const UNKNOWN = /^\s*(?:\[\s*)?unknown(?:\s+(?:album|artist|track|title))?(?:\s*\])?\s*$/i;
+
+export function knownMusicValue(raw?: string | null): string | null {
+  const value = raw?.trim();
+  if (!value || UNKNOWN.test(value)) return null;
+  return value;
+}
+
+export function isUnknownAlbumName(name?: string | null): boolean {
+  return knownMusicValue(name) === null;
+}
+
+export function songDisplayTitle(song: Pick<Song, "title">): string {
+  return knownMusicValue(song.title) ?? "Track not tagged";
+}
+
+export function songDisplayArtist(song: Pick<Song, "artist">): string {
+  return knownMusicValue(song.artist) ?? "Artist not tagged";
+}
+
+export function songDisplayAlbum(song: Pick<Song, "album">): string | null {
+  return knownMusicValue(song.album);
+}
+
+export type AlbumDisplayInfo = {
+  primary: string;
+  primaryKind: "Track" | "Album";
+  artist: string;
+  album: string | null;
+  track: string | null;
+  detailLabel: string;
+  detail: string;
+};
+
+export function albumDisplayInfo(album: Album, candidate?: Song): AlbumDisplayInfo {
+  const albumName = knownMusicValue(album.name)
+    ?? knownMusicValue(album.album)
+    ?? knownMusicValue(album.title);
+  // A recently indexed song may enrich a summary only when its ID belongs to
+  // that album AND Navidrome says it contains precisely one track.
+  const songCount = album.songCount ?? album.song?.length;
+  const knownCandidate = songCount === 1 && candidate?.albumId === album.id ? candidate : null;
+  const track = knownMusicValue(knownCandidate?.title);
+  const artist = knownMusicValue(album.artist)
+    ?? knownMusicValue(knownCandidate?.artist)
+    ?? "Artist not tagged";
+  const primaryIsTrack = !albumName && Boolean(track);
+  return {
+    primary: primaryIsTrack ? track! : (albumName ?? "Album not tagged"),
+    primaryKind: primaryIsTrack ? "Track" : "Album",
+    artist,
+    album: albumName,
+    track,
+    detailLabel: primaryIsTrack ? "Album" : track ? "Track" : "Tracks",
+    detail: primaryIsTrack ? "Not tagged" : (track ?? String(songCount ?? "Unknown")),
+  };
 }
 
 export function albumDisplayTitle(album: Album, track?: Song): string {
-  const name = album.name?.trim() || album.album?.trim() || album.title?.trim();
-  if (isUnknownAlbumName(name)) {
-    return album.songCount === 1 && track?.title?.trim()
-      ? track.title.trim() : "Unknown album";
-  }
-  return name!;
+  return albumDisplayInfo(album, track).primary;
 }
 
 export function albumDisplaySubtitle(album: Album, track?: Song): string {
-  const artist = album.artist?.trim() || track?.artist?.trim() || "Unknown artist";
-  const name = album.name?.trim() || album.album?.trim() || album.title?.trim();
-  if (album.songCount === 1 && track?.title?.trim() && !isUnknownAlbumName(name)) {
-    // A one-track album's name and the song title are both useful:
-    // e.g. WHITE LIGHT / Goth — rather than apparently conflicting labels.
-    return `${track.title.trim()} · ${artist}`;
-  }
-  return artist;
+  return albumDisplayInfo(album, track).artist;
 }
 
 export function recentTracksByAlbum(recent: Song[]): Map<string, Song> {
   const result = new Map<string, Song>();
-  for (const track of recent) {
-    if (track.albumId && !result.has(track.albumId)) result.set(track.albumId, track);
+  for (const song of recent) {
+    // Ignore malformed IDs rather than pairing one artist's track to another's album.
+    if (song.albumId && song.id && !result.has(song.albumId)) {
+      result.set(song.albumId, song);
+    }
   }
   return result;
 }

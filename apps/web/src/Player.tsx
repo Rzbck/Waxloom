@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { api } from "./api";
+import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
 import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
 import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
@@ -139,8 +140,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const activeIndex = mode === "preview" ? previewIndex : currentIndex;
   const activeLength = mode === "preview" ? previewQueue.length : queue.length;
-  const activeTitle = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
-  const activeArtist = currentPreview?.artist ?? currentSong?.artist ?? "Unknown artist";
+  const activeTitle = currentPreview?.title ?? (currentSong ? songDisplayTitle(currentSong) : "Track not tagged");
+  const activeArtist = currentPreview?.artist ?? (currentSong ? songDisplayArtist(currentSong) : "Artist not tagged");
   const activeDuration = currentPreview?.duration ?? currentSong?.duration ?? 0;
 
   const traceLocalPlayer = useCallback((event: string, songId: string, clientEpochMs = Date.now()) => {
@@ -891,7 +892,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     session.metadata = new MediaMetadata({
       title: activeTitle,
       artist: activeArtist,
-      album: currentSong?.album ?? "",
+      album: currentSong ? (songDisplayAlbum(currentSong) ?? "") : "",
       artwork: currentSong?.coverArt ? [{ src: api.coverUrl(currentSong.coverArt, 600), sizes: "600x600" }] : [],
     });
     const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
@@ -1088,7 +1089,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 </span>
                 <span className="waxloom-mobile-mini-copy">
                   <MarqueeText value={activeTitle} className="waxloom-mobile-mini-title" />
-                  <span className="waxloom-mobile-mini-artist">{activeArtist}</span>
+                  <span className="waxloom-mobile-mini-artist">Artist · {activeArtist}</span>
                 </span>
                 <span className="waxloom-mobile-mini-chevron"><PlayerIcon name="chevron-down" size={22} /></span>
               </button>
@@ -1116,7 +1117,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               </div>
               <div className="player-track-copy">
                 <strong>{activeTitle}</strong>
-                <span>{activeArtist}</span>
+                <span>Artist · {activeArtist}</span>
+                {mode === "navidrome" && <small className="player-album">Album · {songDisplayAlbum(currentSong ?? {}) ?? "Not tagged"}</small>}
                 {mode === "preview" && <small>{owned.get(currentPreview?.recording_mbid ?? "") === "present" ? "Already in your library" : "Discovery preview"}</small>}
               </div>
             </div>
@@ -1184,7 +1186,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             onClose={closeMobilePlayer}
             title={activeTitle}
             artist={activeArtist}
-            album={currentSong?.album}
+            album={currentSong ? (songDisplayAlbum(currentSong) ?? undefined) : undefined}
             cover={currentSong?.coverArt ? api.coverUrl(currentSong.coverArt, 600) : undefined}
             isPreview={mode === "preview"}
             playing={playing}
@@ -1192,8 +1194,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             currentTime={currentTime}
             duration={duration}
             queue={activeQueue.map((song) => ({
-              id: song.id, title: song.title ?? "Unknown title",
-              artist: song.artist ?? "Unknown artist", duration: song.duration,
+              id: song.id, title: songDisplayTitle(song),
+              artist: songDisplayArtist(song), duration: song.duration,
             }))}
             index={activeIndex}
             shuffle={shuffle}

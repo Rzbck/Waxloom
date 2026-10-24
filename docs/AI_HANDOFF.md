@@ -1,3 +1,10 @@
+## 2026-10-24 - General semantic artist/album/track metadata
+
+- The owner's request is **global consistency**, not fixing only two sample songs. Read `docs/METADATA_SEMANTIC_AUDIT_20261024.md`.
+- Observed sample: 480 album summaries, 454 one-track albums, 197 unknown album tags, 2 unknown artists. Separate Track / Artist / Album fields now have a single normalization/identity policy across album and song vinyls, Home, artist lists, album detail, desktop/mobile player and mobile recent cards.
+- No album/title guesses: albumId must match an existing song, and only a verified singleton can show its track title on an unnamed record; missing album tags remain visibly `Not tagged` rather than being overwritten. UI-only changes, no Navidrome writes and no new album-detail requests.
+- This worktree is based on live Web `7c50a59`; `main` and all previous release worktrees remain unchanged. Regression gates and exact published SHA/production result to be recorded after verification.
+
 ## 2026-10-24 - iOS Home Shuffle and vinyl metadata/playback follow
 
 - Owner reported on physical iPhone that many locked-screen modes now continue, but Home Shuffle fails to continue randomly; Home vinyl album cards differ from player song titles and do not track the playing song.

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { knownMusicValue } from "./albumDisplay";
 import type { Artist, PlaylistSummary } from "./types";
 import { VinylRack } from "./VinylRack";
 
@@ -17,19 +18,19 @@ export function VinylArtists({ artists, onOpen }: {
     <div className="waxloom-entity-vinyl" aria-label="Artists as record sleeves">
       <VinylRack count={visible.length} contentKey={visible[0]?.id} variant="artist"
         label="Browse artists as vinyl sleeves"
-        records={visible.map((artist) => ({title:artist.name,artist:`${artist.albumCount ?? 0} albums`}))}>
+        records={visible.map((artist) => ({title:knownMusicValue(artist.name) ?? "Artist not tagged",artist:`${artist.albumCount ?? 0} albums`}))}>
         {visible.map((artist,index) => (
           <article key={artist.id} className="waxloom-vinyl-sleeve waxloom-entity-sleeve">
-            <button className="waxloom-entity-face" type="button" title={artist.name}
-              aria-label={`Open artist ${artist.name}`} onClick={() => onOpen(artist)}>
-              <span className="waxloom-entity-fallback">{artist.name.slice(0,1).toUpperCase()}</span>
+            <button className="waxloom-entity-face" type="button" title={knownMusicValue(artist.name) ?? "Artist not tagged"}
+              aria-label={`Open artist ${knownMusicValue(artist.name) ?? "Artist not tagged"}`} onClick={() => onOpen(artist)}>
+              <span className="waxloom-entity-fallback">{(knownMusicValue(artist.name) ?? "Artist not tagged").slice(0,1).toUpperCase()}</span>
               {artist.coverArt && <img src={api.coverUrl(artist.coverArt,300)}
                 loading={index<3?"eager":"lazy"} alt=""
                 onError={(event)=>{event.currentTarget.hidden=true;}} />}
               <span className="waxloom-entity-open" aria-hidden="true">&nearr;</span>
             </button>
             <div className="waxloom-entity-copy">
-              <strong title={artist.name}>{artist.name}</strong>
+              <strong title={knownMusicValue(artist.name) ?? "Artist not tagged"}>{knownMusicValue(artist.name) ?? "Artist not tagged"}</strong>
               <small>{artist.albumCount ?? 0} albums</small>
             </div>
           </article>
