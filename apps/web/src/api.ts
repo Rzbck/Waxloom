@@ -18,6 +18,8 @@ import type {
   Song,
   StarredResults,
   YouTubeCandidate,
+  YouTubeBrowseResponse,
+  YouTubeExpandResponse,
   YouTubeRuntime,
 } from "./types";
 
@@ -63,6 +65,7 @@ const albumCache = new Map<string, CachedPromise<ListResponse<Album>>>();
 const albumDetailCache = new Map<string, CachedPromise<Album>>();
 let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
 const youtubeSearchCache = new Map<string, CachedPromise<ListResponse<YouTubeCandidate>>>();
+const youtubeBrowseCache = new Map<string, CachedPromise<YouTubeBrowseResponse>>();
 
 function mediaCoverUrl(coverId?: string, size = 300): string {
   return coverId
@@ -122,6 +125,20 @@ function loadArtistsCached(): Promise<ListResponse<Artist>> {
     throw error;
   });
   artistsCache = { at: Date.now(), promise };
+  return promise;
+}
+
+function youtubeBrowseCached(query: string, limit: number): Promise<YouTubeBrowseResponse> {
+  const clean = query.trim();
+  const safeLimit = Math.max(1, Math.min(30, limit));
+  const key = `${clean.toLowerCase()}: ${safeLimit}`;
+  const previous = youtubeBrowseCache.get(key);
+  if (previous && Date.now() - previous.at < 5 * 60_000) return previous.promise;
+  const promise = request<YouTubeBrowseResponse>("/api/imports/youtube/browse", {
+    method: "POST", body: JSON.stringify({ query: clean, limit: safeLimit }),
+  }).catch((error) => { youtubeBrowseCache.delete(key); throw error; });
+  if (youtubeBrowseCache.size >= 50) youtubeBrowseCache.delete(youtubeBrowseCache.keys().next().value!);
+  youtubeBrowseCache.set(key, { at: Date.now(), promise });
   return promise;
 }
 
@@ -297,6 +314,16 @@ export const api = {
   }),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
+  youtubeBrowse: (query: string, limit = 20) => youtubeBrowseCached(query, limit),
+  youtubeCollections: (query: string, limit = 8) => request<{ items: import("./types").YouTubeBrowseCollection[]; count: number }>("/api/imports/youtube/collections", {
+    method: "POST", body: JSON.stringify({ query, limit }),
+  }),
+  youtubeExpand: (url: string, limit = 80) => request<YouTubeExpandResponse>("/api/imports/youtube/expand", {
+    method: "POST", body: JSON.stringify({ url, limit }),
+  }),
+  youtubePreview: (url: string) => request<{ preview_url: string; duration?: number }>("/api/imports/youtube/preview", {
+    method: "POST", body: JSON.stringify({ url }),
+  }),
   youtubeSearch: (artist: string, title: string, isrc?: string, limit = 8) => youtubeSearchCached(artist, title, isrc, limit),
   prefetchYoutubePreview: (artist: string, title: string) => {
     void youtubeSearchCached(artist, title, undefined, 1).catch(() => undefined);

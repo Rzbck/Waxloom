@@ -204,6 +204,38 @@ export type AudioMuseSimilarTrack = {
   distance?: number;
 };
 
+export type YouTubeBrowseTrack = {
+  kind: "track";
+  id: string;
+  title: string;
+  suggested_artist: string;
+  suggested_title: string;
+  channel?: string;
+  duration?: number | null;
+  thumbnail?: string | null;
+  url: string;
+};
+export type YouTubeBrowseCollection = {
+  kind: "album" | "playlist";
+  id: string;
+  title: string;
+  url: string;
+  channel?: string;
+  count?: number | null;
+  thumbnail?: string | null;
+};
+export type YouTubeBrowseResponse = {
+  items: YouTubeBrowseTrack[];
+  collections: YouTubeBrowseCollection[];
+  count: number;
+};
+export type YouTubeExpandResponse = {
+  collection: YouTubeBrowseCollection;
+  items: YouTubeBrowseTrack[];
+  count: number;
+  truncated: boolean;
+};
+
 export type YouTubeCandidate = {
   title: string;
   url: string;

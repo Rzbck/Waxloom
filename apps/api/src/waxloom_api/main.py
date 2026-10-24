@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, Response
 from pydantic import BaseModel, Field
 
 from waxloom_api import __version__
@@ -24,6 +24,8 @@ from waxloom_api.providers.audiomuse import AudioMuseClient
 from waxloom_api.providers.listenbrainz import ListenBrainzLabsClient
 from waxloom_api.providers.navidrome import NavidromeClient, NavidromeError
 from waxloom_api.providers.youtube import YouTubeProvider
+from waxloom_api.youtube_browse import YouTubeBrowseService
+from waxloom_api.cover_cache import ArtworkCache
 from waxloom_api.recent_tracks import get_newest_songs
 from waxloom_api.settings import settings
 
@@ -77,6 +79,20 @@ class DiscoveryFeedbackRequest(BaseModel):
     value: int = Field(ge=-1, le=1)
 
 
+class YouTubeBrowseRequest(BaseModel):
+    query: str = Field(min_length=2, max_length=300)
+    limit: int = Field(default=20, ge=1, le=30)
+
+
+class YouTubeExpandRequest(BaseModel):
+    url: str = Field(min_length=20, max_length=2000)
+    limit: int = Field(default=80, ge=1, le=80)
+
+
+class YouTubePreviewRequest(BaseModel):
+    url: str = Field(min_length=20, max_length=2000)
+
+
 class YouTubeSearchRequest(BaseModel):
     artist: str = Field(min_length=1, max_length=300)
     title: str = Field(min_length=1, max_length=300)
@@ -97,6 +113,8 @@ def waxloom_state_dir() -> Path:
 
 
 _youtube_provider = YouTubeProvider(cache_dir=waxloom_state_dir() / "yt-dlp-cache")
+_youtube_browse = YouTubeBrowseService(_youtube_provider)
+_artwork_cache = ArtworkCache(waxloom_state_dir() / "cover-thumbs")
 _import_service: ImportService | None = None
 
 
@@ -519,6 +537,53 @@ async def youtube_runtime() -> dict[str, object]:
     return {"status": status, "library_configured": bool(settings.music_library_path)}
 
 
+@app.post("/api/imports/youtube/browse")
+async def youtube_browse(payload: YouTubeBrowseRequest) -> dict[str, object]:
+    try:
+        return await asyncio.to_thread(
+            _youtube_browse.browse, payload.query, payload.limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="YouTube search is temporarily unavailable.") from exc
+
+
+@app.post("/api/imports/youtube/collections")
+async def youtube_collections(payload: YouTubeBrowseRequest) -> dict[str, object]:
+    try:
+        return await asyncio.to_thread(
+            _youtube_browse.collections, payload.query, payload.limit
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Playlist search is unavailable.") from exc
+
+
+@app.post("/api/imports/youtube/expand")
+async def youtube_expand(payload: YouTubeExpandRequest) -> dict[str, object]:
+    try:
+        return await asyncio.to_thread(
+            _youtube_browse.expand, payload.url, payload.limit
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="YouTube playlist could not be expanded.") from exc
+
+
+@app.post("/api/imports/youtube/preview")
+async def youtube_preview(payload: YouTubePreviewRequest) -> dict[str, object]:
+    try:
+        # Only canonical YouTube video IDs are accepted by browse service.
+        # Browser plays the short-lived direct HTTPS audio URL with native
+        # range/seek support. No full-file download is required before Play.
+        return await asyncio.to_thread(_youtube_browse.preview, payload.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Audio preview is unavailable.") from exc
+
+
 @app.post("/api/imports/youtube/search")
 async def youtube_search(payload: YouTubeSearchRequest) -> dict[str, object]:
     if payload.limit == 1:
@@ -612,8 +677,9 @@ async def stream_song(song_id: str, request: Request) -> StreamingResponse:
 
 
 @app.get("/api/media/cover/{cover_id}")
-async def cover_art(cover_id: str, size: int = Query(default=300, ge=16, le=1200)) -> StreamingResponse:
-    return await _stream_upstream("getCoverArt", params={"id": cover_id, "size": size})
+async def cover_art(cover_id: str, size: int = Query(default=300, ge=16, le=1200)) -> Response:
+    require_navidrome()
+    return await _artwork_cache.get(cover_id, size, navidrome_client())
 
 
 @app.get("/api/playlists")

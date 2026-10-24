@@ -13,11 +13,24 @@ export function artworkTheme(seed: string) {
     hash = Math.imul(hash, 16777619);
   }
   const unsigned = hash >>> 0;
+  // Curated, quiet editorial palettes — never random neon hues.
+  const palettes = [
+    ["#101923", "#344957", "#c1b5a1", "#d0b692"], // blue slate / paper
+    ["#1e2423", "#4d665c", "#c0bf9d", "#e3c99e"], // moss / bone
+    ["#2b1d23", "#795b60", "#ddc3b0", "#cf998a"], // dusty wine
+    ["#1c222e", "#485267", "#c5c1c2", "#929eb8"], // blue graphite
+    ["#30241d", "#765b46", "#d8ba90", "#ebd2ab"], // analog sepia
+    ["#171b1e", "#586269", "#cec6ba", "#e1d9c8"], // monochrome silver
+    ["#2b292e", "#686278", "#c9bbc1", "#afa1b5"], // muted lavender
+    ["#22272a", "#5b7678", "#bac9bf", "#cad4bd"], // muted cyan
+  ];
   return {
-    variant: unsigned % 5,
+    variant: (unsigned >>> 5) % 8,
     hue: unsigned % 360,
     angle: 20 + ((unsigned >>> 8) % 180),
     accent: (unsigned * 17 + 47) % 360,
+    palette: palettes[unsigned % palettes.length],
+    offset: 18 + ((unsigned >>> 13) % 60),
   };
 }
 
@@ -90,6 +103,11 @@ export function CoverArtwork({
     "--cover-hue": String(theme.hue),
     "--cover-accent": String(theme.accent),
     "--cover-angle": `${theme.angle}deg`,
+    "--cover-base": theme.palette[0],
+    "--cover-mid": theme.palette[1],
+    "--cover-paper": theme.palette[2],
+    "--cover-ink": theme.palette[3],
+    "--cover-offset": `${theme.offset}%`,
   } as CSSProperties;
   return (
     <span className={`waxloom-generated-cover art-variant-${theme.variant} ${className}`}
@@ -97,7 +115,7 @@ export function CoverArtwork({
       <span className="waxloom-generated-pattern" />
       <span className="waxloom-generated-disc" />
       <span className="waxloom-generated-flare" />
-      <span className="waxloom-generated-seal">WAX</span>
+      <span className="waxloom-generated-seal" />
       {coverId && loaded !== "synthetic" && (
         <img src={api.coverUrl(coverId, size)}
           className={loaded === "real" ? "waxloom-cover-photo is-ready" : "waxloom-cover-photo"}

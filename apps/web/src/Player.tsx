@@ -29,10 +29,14 @@ type PlayerContextValue = {
   currentPreview: PreviewTrack | null;
   currentIndex: number;
   playing: boolean;
+  currentTime: number;
+  duration: number;
+  seekTo: (seconds: number) => void;
+  togglePlayback: () => void;
   playSongs: (songs: Song[], startIndex?: number, options?: { ordered?: boolean; shuffled?: boolean }) => void;
   playNow: (song: Song) => void;
   addToQueue: (song: Song) => void;
-  playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number, onManualImport?: (candidate: DiscoveryCandidate) => void) => void;
+  playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number, onManualImport?: (candidate: DiscoveryCandidate) => void, options?: { useProvidedUrls?: boolean }) => void;
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -455,6 +459,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playPreviewTracks = useCallback((
     tracks: PreviewTrack[], startIndex = 0,
     onManualImport?: (candidate: DiscoveryCandidate) => void,
+    options?: { useProvidedUrls?: boolean },
   ) => {
     if (tracks.length === 0) return;
     queueEpochRef.current += 1;
@@ -465,9 +470,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       // If this verified M4A was fully buffered before click, hand it to the
       // player immediately via an in-memory object URL. Otherwise stream the
       // existing backend URL without awaiting any speculative download.
-      preview_url: track.recording_mbid === tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))]?.recording_mbid
-        ? (prewarmedUrlOrStream(track.recording_mbid) ?? api.previewStreamUrl(track.recording_mbid, track.artist, track.title))
-        : api.previewStreamUrl(track.recording_mbid, track.artist, track.title),
+      preview_url: options?.useProvidedUrls && track.preview_url
+        ? track.preview_url
+        : track.recording_mbid === tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))]?.recording_mbid
+          ? (prewarmedUrlOrStream(track.recording_mbid) ?? api.previewStreamUrl(track.recording_mbid, track.artist, track.title))
+          : api.previewStreamUrl(track.recording_mbid, track.artist, track.title),
     }));
     const safeIndex = Math.max(0, Math.min(startIndex, preparedTracks.length - 1));
     const target = preparedTracks[safeIndex];
@@ -945,12 +952,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       currentPreview,
       currentIndex: activeIndex,
       playing,
+      currentTime, duration,
+      seekTo: seek,
+      togglePlayback,
       playSongs,
       playNow,
       addToQueue,
       playPreviewTracks,
     }),
-    [queue, currentSong, currentPreview, activeIndex, playing, playSongs, playNow, addToQueue, playPreviewTracks],
+    [queue, currentSong, currentPreview, activeIndex, playing, currentTime, duration, playSongs, playNow, addToQueue, playPreviewTracks],
   );
 
   const jumpToIndex = (targetIndex: number) => {

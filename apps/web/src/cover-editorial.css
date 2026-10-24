@@ -1,0 +1,166 @@
+/* Waxloom editorial sleeves V2
+ * Eight restrained original compositions, no logos, no random neon palette.
+ * Based on visual language of real contemporary ambient, jazz and indie
+ * album packaging: quiet photo-like gradients, architectural shapes, analog
+ * paper, negative space and small-scale printed texture.
+ * 100% CSS — deterministic first paint, no network or per-frame canvas.
+ */
+.waxloom-generated-cover {
+  background:
+    radial-gradient(ellipse at var(--cover-offset) 18%, color-mix(in srgb,var(--cover-paper) 35%,transparent), transparent 56%),
+    linear-gradient(146deg, var(--cover-mid) 0%,var(--cover-base) 94%) !important;
+}
+.waxloom-generated-cover .waxloom-generated-pattern,
+.waxloom-generated-cover .waxloom-generated-disc,
+.waxloom-generated-cover .waxloom-generated-flare,
+.waxloom-generated-cover .waxloom-generated-seal {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  border: 0;
+  border-radius: 0;
+  transform: none;
+  box-shadow: none;
+  opacity: 1;
+  mix-blend-mode: normal;
+}
+.waxloom-generated-cover .waxloom-generated-seal {
+  inset: 0;
+  width: auto; height: auto;
+  background: repeating-linear-gradient(96deg,#fff0 0 4px,#fff1 4.5px 4.8px,#fff0 5px 13px);
+  opacity: .23;
+  letter-spacing: 0;
+}
+.waxloom-generated-cover .waxloom-generated-flare {
+  inset: 0;
+  background:
+    linear-gradient(124deg,#fff0 27%,#fffa 29%,#fff0 31% 62%,#fff4 65%,#fff0 68%),
+    linear-gradient(0deg,#04060988,transparent 55%);
+  opacity: .15;
+}
+/* 0 — mysterious architectural photography */
+.waxloom-generated-cover.art-variant-0 .waxloom-generated-pattern {
+  inset: -7% -16%;
+  background:
+    linear-gradient(152deg, transparent 0 41%, var(--cover-paper) 41% 43%, transparent 43%),
+    linear-gradient(115deg, transparent 0 55%, #030407b8 55% 68%, transparent 68%),
+    radial-gradient(ellipse at 31% 21%, var(--cover-paper),transparent 62%);
+  opacity: .46;
+}
+.waxloom-generated-cover.art-variant-0 .waxloom-generated-disc {
+  width: 52%; height: 75%; top: 37%; left: 8%;
+  background: linear-gradient(165deg,var(--cover-paper) 0%,var(--cover-mid) 72%,var(--cover-base));
+  clip-path: polygon(0 0,100% 12%,100% 100%,0 90%);
+  opacity: .73;
+}
+/* 1 — filmic horizon / abstract landscape */
+.waxloom-generated-cover.art-variant-1 .waxloom-generated-pattern {
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 68% 33%,var(--cover-paper) 0%,transparent 43%),
+    linear-gradient(180deg,transparent 0 53%,var(--cover-base) 54% 55%,transparent 56%),
+    linear-gradient(180deg,transparent 0 62%,var(--cover-mid) 63% 100%);
+  opacity: .7;
+}
+.waxloom-generated-cover.art-variant-1 .waxloom-generated-disc {
+  width: 138%; height: 45%; left: -24%; top: 64%;
+  border-radius: 50%;
+  background: linear-gradient(4deg, var(--cover-base),var(--cover-mid),var(--cover-paper));
+  opacity: .86;
+}
+/* 2 — minimal geometry and paper */
+.waxloom-generated-cover.art-variant-2 .waxloom-generated-pattern {
+  inset: 9%;
+  background: var(--cover-paper);
+  opacity: .80;
+}
+.waxloom-generated-cover.art-variant-2 .waxloom-generated-disc {
+  left: 23%; top: 20%; width: 56%; height: 56%;
+  border-radius: 50%;
+  background: var(--cover-base);
+  box-shadow: 13px 14px 0 color-mix(in srgb,var(--cover-ink) 72%,transparent);
+  opacity: .93;
+}
+.waxloom-generated-cover.art-variant-2 .waxloom-generated-flare {
+  inset: 36% 0 0 0;
+  background: linear-gradient(164deg,transparent 0 38%,var(--cover-mid) 39% 42%,transparent 43%);
+  opacity: .6;
+}
+/* 3 — nocturne portrait silhouette, never a copied person */
+.waxloom-generated-cover.art-variant-3 .waxloom-generated-pattern {
+  inset: 0;
+  background: radial-gradient(ellipse at 42% 26%,var(--cover-paper),transparent 49%),
+              linear-gradient(180deg,transparent 37%,#030406a1);
+  opacity: .59;
+}
+.waxloom-generated-cover.art-variant-3 .waxloom-generated-disc {
+  width: 64%; height: 98%; bottom: -39%; top: auto; left: 22%;
+  border-radius: 49% 49% 28% 28%;
+  background: linear-gradient(115deg,var(--cover-base),var(--cover-mid),#080a10);
+  box-shadow: -22px -10px 28px #080a1375;
+}
+/* 4 — collaged paper strips */
+.waxloom-generated-cover.art-variant-4 .waxloom-generated-pattern {
+  inset: 0;
+  background: linear-gradient(145deg,transparent 0 22%,var(--cover-paper) 23% 47%,transparent 48% 100%);
+  opacity: .71;
+}
+.waxloom-generated-cover.art-variant-4 .waxloom-generated-disc {
+  width: 76%; height: 78%; top: 30%; left: 41%;
+  background: linear-gradient(82deg,var(--cover-mid),var(--cover-base));
+  transform: rotate(-18deg);
+  box-shadow: -19px -15px 0 color-mix(in srgb,var(--cover-ink) 65%,transparent);
+}
+.waxloom-generated-cover.art-variant-4 .waxloom-generated-flare {
+  background: repeating-linear-gradient(0deg,#fff0 0 6px,#fff5 7px 7.7px,#fff0 8px 12px);
+  opacity: .22;
+}
+/* 5 — folded analog typography *without text* */
+.waxloom-generated-cover.art-variant-5 .waxloom-generated-pattern {
+  inset: 10% 14%;
+  background: repeating-linear-gradient(0deg,
+    var(--cover-paper) 0 6px,transparent 7px 13px);
+  opacity: .51;
+  clip-path: polygon(0 0,78% 0,78% 55%,100% 55%,100% 100%,0 100%);
+}
+.waxloom-generated-cover.art-variant-5 .waxloom-generated-disc {
+  width: 90%; height: 51%; top: 53%; left: -7%;
+  background: linear-gradient(90deg,var(--cover-mid) 35%,var(--cover-paper));
+  clip-path: polygon(0 15%,100% 0,100% 80%,0 100%);
+  opacity: .77;
+}
+/* 6 — abstract reflection / cool photographic haze */
+.waxloom-generated-cover.art-variant-6 .waxloom-generated-pattern {
+  inset: 0;
+  background: radial-gradient(ellipse at 52% 31%,var(--cover-paper) 0%,transparent 44%),
+              linear-gradient(180deg,var(--cover-base),transparent 75%);
+  opacity: .66;
+}
+.waxloom-generated-cover.art-variant-6 .waxloom-generated-disc {
+  width: 120%; height: 45%; top: 54%; left: -10%;
+  border-radius: 50% 50% 0 0;
+  background: repeating-linear-gradient(0deg,var(--cover-mid) 0 8px,var(--cover-paper) 9px 10px,var(--cover-base) 12px 20px);
+  opacity: .4;
+}
+/* 7 — record-label motif: only 1 of 8 sleeves contains an actual disc */
+.waxloom-generated-cover.art-variant-7 .waxloom-generated-pattern {
+  inset: 0;
+  background: repeating-linear-gradient(150deg,transparent 0 19px,#fff2 20px 21px,transparent 22px 45px);
+  opacity: .45;
+}
+.waxloom-generated-cover.art-variant-7 .waxloom-generated-disc {
+  width: 84%; height: 84%; top: 8%; left: 8%;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center,var(--cover-paper) 0 5%,var(--cover-base) 5.5% 8%,var(--cover-ink) 8.5% 21%,transparent 22%),
+    repeating-radial-gradient(circle,#fff1 0 1px,transparent 2px 4px),
+    radial-gradient(circle,var(--cover-mid),var(--cover-base) 73%);
+  box-shadow: 8px 8px 20px #04050688;
+}
+.waxloom-generated-cover.art-variant-7 .waxloom-generated-disc::after {
+  content: none;
+}
+.waxloom-generated-cover .waxloom-cover-photo { z-index: 6; }
+@media (prefers-reduced-motion:reduce) {
+  .waxloom-generated-cover .waxloom-cover-photo { transition: none !important; }
+}

@@ -1,3 +1,10 @@
+## 2026-10-24 — Import YouTube V2 / preview seek, editorial covers, persistent thumbs
+
+- User requested free-form search of song/artist/album/playlist, bulk selection, inline Play/Pause/seek before downloads, optional playlist target using existing Discovery downloader, and faster true covers. Prior generated art looked too neon and repeatedly printed WAX. Source branch `feat/import-design-v2-20261024` is based on current Web 5dfa0e7; API must be deployed jointly for added routes.
+- Import now offers one field, nonblocking YouTube track results + independently fetched albums/playlists, expansion up to 80 songs, exact-source preview direct signed M4A with seek through existing player, editable tags and bulk 2-concurrent Discovery download queue. Strict canonical YouTube URLs and SSRF guard, no paid API. Backend persistent 320 MB artwork cache uses existing /data volume and suppresses SHA-known Navidrome logo.
+- 8 original editorial curated-palette artwork families, no WAX or text. Browser imports test covers 3 previewed/download-queued selected tracks and playlist additions, 320–768px. Read-only real YouTube query: tracks 1.77s, collections 4.19s separately, signed m4a preview resolved 4.01s. API 38 tests, existing frontend and iOS tests pass. Real iPhone pre-listen acceptance still needed.
+- Details: `docs/IMPORT_V2_EDITORIAL_ARTWORK_20261024.md`. Joint Web+API deployment/rollback; never merge to main implicitly.
+
 ## 2026-10-24 — Fast album opening, session summary catalog and procedural vinyl art
 
 - Owner wants maximum perceived loading speed inspired by their FitBoyRepack lightweight catalog/lazy detail pattern. Read `docs/INSTANT_ARTWORK_PERFORMANCE_20261024.md`.

@@ -162,6 +162,9 @@ try {
   check(generated.count===firstAlbums.cards && generated.unique>=8 && generated.color.includes("gradient"),
     "All cards must have distinct, deterministic generated artwork before any media response");
   check(count.covers.every(x=>x.size==="160"),"Album/artist grid must request 160px thumbnails, never 320px assets");
+  const editorial=await evaluate('(()=>{const items=[...document.querySelectorAll(".waxloom-library-grid .waxloom-generated-cover")];return {labels:document.querySelectorAll(".waxloom-generated-seal").length,containsWax:items.some(x=>x.textContent?.includes("WAX")),palettes:new Set(items.map(x=>x.style.getPropertyValue("--cover-base"))).size,variants:new Set(items.map(x=>[...x.classList].find(n=>n.startsWith("art-variant-")))).size}})()');
+  check(!editorial.containsWax && editorial.palettes<=8 && editorial.variants>=5,
+    "Editorial album art must have no WAX text, restrained palettes and multiple visual directions");
   await wait(720);
   const detected=await evaluate('({stock:document.querySelector(".waxloom-grid-cell:nth-child(1) .waxloom-generated-cover")?.getAttribute("data-artwork"),real:document.querySelector(".waxloom-grid-cell:nth-child(2) .waxloom-generated-cover")?.getAttribute("data-artwork")})');
   check(detected.stock==="generated","Navidrome stock logo should be recognized and replaced with art");

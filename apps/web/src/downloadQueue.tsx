@@ -1,7 +1,7 @@
 import { useSyncExternalStore, useState } from "react";
 import { api } from "./api";
 import { noteLibraryImport } from "./libraryPresence";
-import type { DiscoveryCandidate, PlaylistSummary } from "./types";
+import type { DiscoveryCandidate, PlaylistSummary, YouTubeBrowseTrack } from "./types";
 
 export type DownloadPhase = "queued" | "searching" | "downloading" | "indexed" | "existing" | "manual" | "failed";
 export type DownloadItem = {
@@ -14,9 +14,9 @@ export type DownloadItem = {
   downloaded?: boolean;
   songId?: string;
 };
-type Job = { candidate: DiscoveryCandidate; manual: (track: DiscoveryCandidate) => void };
+type Job = { candidate: DiscoveryCandidate; manual: (track: DiscoveryCandidate) => void; selectedSource?: string };
 const MAX_CONCURRENT = 2;
-const MAX_VISIBLE = 16;
+const MAX_VISIBLE = 120;
 let items: DownloadItem[] = [];
 const pending: Job[] = [];
 const playlistTargets = new Map<string, PlaylistSummary[]>();
@@ -97,6 +97,46 @@ async function finishPlaylists(
   }
 }
 
+export function enqueueSelectedYouTube(
+  track: YouTubeBrowseTrack,
+  authorized: boolean,
+  playlist?: PlaylistSummary,
+  edits?: { artist: string; title: string },
+): boolean {
+  if (!authorized || !/^[A-Za-z0-9_-]{11}$/.test(track.id)) return false;
+  const id = `yt:${track.id}`;
+  const url = `https://www.youtube.com/watch?v=${track.id}`;
+  const artist = (edits?.artist || track.suggested_artist).trim().slice(0, 300);
+  const title = (edits?.title || track.suggested_title).trim().slice(0, 300);
+  if (!artist || !title) return false;
+  const candidate: DiscoveryCandidate = {
+    recording_mbid: id, artist, title, release: undefined, similarity: 0,
+    underground: 0, rank: 0, tags: [], musicbrainz_url: "",
+    source: "youtube_dig",
+  };
+  const existing = items.find((item) => item.id === id);
+  if (existing?.downloaded) {
+    if (!playlist) return false;
+    addPlaylistTarget(id, playlist);
+    void finishPlaylists(candidate, existing.songId, existing.phase === "existing" ? "existing" : "indexed");
+    return true;
+  }
+  if (existing && ["queued", "searching", "downloading"].includes(existing.phase)) {
+    if (playlist) addPlaylistTarget(id, playlist);
+    return false;
+  }
+  if (playlist) addPlaylistTarget(id, playlist);
+  pending.push({ candidate, selectedSource: url, manual: () => undefined });
+  items = [{
+    id, artist, title, phase: "queued" as const,
+    detail: playlist ? `Queued · add to ${playlist.name}` : "Waiting for a download slot",
+    updatedAt: Date.now(),
+  }, ...items.filter((item) => item.id !== id)].slice(0, MAX_VISIBLE);
+  notify();
+  pump(); // Existing two-concurrent Discovery download workers, no new service.
+  return true;
+}
+
 export function enqueueDiscoveryDownload(
   candidate: DiscoveryCandidate, manual: (track: DiscoveryCandidate) => void, playlist?: PlaylistSummary,
 ): boolean {
@@ -140,9 +180,10 @@ async function run(job: Job) {
   const { candidate, manual } = job;
   const id = candidate.recording_mbid;
   try {
-    change(id, "searching", "Finding a reliable music source");
-    const search = await api.youtubeSearch(candidate.artist, candidate.title, undefined, 1);
-    const best = search.items[0];
+    if (!job.selectedSource) change(id, "searching", "Finding a reliable music source");
+    const best = job.selectedSource
+      ? { url: job.selectedSource, score: 100 }
+      : (await api.youtubeSearch(candidate.artist, candidate.title, undefined, 1)).items[0];
     if (!best || best.score < 80) {
       change(id, "manual", hasPlaylistTarget(id)
         ? "Source ambiguous: choose it in Imports, then add the indexed song to your playlist."
@@ -165,7 +206,7 @@ async function run(job: Job) {
     if (hasPlaylistTarget(id)) await finishPlaylists(candidate, songId, completedPhase);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Download failed";
-    if (/Import failed|No verified music source|\b502\b/i.test(detail)) {
+    if (!job.selectedSource && /Import failed|No verified music source|\b502\b/i.test(detail)) {
       // A failed automatic provider source must never silently retry the
       // same possibly incorrect recording. Let the listener select a
       // verified alternative; keep the failed state actionable.
