@@ -6,7 +6,7 @@ import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
 import { MobileNavigation } from "./MobileNavigation";
 import { MobileHome } from "./MobileHome";
-import { VinylAlbums } from "./VinylRack";
+import { AlbumCoverGrid, FavoriteTrackGrid } from "./LibraryGrids";
 import { VinylSongs } from "./VinylSongs";
 import { VinylArtists, VinylPlaylists } from "./VinylEntities";
 import { DownloadTray } from "./downloadQueue";
@@ -79,6 +79,13 @@ export default function App() {
   const [recentSongs, setRecentSongs] = useState<Song[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
   const [albumMode, setAlbumMode] = useState("newest");
+  const [albumsHaveMore, setAlbumsHaveMore] = useState(false);
+  const [albumPageLoading, setAlbumPageLoading] = useState(false);
+  const [albumListRevision, setAlbumListRevision] = useState(0);
+  const albumsEpochRef = useRef(0);
+  const albumsOffsetRef = useRef(0);
+  const albumsModeRef = useRef("newest");
+  const albumsLoadingRef = useRef(false);
   const [artists, setArtists] = useState<Artist[]>([]);
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [favorites, setFavorites] = useState<StarredResults | null>(null);
@@ -196,9 +203,63 @@ export default function App() {
     }
   }
 
-  async function loadAlbums(mode = albumMode) {
+  // Server-side Navidrome pagination, no artificial shelves of 40 albums.
+  // Only one 80-record request at a time; ignore responses from an old filter.
+  async function loadAlbums(mode = albumsModeRef.current) {
+    const epoch = ++albumsEpochRef.current;
+    albumsModeRef.current = mode;
+    setAlbumListRevision((value) => value + 1);
+    albumsOffsetRef.current = 0;
+    albumsLoadingRef.current = true;
     setAlbumMode(mode);
-    await run(() => api.albums(mode, 120), (payload) => setAlbums(payload.items));
+    setAlbums([]);
+    setAlbumsHaveMore(false);
+    setAlbumPageLoading(true);
+    setError(null);
+    try {
+      const result = await api.albums(mode, 80, 0);
+      if (epoch !== albumsEpochRef.current) return;
+      setAlbums(result.items);
+      albumsOffsetRef.current = result.items.length;
+      setAlbumsHaveMore(result.items.length === 80);
+    } catch (caught) {
+      if (epoch === albumsEpochRef.current)
+        setError(caught instanceof Error ? caught.message : "Could not load albums.");
+    } finally {
+      if (epoch === albumsEpochRef.current) {
+        albumsLoadingRef.current = false;
+        setAlbumPageLoading(false);
+      }
+    }
+  }
+
+  async function loadNextAlbums() {
+    if (albumsLoadingRef.current || !albumsOffsetRef.current) return;
+    const epoch = albumsEpochRef.current;
+    const mode = albumsModeRef.current;
+    const offset = albumsOffsetRef.current;
+    albumsLoadingRef.current = true;
+    setAlbumPageLoading(true);
+    try {
+      const result = await api.albums(mode, 80, offset);
+      if (epoch !== albumsEpochRef.current) return;
+      setAlbums((previous) => {
+        const known = new Set(previous.map((album) => album.id));
+        return [...previous, ...result.items.filter((album) => !known.has(album.id))];
+      });
+      albumsOffsetRef.current += result.items.length;
+      setAlbumsHaveMore(result.items.length === 80);
+    } catch (caught) {
+      if (epoch === albumsEpochRef.current) {
+        setAlbumsHaveMore(false);
+        setError(caught instanceof Error ? caught.message : "Could not load more albums. Refresh to retry.");
+      }
+    } finally {
+      if (epoch === albumsEpochRef.current) {
+        albumsLoadingRef.current = false;
+        setAlbumPageLoading(false);
+      }
+    }
   }
 
   async function loadArtists() {
@@ -361,16 +422,18 @@ export default function App() {
 
   const selectedAlbumInfo = selectedAlbum ? albumDisplayInfo(selectedAlbum, selectedAlbum.song?.[0]) : null;
 
-  function renderAlbumGrid(items: Album[]) {
-    if (!items.length) return <p className="muted">No albums in this collection.</p>;
+  function renderAlbumGrid(items: Album[], libraryPaging = false) {
     return (
-      <div className="waxloom-album-vinyl">
-        <VinylAlbums albums={items} trackHints={recentSongs} batchSize={40}
-          label="Album covers. Swipe through the record bin."
-          onOpenAlbum={(album) => void openAlbum(album)}
-          onPlayAlbum={(album) => void playAlbum(album)}
-        />
-      </div>
+      <AlbumCoverGrid albums={items} trackHints={recentSongs}
+        identity={libraryPaging ? `library-${albumMode}-${albumListRevision}` : `albums-${items[0]?.id ?? "none"}`}
+        onOpenAlbum={(album) => void openAlbum(album)}
+        onPlayAlbum={(album) => void playAlbum(album)}
+        {...(libraryPaging ? {
+          onEndReached: () => void loadNextAlbums(),
+          hasMore: albumsHaveMore,
+          loadingMore: albumPageLoading,
+        } : {})}
+      />
     );
   }
 
@@ -532,7 +595,7 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-                {renderAlbumGrid(albums)}
+                {renderAlbumGrid(albums, true)}
               </>
             )}
           </div>
@@ -572,7 +635,18 @@ export default function App() {
         {view === "favorites" && (
           <div className="workspace-stack">
             <div className="section-toolbar"><div><p className="eyebrow">Navidrome starred</p><h2>Favorites</h2></div><button className="secondary-action" type="button" onClick={() => void loadFavorites()}>Refresh</button></div>
-            {favorites && <><section><h3>Artists</h3><VinylArtists artists={favorites.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums</h3>{renderAlbumGrid(favorites.albums)}</section><section><div className="section-toolbar"><h3>Tracks</h3><button className="secondary-action" type="button" onClick={() => player.playSongs(favorites.songs, 0, { ordered: true })} disabled={favorites.songs.length === 0}>▶ Play favorites</button></div><SongTable songs={favorites.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
+            {favorites && (
+              <section className="waxloom-favorites-grid">
+                <div className="section-toolbar">
+                  <p className="muted">{favorites.songs.length} favorite tracks</p>
+                  <button className="secondary-action" type="button"
+                    onClick={() => player.playSongs(favorites.songs, 0, { ordered: true })}
+                    disabled={!favorites.songs.length}>▶ Play favorites</button>
+                </div>
+                <FavoriteTrackGrid songs={favorites.songs} starOverrides={starOverrides}
+                  onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
+              </section>
+            )}
           </div>
         )}
 

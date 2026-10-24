@@ -216,9 +216,9 @@ try{
   // Home is intentionally SONG-first. Album navigation is a different view.
   await evaluate('document.querySelector(".waxloom-home-explore")?.click()');
   await wait(3850);
-  const albumsView=await evaluate('({name:document.querySelector(".topbar h1")?.textContent,covers:document.querySelectorAll(".waxloom-album-vinyl .waxloom-vinyl-face").length})');
+  const albumsView=await evaluate('({name:document.querySelector(".topbar h1")?.textContent,covers:document.querySelectorAll(".waxloom-library-grid .waxloom-grid-cover").length})');
   check(albumsView.covers===2,"Album browser must remain available outside Home");
-  await evaluate('document.querySelectorAll(".waxloom-album-vinyl .waxloom-vinyl-face")[1]?.click()');
+  await evaluate('document.querySelectorAll(".waxloom-library-grid .waxloom-grid-cover")[1]?.click()');
   await wait(200);
   const detail=await evaluate('({hero:document.querySelector(".detail-hero")?.textContent?.slice(0,170),play:!!document.querySelector(".detail-hero .primary-action")})');
   check(detail.play && detail.hero.includes("BRIGHT LIGHT"),"Real album view must load one-track album detail");

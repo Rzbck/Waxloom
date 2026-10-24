@@ -71,6 +71,7 @@ jobs:
         run: |
           .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite ios-background
           .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite home-fluidity
+          .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite library-grids
           .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite mobile
 
       - name: Smoke direct Vite launcher

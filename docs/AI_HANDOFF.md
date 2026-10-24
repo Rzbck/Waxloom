@@ -1,3 +1,10 @@
+## 2026-10-24 — Albums/Artists/Favorites responsive vertical grids
+
+- User screenshots: repeated batch carousels `More records`, truncated artist and album captions, literal `&nearr;`, Favorites cluttered by artists/albums when only tracks are wanted. Base source exact live Web `7dcd836`; dedicated worktree/branch `feat/library-vertical-grids-20261024`.
+- `LibraryGrids.tsx` + `library-grids.css` provide a native-scroll CSS Grid, desktop vinyl emerging on hover/focus, readable names and progressive IntersectionObserver reveal (48 nodes at first for 1,476 artists). Albums paginate through existing Navidrome endpoint in 80s and ignore obsolete filter responses. All album browsing and artist detail/search surfaces share the grid; Home song-first vinyl and Discovery unaffected.
+- Favorites **only track artwork** with Play/Like/Add-to-playlist. Removes separate favorite albums/artists sections from UI, NOT Navidrome's stored data. Broken entity removed in artist grid; playlist glyph now valid Unicode ↗. QA synthetic browser 25 assertions (1,476 artists, 171 albums page offsets 0/80/160, desktop hover and phones 320–768px, no horizontal overflow), plus existing audio regressions.
+- Full evidence, CI, rollout, rollback notes: `docs/LIBRARY_VERTICAL_GRIDS_20261024.md`.
+
 ## 2026-10-24 — Vinyl single caption and animated MediaSession Next
 
 - User feedback: current Home repeats every song's title, artist, album under its sleeve and again under the central selection. Users want a slightly larger center sleeve with a visibly emerging black record, and an animated Next rather than immediate teleport.
