@@ -87,12 +87,16 @@
   position:absolute;inset:0;
 }
 .waxloom-import-v2 .waxloom-import-thumbnail .waxloom-import-play {
-  top:50%;left:50%;width:44px;height:44px;
+  /* inset:auto previously reset top/left and pinned Play to the corner. */
+  position:absolute;
+  inset:50% auto auto 50%;
+  margin:0;
   transform:translate(-50%,-50%);
-  position:absolute;inset:auto;
+  width:44px;height:44px;
+  z-index:7;
   border:1px solid #ffffffa1;outline:2px solid #0005;
-  background:#18121ddc;backdrop-filter:blur(5px);
-  color:#f8e9ff;opacity:0;
+  background:#18121de8;backdrop-filter:blur(5px);
+  color:#f8e9ff;opacity:.88;
   transition:opacity .13s ease, background .13s ease;
 }
 .waxloom-import-v2 .waxloom-import-track:hover .waxloom-import-play,

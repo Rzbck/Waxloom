@@ -6,7 +6,7 @@ if(!tab)throw Error("Isolated Chrome tab missing");
 const ws=new WebSocket(tab.webSocketDebuggerUrl);
 await new Promise((res,rej)=>{ws.onopen=res;ws.onerror=rej});
 let sequence=0;const pending=new Map(),failures=[],errors=[];
-const counts={browse:0,expand:0,preview:0,imports:0,active:0,maxActive:0,playlistWrites:0,media:0};
+const counts={browse:0,expand:0,preview:0,imports:0,active:0,maxActive:0,playlistWrites:0,media:0,channelLists:0};
 const check=(cond,msg)=>{if(!cond)failures.push(msg)};
 const rpc=(method,params={})=>new Promise((res,rej)=>{
   const id=++sequence;pending.set(id,{res,rej});ws.send(JSON.stringify({id,method,params}));
@@ -66,10 +66,17 @@ ws.onmessage=async({data})=>{
       await wait(190);
       await json(requestId,{items:[playlist],count:1});
     }else if(path==="/api/imports/youtube/channels"){
-      await json(requestId,{items:[{kind:"channel",id:"UCMF6WPYkYxW3d8ZLxckKzZg",title:"Artist One - Topic",
-        url:"https://www.youtube.com/channel/UCMF6WPYkYxW3d8ZLxckKzZg",verified:true}],count:1});
+      await json(requestId,{items:[
+        {kind:"channel",id:"UCMF6WPYkYxW3d8ZLxckKzZg",title:"Artist One - Topic",
+          url:"https://www.youtube.com/channel/UCMF6WPYkYxW3d8ZLxckKzZg",verified:true},
+        {kind:"channel",id:"UC1234567890123456789012",title:"Artist One Empty Channel",
+          url:"https://www.youtube.com/channel/UC1234567890123456789012",verified:false},
+      ],count:2});
     }else if(path==="/api/imports/youtube/channel-playlists"){
-      await json(requestId,{items:[playlist],count:1});
+      counts.channelLists++;
+      await wait(95);
+      await json(requestId,payload().channel_id==="UCMF6WPYkYxW3d8ZLxckKzZg"
+        ?{items:[playlist],count:1}:{items:[],count:0});
     }else if(path==="/api/imports/youtube/expand"){
       counts.expand++;await wait(180);
       await json(requestId,{collection:playlist,items:tracks,count:3,truncated:false});
@@ -117,14 +124,39 @@ try{
   const covers=await evaluate('({videoThumb:document.querySelector(".waxloom-import-track .waxloom-youtube-art-photo")?.getAttribute("src"),albumCover:!!document.querySelector(".waxloom-import-collection .waxloom-youtube-art"),pixel:document.querySelector(".waxloom-import-track .waxloom-pixel-art")?.getAttribute("src"),inlineQueue:!!document.querySelector(".waxloom-import-queue")})');
   check(covers.videoThumb?.includes("i.ytimg.com/vi/")&&covers.albumCover&&covers.pixel?.startsWith("data:image/svg+xml,")&&!covers.inlineQueue,
     "Track and playlist artwork uses real YouTube thumbnails over original pixel-art; only global popup queue");
-  const channelCard=await evaluate('!!document.querySelector(".waxloom-import-channel-card")');
-  check(channelCard,"Artist channel discovery must be independently available");
+  const channelCards=await evaluate('([...document.querySelectorAll(".waxloom-import-channel-card strong")].map(x=>x.textContent))');
+  check(channelCards.length===1&&channelCards[0]==="Artist One - Topic",
+    "Only real artist channels with usable public playlists should be shown");
+  check(counts.channelLists===2,"Background verifies 2 channels before showing usable one");
+  const centered=await evaluate('(()=>{const art=document.querySelector(".waxloom-import-results:not(.is-expanded) .waxloom-import-thumbnail");const play=art?.querySelector(".waxloom-import-play");if(!art||!play)return null;const a=art.getBoundingClientRect(),b=play.getBoundingClientRect();return {dx:Math.abs(a.left+a.width/2-b.left-b.width/2),dy:Math.abs(a.top+a.height/2-b.top-b.height/2),opacity:Number(getComputedStyle(play).opacity),width:b.width}})()');
+  check(centered&&centered.dx<2&&centered.dy<2&&centered.opacity>=.75&&centered.width>=40,
+    "Play must be visible and centered over each album-art track (desktop)");
   await evaluate('document.querySelector(".waxloom-import-channel-card")?.click()');
-  await wait(310);
+  await wait(125);
   check(await evaluate('!!document.querySelector(".waxloom-import-channel-expanded")&&!!document.querySelector(".waxloom-import-collection-open")'),
-    "A selected artist channel must show its playlist covers");
+    "Selected verified artist channel shows cached playlist covers instantly");
+  const initialRequests=counts.browse,initialChannelRequests=counts.channelLists;
   await evaluate('document.querySelector(".waxloom-import-channel-expanded .waxloom-import-back")?.click()');
-  await wait(130);
+  await wait(110);
+  const restored=await evaluate('({query:document.querySelector(".waxloom-import-search input")?.value,tracks:document.querySelectorAll(".waxloom-import-track").length,collections:document.querySelectorAll(".waxloom-import-collection").length,channels:document.querySelectorAll(".waxloom-import-channel-card").length,filter:document.querySelector(".waxloom-import-filters .is-active")?.textContent})');
+  check(restored.query==="Artist One"&&restored.tracks===3&&restored.collections===1&&restored.channels===1&&restored.filter==="All"&&counts.browse===initialRequests,
+    "Back from channel must restore query, all tracks/album/channels immediately without new search");
+  await evaluate('document.querySelector(".waxloom-import-channel-card")?.click()');
+  await wait(90);
+  await evaluate('document.querySelector(".waxloom-import-collection-open")?.click()');
+  await wait(350);
+  check(await evaluate('!!document.querySelector(".waxloom-import-album-detail")&&document.querySelectorAll(".waxloom-import-track").length===3'),
+    "Opening playlist under channel renders its songs");
+  const albumCenter=await evaluate('(()=>{const art=document.querySelector(".waxloom-import-results.is-expanded .waxloom-import-thumbnail");const play=art?.querySelector(".waxloom-import-play");if(!art||!play)return null;const a=art.getBoundingClientRect(),b=play.getBoundingClientRect();return {dx:Math.abs(a.left+a.width/2-b.left-b.width/2),dy:Math.abs(a.top+a.height/2-b.top-b.height/2),opacity:Number(getComputedStyle(play).opacity)}})()');
+  check(albumCenter&&albumCenter.dx<2&&albumCenter.dy<2&&albumCenter.opacity>.8,"Play centered in expanded playlist too");
+  await evaluate('document.querySelector(".waxloom-import-album-detail .waxloom-import-back")?.click()');
+  await wait(100);
+  check(await evaluate('!!document.querySelector(".waxloom-import-channel-expanded")&&document.querySelectorAll(".waxloom-import-collection").length===1'),
+    "Back from album within channel restores its cached playlist instead of blank screen");
+  await evaluate('document.querySelector(".waxloom-import-channel-expanded .waxloom-import-back")?.click()');
+  await wait(100);
+  check(await evaluate('document.querySelectorAll(".waxloom-import-track").length===3&&document.querySelectorAll(".waxloom-import-collection").length===1')&&counts.browse===initialRequests&&counts.channelLists===initialChannelRequests,
+    "Two consecutive Back actions restore original results, no network re-search or channel re-fetch");
   await evaluate('document.querySelector(".waxloom-import-track .waxloom-import-thumbnail button")?.click()');
   await wait(760);
   const sample=await evaluate('({active:!!document.querySelector(".waxloom-import-track.is-playing"),slider:!!document.querySelector(".waxloom-import-seek input"),src:document.querySelector("audio")?.getAttribute("src"),duration:document.querySelector(".waxloom-import-seek")?.textContent})');
@@ -154,9 +186,10 @@ try{
   for(const width of [320,390,768]){
     await rpc("Emulation.setDeviceMetricsOverride",{width,height:844,deviceScaleFactor:1,mobile:true});
     await wait(100);
-    const state=await evaluate('({page:document.documentElement.scrollWidth,width:innerWidth,search:document.querySelector(".waxloom-import-search").getBoundingClientRect().width,action:!!document.querySelector(".waxloom-import-actionbar")})');
+    const state=await evaluate('(()=>{const thumb=document.querySelector(".waxloom-import-results.is-expanded .waxloom-import-thumbnail");const play=thumb?.querySelector(".waxloom-import-play");const a=thumb?.getBoundingClientRect(),b=play?.getBoundingClientRect();return {page:document.documentElement.scrollWidth,width:innerWidth,search:document.querySelector(".waxloom-import-search").getBoundingClientRect().width,action:!!document.querySelector(".waxloom-import-actionbar"),playDx:a&&b?Math.abs(a.left+a.width/2-b.left-b.width/2):999,playDy:a&&b?Math.abs(a.top+a.height/2-b.top-b.height/2):999,playOpacity:play?Number(getComputedStyle(play).opacity):0}})()');
     mobile.push(state);
     check(state.page<=width+1&&state.search<=width+1&&state.action,"Import must fit width "+width+"px");
+    check(state.playDx<2&&state.playDy<2&&state.playOpacity>.8,"Expanded album Play must remain centered and visible at "+width+"px");
   }
   console.log(JSON.stringify({passed:!failures.length&&!errors.length,failures,errors,counts,initial,results,sample,seek,jobs,mobile},null,2));
   if(failures.length||errors.length)process.exitCode=1;

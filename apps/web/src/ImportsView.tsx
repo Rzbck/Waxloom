@@ -12,6 +12,19 @@ import "./imports-v2.css";
 import "./imports-v3.css";
 
 type Filter = "all" | "tracks" | "collections";
+type SearchSnapshot = {
+  tracks: YouTubeBrowseTrack[];
+  collections: YouTubeBrowseCollection[];
+  channels: YouTubeBrowseChannel[];
+  filter: Filter;
+  unavailableIds: string[];
+  selection: Record<string, YouTubeBrowseTrack>;
+};
+function usableChannelPlaylists(items: YouTubeBrowseCollection[]) {
+  return items.filter((item) =>
+    item.count !== 0 && /^https:\/\/www\.youtube\.com\/playlist\?list=[a-zA-Z0-9_-]{8,90}$/.test(item.url),
+  );
+}
 const previewCache = new Map<string, { at: number; url: string; duration?: number }>();
 const previewInFlight = new Map<string, Promise<{ preview_url: string; duration?: number }>>();
 const PREVIEW_VALID_MS = 65_000;
@@ -67,7 +80,8 @@ export function ImportsView({
   const requestEpochRef = useRef(0);
   const hoverTimerRef = useRef<number | null>(null);
   const searchedTermRef = useRef("");
-  const searchSnapshotRef = useRef<{tracks:YouTubeBrowseTrack[];collections:YouTubeBrowseCollection[]}|null>(null);
+  const searchSnapshotRef = useRef<SearchSnapshot | null>(null);
+  const channelPlaylistsRef = useRef(new Map<string, YouTubeBrowseCollection[]>());
   const currentId = player.currentPreview?.recording_mbid?.startsWith("yt:")
     ? player.currentPreview.recording_mbid.slice(3) : null;
   const currentDuration = Math.max(player.duration || 0, player.currentPreview?.duration || 0);
@@ -113,6 +127,7 @@ export function ImportsView({
     setCollections([]);
     setChannels([]);
     setOpenedChannel(null);
+    setFilter("all");
     setSelection({});
     setUnavailableIds([]);
     searchSnapshotRef.current = null;
@@ -122,12 +137,46 @@ export function ImportsView({
       setTracks(data.items);
       setCollections(data.collections);
       searchedTermRef.current = clean;
-      searchSnapshotRef.current = { tracks: data.items, collections: data.collections };
+      searchSnapshotRef.current = {
+        tracks: data.items, collections: data.collections, channels: [],
+        filter: "all", unavailableIds: [], selection: {},
+      };
       if (!clean.startsWith("http")) {
         // Album/playlist search is independently slow on YouTube. Don't make
         // a user wait for it before displaying songs.
         void api.youtubeChannels(clean, 4).then((extra) => {
-          if (epoch === requestEpochRef.current) setChannels(extra.items);
+          if (epoch !== requestEpochRef.current) return;
+          // Only show artist channels with at least one real, non-empty
+          // public playlist. Verification happens after songs have painted.
+          // Two workers prevent a row of empty channels and avoid flooding
+          // the self-hosted yt-dlp service with parallel metadata requests.
+          const candidates = extra.items.slice(0, 4);
+          let cursor = 0;
+          const verifyChannel = async () => {
+            while (epoch === requestEpochRef.current && cursor < candidates.length) {
+              const channel = candidates[cursor++];
+              let playlists = channelPlaylistsRef.current.get(channel.id);
+              if (!playlists) {
+                try {
+                  const result = await api.youtubeChannelPlaylists(channel.id, 20);
+                  playlists = usableChannelPlaylists(result.items);
+                } catch {
+                  playlists = [];
+                }
+                channelPlaylistsRef.current.set(channel.id, playlists);
+              }
+              if (epoch !== requestEpochRef.current || !playlists.length) continue;
+              setChannels((previous) => {
+                if (previous.some((item) => item.id === channel.id)) return previous;
+                const approved = new Set([...previous.map((item) => item.id), channel.id]);
+                const verified = candidates.filter((item) => approved.has(item.id));
+                if (searchSnapshotRef.current) searchSnapshotRef.current.channels = verified;
+                return verified;
+              });
+            }
+          };
+          void verifyChannel();
+          void verifyChannel();
         }).catch(() => undefined);
         void api.youtubeCollections(clean, 8).then((extra) => {
           if (epoch === requestEpochRef.current) {
@@ -178,7 +227,15 @@ export function ImportsView({
     void performSearch(query);
   }
 
+  function rememberSearchResults() {
+    searchSnapshotRef.current = {
+      tracks: [...tracks], collections: [...collections], channels: [...channels],
+      filter, unavailableIds: [...unavailableIds], selection: { ...selection },
+    };
+  }
+
   const expandCollection = async (collection: YouTubeBrowseCollection) => {
+    if (!openedChannel && !expanded) rememberSearchResults();
     const epoch = ++requestEpochRef.current;
     setOpening(collection.id);
     setExpanded(collection);
@@ -295,34 +352,67 @@ export function ImportsView({
     } finally { setCollectionLoading(null); }
   }
   async function openArtistChannel(channel: YouTubeBrowseChannel) {
+    rememberSearchResults();
     const epoch = ++requestEpochRef.current;
     setOpenedChannel(channel);
     setExpanded(null);
     setFilter("collections");
-    setCollections([]);
     setTracks([]);
+    setError(null);
+    setNotice(null);
+    const saved = channelPlaylistsRef.current.get(channel.id);
+    if (saved?.length) {
+      setCollections(saved);
+      setOpening(null);
+      return;
+    }
+    // Defensive fallback for a channel opened before verification finishes.
+    setCollections([]);
     setOpening(channel.id);
     try {
       const result = await api.youtubeChannelPlaylists(channel.id, 20);
-      if (epoch === requestEpochRef.current) setCollections(result.items);
+      const usable = usableChannelPlaylists(result.items);
+      channelPlaylistsRef.current.set(channel.id, usable);
+      if (epoch === requestEpochRef.current) setCollections(usable);
     } catch (caught) {
-      if (epoch === requestEpochRef.current) setError(caught instanceof Error ? caught.message : "Channel playlists unavailable.");
+      if (epoch === requestEpochRef.current)
+        setError(caught instanceof Error ? caught.message : "Channel playlists unavailable.");
     } finally {
       if (epoch === requestEpochRef.current) setOpening(null);
     }
   }
   function backFromAlbum() {
-    if (openedChannel) {
-      requestEpochRef.current += 1;
-      setExpanded(null); setTracks([]); setSelection({}); setFilter("collections");
-    } else backToResults();
+    if (!openedChannel) {
+      backToResults();
+      return;
+    }
+    requestEpochRef.current += 1;
+    setExpanded(null);
+    setOpening(null);
+    setError(null);
+    setNotice(null);
+    setTracks([]);
+    setSelection({});
+    setFilter("collections");
+    // The previous code had cleared this list on album open, making Back
+    // show an empty channel and forcing another search. Use cached data.
+    setCollections(channelPlaylistsRef.current.get(openedChannel.id) ?? []);
   }
   function backToResults() {
     requestEpochRef.current += 1;
-    setExpanded(null); setOpening(null); setOpenedChannel(null);
-    setFilter("all"); setSelection({}); setUnavailableIds([]);
-    setTracks(searchSnapshotRef.current?.tracks ?? []);
-    setCollections(searchSnapshotRef.current?.collections ?? []);
+    const snapshot = searchSnapshotRef.current;
+    setExpanded(null);
+    setOpening(null);
+    setOpenedChannel(null);
+    setBusy(false);
+    setError(null);
+    setNotice(null);
+    setFilter(snapshot?.filter ?? "all");
+    setTracks(snapshot?.tracks ?? []);
+    setCollections(snapshot?.collections ?? []);
+    setChannels(snapshot?.channels ?? []);
+    setUnavailableIds(snapshot?.unavailableIds ?? []);
+    setSelection(snapshot?.selection ?? {});
   }
   const queueDownloads = () => {
     if (!runtimeReady || !selectedItems.length || !permitDownload()) return;
