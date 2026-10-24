@@ -559,6 +559,29 @@ async def youtube_collections(payload: YouTubeBrowseRequest) -> dict[str, object
         raise HTTPException(status_code=502, detail="Playlist search is unavailable.") from exc
 
 
+@app.post("/api/imports/youtube/channels")
+async def youtube_channels(payload: YouTubeBrowseRequest) -> dict[str, object]:
+    try:
+        return await asyncio.to_thread(_youtube_browse.channels, payload.query, payload.limit)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="YouTube channel search unavailable.") from exc
+
+
+class YouTubeChannelRequest(BaseModel):
+    channel_id: str = Field(min_length=24, max_length=40)
+    limit: int = Field(default=20, ge=1, le=30)
+
+
+@app.post("/api/imports/youtube/channel-playlists")
+async def youtube_channel_playlists(payload: YouTubeChannelRequest) -> dict[str, object]:
+    try:
+        return await asyncio.to_thread(_youtube_browse.channel_playlists, payload.channel_id, payload.limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Could not read this channel's playlists.") from exc
+
+
 @app.post("/api/imports/youtube/expand")
 async def youtube_expand(payload: YouTubeExpandRequest) -> dict[str, object]:
     try:

@@ -65,6 +65,11 @@ ws.onmessage=async({data})=>{
     }else if(path==="/api/imports/youtube/collections"){
       await wait(190);
       await json(requestId,{items:[playlist],count:1});
+    }else if(path==="/api/imports/youtube/channels"){
+      await json(requestId,{items:[{kind:"channel",id:"UCMF6WPYkYxW3d8ZLxckKzZg",title:"Artist One - Topic",
+        url:"https://www.youtube.com/channel/UCMF6WPYkYxW3d8ZLxckKzZg",verified:true}],count:1});
+    }else if(path==="/api/imports/youtube/channel-playlists"){
+      await json(requestId,{items:[playlist],count:1});
     }else if(path==="/api/imports/youtube/expand"){
       counts.expand++;await wait(180);
       await json(requestId,{collection:playlist,items:tracks,count:3,truncated:false});
@@ -109,6 +114,17 @@ try{
   await wait(580);
   const results=await evaluate('({tracks:document.querySelectorAll(".waxloom-import-track").length,collections:document.querySelectorAll(".waxloom-import-collection").length})');
   check(results.tracks===3&&results.collections===1,"Artist-only search should display songs + collection");
+  const covers=await evaluate('({videoThumb:document.querySelector(".waxloom-import-track .waxloom-youtube-art-photo")?.getAttribute("src"),albumCover:!!document.querySelector(".waxloom-import-collection .waxloom-youtube-art"),pixel:document.querySelector(".waxloom-import-track .waxloom-pixel-art")?.getAttribute("src"),inlineQueue:!!document.querySelector(".waxloom-import-queue")})');
+  check(covers.videoThumb?.includes("i.ytimg.com/vi/")&&covers.albumCover&&covers.pixel?.startsWith("data:image/svg+xml,")&&!covers.inlineQueue,
+    "Track and playlist artwork uses real YouTube thumbnails over original pixel-art; only global popup queue");
+  const channelCard=await evaluate('!!document.querySelector(".waxloom-import-channel-card")');
+  check(channelCard,"Artist channel discovery must be independently available");
+  await evaluate('document.querySelector(".waxloom-import-channel-card")?.click()');
+  await wait(310);
+  check(await evaluate('!!document.querySelector(".waxloom-import-channel-expanded")&&!!document.querySelector(".waxloom-import-collection-open")'),
+    "A selected artist channel must show its playlist covers");
+  await evaluate('document.querySelector(".waxloom-import-channel-expanded .waxloom-import-back")?.click()');
+  await wait(130);
   await evaluate('document.querySelector(".waxloom-import-track .waxloom-import-thumbnail button")?.click()');
   await wait(760);
   const sample=await evaluate('({active:!!document.querySelector(".waxloom-import-track.is-playing"),slider:!!document.querySelector(".waxloom-import-seek input"),src:document.querySelector("audio")?.getAttribute("src"),duration:document.querySelector(".waxloom-import-seek")?.textContent})');
@@ -120,7 +136,7 @@ try{
   await evaluate('document.querySelector(".waxloom-import-track.is-playing .waxloom-import-thumbnail button")?.click()');
   await wait(90);
   check(await evaluate('document.querySelector("audio")?.paused===true'),"Pause selected preview");
-  await evaluate('document.querySelector(".waxloom-import-collection")?.click()');
+  await evaluate('document.querySelector(".waxloom-import-collection-open")?.click()');
   await wait(400);
   check(await evaluate('document.querySelectorAll(".waxloom-import-track").length')===3,"Playlist expands to individual songs");
   await evaluate('document.querySelector(".waxloom-import-select-all")?.click()');
@@ -129,10 +145,10 @@ try{
   await wait(60);
   await evaluate('document.querySelector(".waxloom-import-download")?.click()');
   await wait(1300);
-  const jobs=await evaluate('({count:document.querySelectorAll(".waxloom-import-job").length,success:[...document.querySelectorAll(".waxloom-import-job-phase")].filter(x=>x.textContent.includes("existing")).length})');
-  check(jobs.count===3&&counts.imports===3&&counts.maxActive<=2&&counts.playlistWrites===3,
-    "3 selections must reuse two-worker Discovery queue and add to playlist");
-  check(jobs.success===3,"Each queued selection completes via existing import pipeline");
+  const jobs=await evaluate('({inlineQueue:!!document.querySelector(".waxloom-import-queue"),hero:!!document.querySelector(".waxloom-import-album-detail"),cards:document.querySelectorAll(".waxloom-import-track").length})');
+  check(!jobs.inlineQueue&&jobs.hero&&jobs.cards===3&&counts.imports===3&&counts.maxActive<=2&&counts.playlistWrites===3,
+    "3 songs must reuse 2 workers and playlist with no duplicate inline queue");
+  check(counts.active===0,"All selected songs completed via Discovery queue");
   // Revisit iPhone widths: fast unified controls and one-line actionbar.
   const mobile=[];
   for(const width of [320,390,768]){

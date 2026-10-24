@@ -8,8 +8,9 @@ import pytest
 
 from waxloom_api import youtube_browse
 from waxloom_api.cover_cache import ArtworkCache
+from waxloom_api.providers.youtube import _manual_music_source_allowed
 from waxloom_api.youtube_browse import (
-    YouTubeBrowseService, _is_audio_https, _track_info, canonical_source,
+    YouTubeBrowseService, _is_audio_https, _track_info, _relevance, canonical_source,
 )
 
 WATCH = "https://www.youtube.com/watch?v=AbCdEf012_3"
@@ -47,6 +48,7 @@ def test_video_metadata_without_fabricated_album():
     assert obj["suggested_artist"] == "Original Artist"
     assert obj["suggested_title"] == "Exact Track"
     assert "album" not in obj
+    assert obj["thumbnail"] == "https://i.ytimg.com/vi/AbCdEf012_3/hqdefault.jpg"
 
 
 def test_audio_preview_destination_only_https_approved_cdn():
@@ -90,7 +92,7 @@ class FakeYoutubeDL:
         if "/watch?" in target:
             return {"id": "AbCdEf012_3", "title": "Artist - Song 1",
                     "url": "https://rr3.googlevideo.com/videoplayback?expire=999",
-                    "duration": 199}
+                    "duration": 199, "ext": "m4a", "acodec": "mp4a.40.2", "vcodec": "none", "protocol": "https"}
         raise AssertionError(target)
 
 

@@ -36,6 +36,8 @@ import "./vinyl-center-motion.css";
 import "./library-grids.css";
 import "./instant-artwork.css";
 import "./cover-editorial.css";
+import "./pixel-covers.css";
+import "./youtube-art.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -97,6 +97,24 @@ async function finishPlaylists(
   }
 }
 
+export function authorizeYouTubeImport(): boolean {
+  const key = "waxloom.authorizedMediaImports";
+  try {
+    if (window.localStorage.getItem(key) === "true") return true;
+  } catch { /* Private browsing */ }
+  const agreed = window.confirm(
+    "Download this music to your personal library? Only save music that you are authorized to store.",
+  );
+  if (agreed) {
+    try { window.localStorage.setItem(key, "true"); } catch { /* Private browsing */ }
+  }
+  return agreed;
+}
+export function hasImportAuthorization(): boolean {
+  try { return window.localStorage.getItem("waxloom.authorizedMediaImports") === "true"; }
+  catch { return false; }
+}
+
 export function enqueueSelectedYouTube(
   track: YouTubeBrowseTrack,
   authorized: boolean,
@@ -245,7 +263,7 @@ export function DownloadTray() {
       <button className="waxloom-download-summary" type="button" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded}>
         <span className={busy > 0 ? "waxloom-dl-dot waxloom-dl-active" : "waxloom-dl-dot"} aria-hidden="true" />
         <strong>Downloads</strong> <span>{busy > 0 ? `${busy} running` : `${downloads.length} tracked`}</span>
-        {failed > 0 ? <em>{failed} to review</em> : null}
+        {failed > 0 ? <em>{failed} failed / needs action</em> : null}
         <span aria-hidden="true">{expanded ? "▾" : "▴"}</span>
       </button>
       {expanded && (
@@ -253,7 +271,8 @@ export function DownloadTray() {
           {downloads.map((item) => (
             <div key={item.id} className="waxloom-download-item">
               <div><strong>{item.title}</strong><small>{item.artist}</small></div>
-              <span className={`waxloom-dl-phase waxloom-dl-${item.phase}`} title={item.detail}>{item.detail}</span>
+              <span className={`waxloom-dl-phase waxloom-dl-${item.phase}`} title={item.detail}>{item.phase === "failed" ? "Failed" : item.phase === "manual" ? "Needs action" : item.detail}</span>
+              {["failed","manual"].includes(item.phase) && <p className="waxloom-download-error" role="status">{item.detail}</p>}
             </div>
           ))}
         </div>

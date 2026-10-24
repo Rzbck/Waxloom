@@ -158,8 +158,8 @@ try {
   check(!firstAlbums.hasMoreButtons, "No manual More records or More artists sections");
   check(count.albums[0]?.offset === 0 && count.albums[0]?.size === 80,
     "Initial albums must fetch first 80 only, not the entire library");
-  const generated = await evaluate('(()=>{const covers=[...document.querySelectorAll(".waxloom-library-grid .waxloom-generated-cover")];return {count:covers.length,first:covers[0]?.getAttribute("data-artwork"),color:getComputedStyle(covers[0]).backgroundImage,unique:new Set(covers.slice(0,12).map(x=>x.style.getPropertyValue("--cover-hue"))).size}})()');
-  check(generated.count===firstAlbums.cards && generated.unique>=8 && generated.color.includes("gradient"),
+  const generated = await evaluate('(()=>{const covers=[...document.querySelectorAll(".waxloom-library-grid .waxloom-generated-cover")];return {count:covers.length,first:covers[0]?.getAttribute("data-artwork"),pixel:covers[0]?.querySelector(".waxloom-pixel-art")?.getAttribute("src"),unique:new Set(covers.slice(0,12).map(x=>x.querySelector(".waxloom-pixel-art")?.getAttribute("src"))).size}})()');
+  check(generated.count===firstAlbums.cards && generated.unique>=8 && generated.pixel?.startsWith("data:image/svg+xml,"),
     "All cards must have distinct, deterministic generated artwork before any media response");
   check(count.covers.every(x=>x.size==="160"),"Album/artist grid must request 160px thumbnails, never 320px assets");
   const editorial=await evaluate('(()=>{const items=[...document.querySelectorAll(".waxloom-library-grid .waxloom-generated-cover")];return {labels:document.querySelectorAll(".waxloom-generated-seal").length,containsWax:items.some(x=>x.textContent?.includes("WAX")),palettes:new Set(items.map(x=>x.style.getPropertyValue("--cover-base"))).size,variants:new Set(items.map(x=>[...x.classList].find(n=>n.startsWith("art-variant-")))).size}})()');

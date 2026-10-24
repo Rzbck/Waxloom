@@ -1,5 +1,6 @@
 import { useState, type CSSProperties, type SyntheticEvent } from "react";
 import { api } from "./api";
+import { pixelCoverUrl } from "./pixelCovers";
 
 /**
  * Artwork is available at first paint, with zero network dependency.
@@ -112,10 +113,7 @@ export function CoverArtwork({
   return (
     <span className={`waxloom-generated-cover art-variant-${theme.variant} ${className}`}
       data-artwork={loaded === "real" ? "photo" : "generated"} style={style} aria-hidden="true">
-      <span className="waxloom-generated-pattern" />
-      <span className="waxloom-generated-disc" />
-      <span className="waxloom-generated-flare" />
-      <span className="waxloom-generated-seal" />
+      <img className="waxloom-pixel-art" src={pixelCoverUrl(seed)} alt="" draggable={false} />
       {coverId && loaded !== "synthetic" && (
         <img src={api.coverUrl(coverId, size)}
           className={loaded === "real" ? "waxloom-cover-photo is-ready" : "waxloom-cover-photo"}

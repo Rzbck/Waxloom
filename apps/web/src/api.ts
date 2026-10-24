@@ -318,6 +318,12 @@ export const api = {
   youtubeCollections: (query: string, limit = 8) => request<{ items: import("./types").YouTubeBrowseCollection[]; count: number }>("/api/imports/youtube/collections", {
     method: "POST", body: JSON.stringify({ query, limit }),
   }),
+  youtubeChannels: (query: string, limit = 4) => request<{items: import("./types").YouTubeBrowseChannel[]; count: number}>("/api/imports/youtube/channels", {
+    method: "POST", body: JSON.stringify({ query, limit }),
+  }),
+  youtubeChannelPlaylists: (channelId: string, limit = 20) => request<{items: import("./types").YouTubeBrowseCollection[]; count: number}>("/api/imports/youtube/channel-playlists", {
+    method: "POST", body: JSON.stringify({ channel_id: channelId, limit }),
+  }),
   youtubeExpand: (url: string, limit = 80) => request<YouTubeExpandResponse>("/api/imports/youtube/expand", {
     method: "POST", body: JSON.stringify({ url, limit }),
   }),

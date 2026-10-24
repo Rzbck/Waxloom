@@ -46,6 +46,7 @@ export type PreviewTrack = {
   duration?: number;
   preview_url?: string | null;
   source_title?: string;
+  thumbnail?: string | null;
   candidate?: DiscoveryCandidate;
 };
 
@@ -214,6 +215,14 @@ export type YouTubeBrowseTrack = {
   duration?: number | null;
   thumbnail?: string | null;
   url: string;
+};
+export type YouTubeBrowseChannel = {
+  kind: "channel";
+  id: string;
+  title: string;
+  url: string;
+  thumbnail?: string | null;
+  verified?: boolean;
 };
 export type YouTubeBrowseCollection = {
   kind: "album" | "playlist";

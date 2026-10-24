@@ -1,0 +1,29 @@
+/* Pixel-art sleeve edition: each record renders one deterministic 32×32
+   narrative scene, not geometric rings. Native cover images always win. */
+.waxloom-generated-cover {
+  background: #172027 !important;
+  image-rendering: auto;
+}
+.waxloom-generated-cover > .waxloom-pixel-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  opacity: 1;
+  border: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 1;
+}
+.waxloom-generated-cover > .waxloom-cover-photo {
+  z-index: 3;
+}
+.waxloom-generated-cover .waxloom-generated-pattern,
+.waxloom-generated-cover .waxloom-generated-disc,
+.waxloom-generated-cover .waxloom-generated-flare,
+.waxloom-generated-cover .waxloom-generated-seal {display:none!important;}
+@media(prefers-reduced-motion:reduce) {.waxloom-generated-cover > .waxloom-cover-photo {transition:none}}

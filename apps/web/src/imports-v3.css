@@ -1,0 +1,241 @@
+/* Import V3: one music-cover browser; album open = track list.
+   Artwork is the primary affordance, never a giant table of duplicate rows. */
+.waxloom-import-v2 {
+  --import-ink: #e9e5ed;
+  --import-muted: #a9a0aa;
+  --import-border: #403845;
+  --import-soft: #19181d;
+}
+.waxloom-import-v2 .waxloom-import-header h2 {letter-spacing:-.045em}
+.waxloom-import-v2 .waxloom-import-collections {
+  display: grid;
+  grid-template-columns: repeat(auto-fill,minmax(min(100%,188px),1fr));
+  gap: 14px;
+  align-items:start;
+}
+.waxloom-import-v2 .waxloom-import-collection {
+  display:block;
+  position: relative;
+  min-width:0;
+  background:transparent;
+  border: 0;
+  border-radius:9px;
+  padding:0;
+  overflow:visible;
+}
+.waxloom-import-collection-open {
+  display:flex; flex-direction:column; gap:8px;
+  background:transparent; border:0; color:inherit;
+  width:100%; padding:0; text-align:left; cursor:pointer; min-width:0;
+}
+.waxloom-import-v2 .waxloom-import-collection-art {
+  display:block; position:relative; flex-shrink:0;
+  width:100%; height:auto; aspect-ratio:1; overflow:hidden;
+  border:1px solid #554858; border-radius:9px;
+  background:#181c27;
+  box-shadow:0 6px 15px #0003;
+}
+.waxloom-import-collection-open:hover .waxloom-import-collection-art {
+  border-color:#ac98b5;box-shadow:0 10px 25px #0006;
+}
+.waxloom-import-collection-caption {display:flex;min-width:0; flex-direction:column;gap:3px;padding:0 2px}
+.waxloom-import-v2 .waxloom-import-collection-caption strong {
+  display:-webkit-box;overflow:hidden;-webkit-box-orient:vertical;
+  -webkit-line-clamp:2;line-height:1.35;min-height:2.7em;
+  font-size:12px;font-weight:730;overflow-wrap:anywhere;
+}
+.waxloom-import-v2 .waxloom-import-collection-caption em {
+  font-size:11px;color:#aa9da9;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;
+}
+.waxloom-import-collection-download {
+  position:absolute;top:9px;right:9px;z-index:5;
+  width:35px;height:35px;border-radius:9px;
+  border:1px solid #ece0f3a8; background:#18121ddd;
+  backdrop-filter:blur(8px);color:#fff;font-size:22px;
+  cursor:pointer;box-shadow:0 3px 11px #0007;
+}
+.waxloom-import-collection-download:hover {background:#bba6c7;color:#211728}
+.waxloom-import-collection-download:disabled {opacity:.5;cursor:wait}
+.waxloom-import-v2 .waxloom-import-results:not(.is-expanded) {
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(min(100%,176px),1fr));
+  align-items:start; gap:15px;
+}
+.waxloom-import-v2 .waxloom-import-results:not(.is-expanded) .waxloom-import-track {
+  position:relative;display:flex;flex-direction:column;gap:8px;
+  min-width:0; min-height:0;
+  padding:0 0 10px;
+  background:transparent;border:0;border-radius:9px;
+  transition:none;
+}
+.waxloom-import-v2 .waxloom-import-track>input[type=checkbox] {
+  position:absolute;top:10px;left:10px;z-index:8;
+  width:19px;height:19px;
+  accent-color:#c2a7ce;
+  box-shadow:0 1px 6px #0008;
+}
+.waxloom-import-v2 .waxloom-import-results:not(.is-expanded) .waxloom-import-track.is-playing .waxloom-import-thumbnail {
+  border-color:#ccb6dc;
+}
+.waxloom-import-v2 .waxloom-import-results:not(.is-expanded) .waxloom-import-thumbnail {
+  flex-shrink:0;position:relative;width:100%;height:auto;aspect-ratio:1;
+  background:#24212d; overflow:hidden;
+  border:1px solid #514452;border-radius:9px;
+}
+.waxloom-import-v2 .waxloom-import-thumbnail>.waxloom-youtube-art {
+  position:absolute;inset:0;
+}
+.waxloom-import-v2 .waxloom-import-thumbnail .waxloom-import-play {
+  top:50%;left:50%;width:44px;height:44px;
+  transform:translate(-50%,-50%);
+  position:absolute;inset:auto;
+  border:1px solid #ffffffa1;outline:2px solid #0005;
+  background:#18121ddc;backdrop-filter:blur(5px);
+  color:#f8e9ff;opacity:0;
+  transition:opacity .13s ease, background .13s ease;
+}
+.waxloom-import-v2 .waxloom-import-track:hover .waxloom-import-play,
+.waxloom-import-v2 .waxloom-import-track.is-playing .waxloom-import-play,
+.waxloom-import-v2 .waxloom-import-play:focus-visible {
+  opacity:1;
+}
+.waxloom-import-v2 .waxloom-import-track-content {
+  min-width:0;display:flex;flex-direction:column;
+  gap:3px;padding:0 2px;
+  overflow:visible;
+}
+.waxloom-import-v2 .waxloom-import-track-content>strong {
+  font-size:12px;line-height:1.38;max-height:none;min-height:2.7em;
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;
+}
+.waxloom-import-v2 .waxloom-import-track-content>span {
+  font-size:10px;min-width:0;text-overflow:ellipsis;overflow:hidden;white-space:nowrap;
+}
+.waxloom-import-v2 .waxloom-import-track-tools {
+  position:absolute;top:9px;right:8px;
+  display:flex;flex-direction:column;align-items:flex-end;gap:6px;
+  z-index:5;
+}
+.waxloom-import-v2 .waxloom-import-track-tools .waxloom-import-add-button {
+  width:35px;height:35px;font-size:22px;
+  background:#15121ccc;color:#fff;border:1px solid #f3e4f2aa;
+  border-radius:9px;backdrop-filter:blur(8px);
+  box-shadow:0 2px 8px #0006;
+}
+.waxloom-import-v2 .waxloom-import-track-tools .waxloom-import-add-button:hover {
+  background:#c8b2d4;color:#1b1420;
+}
+.waxloom-import-v2 .waxloom-import-track-tools .waxloom-import-tag-button {
+  opacity:0; width:30px;height:30px;border-radius:7px;background:#18151ecb;
+}
+.waxloom-import-v2 .waxloom-import-track:hover .waxloom-import-tag-button,
+.waxloom-import-v2 .waxloom-import-tag-button:focus-visible {opacity:1}
+.waxloom-import-v2 .waxloom-import-track .waxloom-import-duration {display:none}
+.waxloom-import-v2 .waxloom-import-seek {max-width:100%;min-width:0;margin-top:3px}
+.waxloom-import-v2 .waxloom-import-seek input {min-width:10px;max-width:100%}
+.waxloom-import-v2 .waxloom-import-tag-editor {grid-template-columns:1fr}
+.waxloom-import-v2 .waxloom-import-track:has(input:checked) .waxloom-import-thumbnail {
+  outline:2px solid #c9b3d4;outline-offset:2px;
+}
+.waxloom-import-v2 .waxloom-import-album-detail {
+  display:flex;flex-direction:column;gap:12px;
+  background:#19161d;border:1px solid #413849;border-radius:15px;padding:14px;
+}
+.waxloom-import-back {align-self:flex-start;border:0;background:transparent;color:#c9aecf;cursor:pointer;font-size:12px;padding:6px}
+.waxloom-import-album-hero {display:grid;grid-template-columns:minmax(120px,205px) minmax(0,1fr);gap:22px;align-items:center}
+.waxloom-import-album-art {width:100%;aspect-ratio:1;min-width:0;position:relative;border-radius:9px;overflow:hidden;box-shadow:0 9px 22px #0007}
+.waxloom-import-album-info {display:flex;flex-direction:column;align-items:flex-start;gap:10px;min-width:0}
+.waxloom-import-album-info small {font-size:11px;letter-spacing:.15em;color:#bba8c1}
+.waxloom-import-album-info h3 {font-size:clamp(21px,2.4vw,35px);margin:0;line-height:1.16;overflow-wrap:anywhere}
+.waxloom-import-album-info p {margin:0;font-size:12px;color:#a99cae}
+.waxloom-import-album-download {padding:11px 15px;border:0;border-radius:9px;background:#c8b0d1;color:#201726;font-weight:760;cursor:pointer}
+.waxloom-import-album-download:disabled {opacity:.5;cursor:not-allowed}
+.waxloom-import-album-tracks-heading {display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-top:1px solid #3d3440;padding-top:13px}
+.waxloom-import-album-tracks-heading strong {font-size:15px}
+.waxloom-import-album-tracks-heading span {font-size:11px;color:#aa9cac}
+.waxloom-import-v2 .waxloom-import-results.is-expanded {display:flex;flex-direction:column;gap:4px}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-track {
+  display:grid;grid-template-columns:20px 58px minmax(0,1fr) auto;
+  align-items:center;gap:12px;min-height:70px;padding:6px 11px;
+  border:1px solid #393139;background:#17151a;border-radius:9px;
+}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-track>input[type=checkbox] {
+  position:static;width:18px;height:18px;
+}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-thumbnail {
+  width:58px;height:58px;border-radius:6px;aspect-ratio:1;
+}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-play {
+  opacity:1;width:34px;height:34px;transform:translate(-50%,-50%);
+}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-track-content>strong {min-height:0;font-size:13px}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-track-tools {
+  position:static;display:flex;flex-direction:row;align-items:center;gap:8px;
+}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-duration {
+  display:inline;font-size:10px;color:#9e91a8;
+}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-tag-button {opacity:1}
+.waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-add-button {
+  width:33px;height:33px;
+}
+.waxloom-import-v2 .waxloom-import-collections + .waxloom-import-results {margin-top:6px}
+@media(max-width:900px) {
+  .waxloom-import-v2 .waxloom-import-results:not(.is-expanded) {grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .waxloom-import-v2 .waxloom-import-collections {grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+  .waxloom-import-v2 .waxloom-import-track-tools .waxloom-import-tag-button {opacity:1}
+  .waxloom-import-v2 .waxloom-import-play {opacity:1}
+}
+@media(max-width:600px) {
+  .waxloom-import-v2 .waxloom-import-results:not(.is-expanded),
+  .waxloom-import-v2 .waxloom-import-collections {
+    grid-template-columns:repeat(2,minmax(0,1fr));gap:11px;
+  }
+  .waxloom-import-v2 .waxloom-import-track-tools .waxloom-import-add-button {width:32px;height:32px}
+  .waxloom-import-album-hero {grid-template-columns:118px minmax(0,1fr);gap:11px}
+  .waxloom-import-album-info h3 {font-size:18px}
+  .waxloom-import-album-info {gap:5px}
+  .waxloom-import-album-info p {font-size:10px}
+  .waxloom-import-album-download {padding:8px 10px;font-size:11px}
+  .waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-track {
+    grid-template-columns:16px 45px minmax(0,1fr) 33px;gap:6px;padding:6px;
+  }
+  .waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-thumbnail {
+    width:45px;height:45px;
+  }
+  .waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-duration,
+  .waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-tag-button {display:none}
+  .waxloom-import-v2 .waxloom-import-results.is-expanded .waxloom-import-track-content>strong {font-size:11px}
+  .waxloom-import-album-tracks-heading span {font-size:10px}
+}
+@media(max-width:360px) {
+  .waxloom-import-album-hero {grid-template-columns:92px minmax(0,1fr);gap:9px}
+  .waxloom-import-v2 .waxloom-import-results:not(.is-expanded),
+  .waxloom-import-v2 .waxloom-import-collections {gap:9px}
+}
+@media (prefers-reduced-motion:reduce) {
+  .waxloom-import-v2 .waxloom-import-play {transition:none}
+}
+
+/* Contextual artist-channel discovery, fetched without holding up tracks. */
+.waxloom-import-channel-section {display:flex;flex-direction:column;gap:10px;min-width:0}
+.waxloom-import-channel-section h3 {display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:14px;margin:0}
+.waxloom-import-channel-section h3 small {font-size:10px;font-weight:400;color:#aaa0ac}
+.waxloom-import-channel-row {display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:9px}
+.waxloom-import-channel-card {display:flex;align-items:center;gap:10px;min-width:0;border:1px solid #403845;border-radius:10px;background:#1c1920;color:inherit;text-align:left;padding:7px;cursor:pointer}
+.waxloom-import-channel-card>span:nth-child(2) {display:flex;flex:1;flex-direction:column;min-width:0;gap:3px}
+.waxloom-import-channel-card strong {font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.waxloom-import-channel-card small {font-size:10px;color:#a89ba7}
+.waxloom-import-channel-card:hover {border-color:#a58ba9}
+.waxloom-import-channel-art {position:relative;width:48px;height:48px;flex:none;border-radius:8px;overflow:hidden}
+.waxloom-import-channel-art img {position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.waxloom-import-channel-expanded {display:flex;gap:15px;align-items:center;border-radius:13px;background:#1a1720;border:1px solid #4b4050;padding:13px}
+.waxloom-import-channel-expanded small {font-size:10px;color:#c7a8c9;letter-spacing:.15em}
+.waxloom-import-channel-expanded h3 {margin:3px 0;font-size:19px}
+.waxloom-import-channel-expanded span {font-size:11px;color:#a99eaa}
+@media(max-width:600px){.waxloom-import-channel-row {grid-template-columns:repeat(2,minmax(0,1fr))}.waxloom-import-channel-card {gap:6px;padding:5px}.waxloom-import-channel-art {width:38px;height:38px}.waxloom-import-channel-card strong {font-size:10px}}
+
+/* Keep the existing Discovery popup, but reveal the COMPLETE failure instead of 138px ellipsis. */
+.waxloom-download-item .waxloom-download-error {grid-column:1/-1;min-width:0;margin:0 0 6px;color:#e9b6b0;font-size:11px;line-height:1.45;white-space:normal;overflow-wrap:anywhere;user-select:text;}
+.waxloom-download-item .waxloom-dl-phase.waxloom-dl-failed {color:#e9a29c;}

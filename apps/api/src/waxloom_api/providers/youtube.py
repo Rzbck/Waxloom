@@ -232,6 +232,15 @@ def _music_confidence(info: dict[str, Any]) -> tuple[bool, float]:
     return score >= 4.0, score
 
 
+def _manual_music_source_allowed(info: dict[str, Any]) -> bool:
+    """An explicit, verified music recording can lack YouTube music tags."""
+    if _music_confidence(info)[0]: return True
+    title = str(info.get("title") or "")
+    duration = info.get("duration")
+    formats = info.get("formats") or []
+    audio_only = any(str(item.get("acodec") or "none") != "none" and str(item.get("vcodec") or "none") == "none" for item in formats if isinstance(item, dict))
+    return (not _obvious_non_music_title(title) and isinstance(duration, (int,float)) and 45 <= duration <= 900 and audio_only)
+
 class YouTubeProvider:
     def __init__(self, *, cache_dir: Path) -> None:
         self.cache_dir = cache_dir
@@ -572,9 +581,11 @@ class YouTubeProvider:
             raise ValueError("The selected YouTube source could not be verified.") from exc
         if not isinstance(probe, dict):
             raise ValueError("The selected YouTube source could not be verified.")
-        is_music, _ = _music_confidence(probe)
-        if not is_music:
-            raise ValueError("The selected YouTube source does not look like a music track.")
+        if not _manual_music_source_allowed(probe):
+            raise ValueError(
+                "Selected video is not a standalone audio recording. "
+                "Choose a music track with a playable audio stream."
+            )
 
         output_root = output_root.resolve()
         artist_dir = output_root / _safe_component(artist, "Unknown Artist") / "Singles"

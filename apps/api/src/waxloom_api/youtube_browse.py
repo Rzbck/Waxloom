@@ -10,6 +10,7 @@ import copy
 import re
 import threading
 import time
+import unicodedata
 from typing import Any
 from urllib.parse import parse_qs, quote, urlparse
 
@@ -20,10 +21,33 @@ from waxloom_api.providers.youtube import YouTubeProvider
 
 _VIDEO = re.compile(r"^[A-Za-z0-9_-]{11}$")
 _LIST = re.compile(r"^[A-Za-z0-9_-]{8,90}$")
+_CHANNEL = re.compile(r"^UC[A-Za-z0-9_-]{22}$")
 _HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"}
 _TTL = 5 * 60
 _PREVIEW_TTL = 80
 _MAX_CACHE = 90
+
+_SEARCH_STOPWORDS = {"the","a","an","and","et","de","des","la","le","les","music","musique","official","video","album","playlist","full","audio"}
+_NOISY_SEARCH = ("solved","lostwave cases","case study","reaction","interview","tutorial","explained","review","documentary","podcast")
+
+def _tokens(value: str) -> list[str]:
+    folded = unicodedata.normalize("NFKD", value.casefold())
+    normalized = "".join(c for c in folded if not unicodedata.combining(c))
+    return [term for term in re.findall(r"[a-z0-9]+", normalized) if len(term)>1 and term not in _SEARCH_STOPWORDS]
+
+def _relevance(query: str, title: str, artist: str="") -> float:
+    terms = set(_tokens(query))
+    if not terms: return 0.
+    title_tokens = set(_tokens(title))
+    artist_tokens = set(_tokens(artist))
+    matches = terms & (title_tokens | artist_tokens)
+    coverage = len(matches)/len(terms)
+    if coverage < .75: return 0.
+    score = coverage * 10 + sum(2 if term in title_tokens else 1 for term in matches)
+    if any(word in (title + " " + artist).casefold() for word in _NOISY_SEARCH): score -= 19
+    if " - topic" in artist.casefold(): score += 2.5
+    return score
+
 
 
 def canonical_source(value: str) -> tuple[str, str]:
@@ -99,7 +123,7 @@ def _track_info(item: dict[str, Any]) -> dict[str, Any] | None:
         "suggested_title": guessed_title,
         "channel": channel,
         "duration": item.get("duration") if isinstance(item.get("duration"), (int, float)) else None,
-        "thumbnail": str(item.get("thumbnail") or "").strip()[:1200] or None,
+        "thumbnail": f"https://i.ytimg.com/vi/{ident}/hqdefault.jpg",
         "url": f"https://www.youtube.com/watch?v={ident}",
     }
 
@@ -125,7 +149,7 @@ def _collection(item: dict[str, Any]) -> dict[str, Any] | None:
         "title": name,
         "channel": str(item.get("channel") or item.get("uploader") or "").strip()[:200],
         "count": item.get("playlist_count") or item.get("n_entries"),
-        "thumbnail": item.get("thumbnail") or None,
+        "thumbnail": item.get("thumbnail") or (item.get("thumbnails") or [{}])[-1].get("url"),
         "url": f"https://www.youtube.com/playlist?list={ident}",
     }
 
@@ -202,9 +226,11 @@ class YouTubeBrowseService:
             if isinstance(entry, dict) and (track := _track_info(entry)):
                 tracks.append(track)
         unique_tracks = list({item["id"]: item for item in tracks}.values())
+        ranked = sorted(((_relevance(text, item["title"], item["channel"]), item) for item in unique_tracks), key=lambda pair: pair[0], reverse=True)
+        relevant = [item for score, item in ranked if score >= 5]
         return self._store(key, {
-            "items": unique_tracks[:limit], "collections": [],
-            "count": len(unique_tracks),
+            "items": relevant[:limit], "collections": [],
+            "count": len(relevant),
         })
 
     def collections(self, query: str, limit: int = 8) -> dict[str, Any]:
@@ -219,7 +245,7 @@ class YouTubeBrowseService:
         results: list[dict[str, Any]] = []
         with yt_dlp.YoutubeDL(opts) as dl:
             try:
-                playlist_q = quote(text + " album playlist")
+                playlist_q = quote(text + " album")
                 payload = dl.extract_info(
                     f"https://www.youtube.com/results?search_query={playlist_q}&sp=EgIQAw%3D%3D",
                     download=False,
@@ -232,7 +258,72 @@ class YouTubeBrowseService:
             except (DownloadError, OSError, ValueError):
                 return {"items": [], "count": 0}
         unique = list({item["id"]: item for item in results}.values())
-        return self._store(key, {"items": unique[:limit], "count": len(unique)})
+        ranked = sorted(((_relevance(text, item["title"], item["channel"]), item) for item in unique), key=lambda pair: pair[0], reverse=True)
+        relevant = [item for score, item in ranked if score >= 5]
+        return self._store(key, {"items": relevant[:limit], "count": len(relevant)})
+
+    def channels(self, query: str, limit: int = 4) -> dict[str, Any]:
+        text = " ".join(query.split())[:220]
+        if len(text) < 2 or text.startswith("http"):
+            return {"items": [], "count": 0}
+        limit = max(1, min(limit, 6))
+        key = f"channels:{text.casefold()}:{limit}"
+        if cached := self._cached(key):
+            return cached
+        opts = self._options()
+        opts["playlistend"] = limit + 4
+        results = []
+        try:
+            with yt_dlp.YoutubeDL(opts) as dl:
+                url = f"https://www.youtube.com/results?search_query={quote(text)}&sp=EgIQAg%3D%3D"
+                info = dl.extract_info(url, download=False)
+                for entry in (info.get("entries") or []) if isinstance(info, dict) else []:
+                    if not isinstance(entry, dict):
+                        continue
+                    cid = str(entry.get("id") or "")
+                    title = str(entry.get("title") or "")[:220]
+                    extras = set(_tokens(title)) - set(_tokens(text)) - {"topic", "vevo", "official", "records", "recordings", "channel", "dj", "live"}
+                    if not _CHANNEL.fullmatch(cid) or _relevance(text, title) < 5 or extras:
+                        continue
+                    thumbs = entry.get("thumbnails") or []
+                    thumb = thumbs[-1].get("url") if thumbs and isinstance(thumbs[-1], dict) else None
+                    if not (isinstance(thumb, str) and thumb.startswith("https://")):
+                        thumb = None
+                    results.append({
+                        "kind": "channel", "id": cid, "title": title,
+                        "url": f"https://www.youtube.com/channel/{cid}",
+                        "thumbnail": thumb,
+                        "verified": bool(entry.get("channel_is_verified")),
+                    })
+                    if len(results) >= limit:
+                        break
+        except (DownloadError, OSError, ValueError):
+            pass
+        return self._store(key, {"items": results, "count": len(results)})
+
+    def channel_playlists(self, channel_id: str, limit: int = 20) -> dict[str, Any]:
+        if not _CHANNEL.fullmatch(channel_id):
+            raise ValueError("Invalid channel ID.")
+        limit = max(1, min(limit, 30))
+        key = f"channel_lists:{channel_id}:{limit}"
+        if cached := self._cached(key):
+            return cached
+        opts = self._options()
+        opts["playlistend"] = limit
+        safe = f"https://www.youtube.com/channel/{channel_id}/playlists"
+        with yt_dlp.YoutubeDL(opts) as dl:
+            payload = dl.extract_info(safe, download=False)
+        entries = (payload.get("entries") or []) if isinstance(payload, dict) else []
+        results = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            candidate = _collection(entry)
+            if candidate:
+                results.append(candidate)
+                if len(results) >= limit:
+                    break
+        return self._store(key, {"items": results, "count": len(results)})
 
     def expand(self, url: str, limit: int = 80) -> dict[str, Any]:
         kind, safe = canonical_source(url)
@@ -258,6 +349,8 @@ class YouTubeBrowseService:
                 "id": cid, "title": name, "url": safe,
                 "channel": str(payload.get("channel") or payload.get("uploader") or "")[:200],
                 "count": payload.get("playlist_count") or payload.get("n_entries") or len(entries),
+                "thumbnail": tracks[0]["thumbnail"] if tracks else None,
+                "first_video_id": tracks[0]["id"] if tracks else None,
             },
             "items": list({item["id"]: item for item in tracks}.values())[:limit],
             "count": len(tracks),
@@ -273,9 +366,30 @@ class YouTubeBrowseService:
         options.update({"noplaylist": True, "format": "bestaudio[ext=m4a]/bestaudio/best"})
         with yt_dlp.YoutubeDL(options) as dl:
             payload = dl.extract_info(f"https://www.youtube.com/watch?v={ident}", download=False)
-        if not isinstance(payload, dict) or not _is_audio_https(str(payload.get("url") or "")):
-            raise ValueError("This track does not offer a playable HTTPS audio preview.")
+        if not isinstance(payload, dict):
+            raise ValueError("This track has no usable audio stream.")
+        # yt-dlp sometimes picks a segmented DASH/HLS manifest or omits
+        # the top-level URL although the video has an ordinary audio-only
+        # HTTPS format. Try viable signed range-enabled formats explicitly.
+        variants = [payload]
+        variants += [x for x in payload.get("requested_formats") or [] if isinstance(x, dict)]
+        variants += [x for x in payload.get("formats") or [] if isinstance(x, dict)]
+        usable = [
+            x for x in variants
+            if _is_audio_https(str(x.get("url") or ""))
+            and str(x.get("protocol") or "https") in ("https", "http")
+            and str(x.get("vcodec") or "none") == "none"
+            and str(x.get("acodec") or "") not in ("", "none")
+            and str(x.get("ext") or "") in ("m4a", "mp4", "webm", "opus")
+        ]
+        if not usable:
+            raise ValueError("No directly playable audio stream is available.")
+        usable.sort(key=lambda x: (
+            3 if x.get("ext") in ("m4a", "mp4") else 2,
+            min(float(x.get("abr") or 0), 250.0),
+        ), reverse=True)
+        chosen = usable[0]
         return self._store(key, {
-            "preview_url": str(payload["url"]),
-            "duration": payload.get("duration"), "ext": payload.get("ext"),
+            "preview_url": str(chosen["url"]),
+            "duration": payload.get("duration"), "ext": chosen.get("ext"),
         })

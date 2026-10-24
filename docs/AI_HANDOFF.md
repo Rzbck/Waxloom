@@ -1,3 +1,10 @@
+## 2026-10-24 — Import V3: pixel sleeves, accurate YouTube search and direct downloads
+
+- User wanted a music-first cover grid for song search and a true album hero with the tracks underneath, one-click "+" to download a song or whole collection, visual thumbnails on every song/playlist, artist channels and their playlists, and direct download from the bottom preview player. Remove duplicate inline Download queue; keep the shared Discovery popup but show complete errors.
+- New source `feat/import-pixel-v3-20261024`, from deployed V2 `0156386`. Nine genuine 32px deterministic pixel-art sleeve scenes replace abstract circles. True album covers prioritized. Thumbnails use canonical public YouTube video images; playlist thumbnail fallback lazy loads via bounded metadata-only expansions.
+- Full report `docs/IMPORT_V3_PIXEL_ART_20261024.md`. API and Web change together. New `/api/imports/youtube/channels` and `/api/imports/youtube/channel-playlists`, strict ID validation. User-selected independent-label music no longer rejected for missing tags, while hard nonmusic/length/audio-only guards remain. True Carradine M4A previews verified and query results ranked on explicit textual relevance. Every Play/Retry/download keeps the actual chosen ID.
+- Never merge into main implicitly. Preserve V2 images and private production deployment backups for rollback.
+
 ## 2026-10-24 — Import YouTube V2 / preview seek, editorial covers, persistent thumbs
 
 - User requested free-form search of song/artist/album/playlist, bulk selection, inline Play/Pause/seek before downloads, optional playlist target using existing Discovery downloader, and faster true covers. Prior generated art looked too neon and repeatedly printed WAX. Source branch `feat/import-design-v2-20261024` is based on current Web 5dfa0e7; API must be deployed jointly for added routes.

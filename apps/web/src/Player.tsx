@@ -15,10 +15,10 @@ import { api } from "./api";
 import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
 import { CoverArtwork } from "./CoverArtwork";
 import { compactPlayedHistory, nextFromQueue, radioGenre, selectRadioTracks } from "./smartAutoplay";
-import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
+import { authorizeYouTubeImport, downloadPhase, enqueueDiscoveryDownload, enqueueSelectedYouTube, useDownloads } from "./downloadQueue";
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
 import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
-import type { DiscoveryCandidate, PlaylistSummary, PreviewTrack, Song } from "./types";
+import type { DiscoveryCandidate, PlaylistSummary, PreviewTrack, Song, YouTubeBrowseTrack } from "./types";
 
 type RepeatMode = "off" | "all" | "one";
 type PlayerMode = "navidrome" | "preview";
@@ -130,7 +130,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     : undefined;
   const canDownloadCurrent = Boolean(
     currentPreview?.candidate
-    && owned.get(currentPreview.recording_mbid) === "absent"
+    && (currentPreview.recording_mbid.startsWith("yt:") || owned.get(currentPreview.recording_mbid) === "absent")
     && !["indexed", "existing"].includes(currentPreviewDownloadPhase ?? ""),
   );
   useEffect(() => {
@@ -731,6 +731,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     if (mode === "preview" && currentPreview && previewError) {
+      // YouTube signed preview URLs expire; Discovery's MusicBrainz
+      // preview endpoint cannot resolve yt: video IDs. Renew the exact
+      // selected video's verified direct HTTPS audio stream on retry.
+      if (currentPreview.recording_mbid.startsWith("yt:")) {
+        const videoId = currentPreview.recording_mbid.slice(3);
+        if (/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+          void api.youtubePreview(`https://www.youtube.com/watch?v=${videoId}`)
+            .then((result) => {
+              setPreviewQueue((items) => items.map((item) => item.id === currentPreview.id
+                ? { ...item, preview_url: result.preview_url } : item));
+              setPreviewError(null);
+              wantsPlaybackRef.current = true;
+              setPlaying(true);
+            }).catch(() => {
+              wantsPlaybackRef.current = false;
+              setPlaying(false);
+              setPreviewError("YouTube preview is unavailable for this video.");
+            });
+        }
+        return;
+      }
       // A new URL bypasses the browser's failed media element/cache state.
       setPreviewQueue((items) => items.map((item) => item.id === currentPreview.id
         ? { ...item, preview_url: `${api.previewStreamUrl(item.recording_mbid, item.artist, item.title)}&retry=${Date.now()}` }
@@ -813,7 +834,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     await setCurrentTaste(playerDisliked ? 0 : -1);
   }
 
+  function activeYouTubeTrack(): YouTubeBrowseTrack | null {
+    if (!currentPreview?.recording_mbid.startsWith("yt:")) return null;
+    const id = currentPreview.recording_mbid.slice(3);
+    if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return null;
+    return {
+      kind: "track", id, title: currentPreview.source_title || currentPreview.title,
+      suggested_artist: currentPreview.artist, suggested_title: currentPreview.title,
+      thumbnail: currentPreview.thumbnail,
+      url: `https://www.youtube.com/watch?v=${id}`,
+    };
+  }
   function downloadPlayingPreview() {
+    const youtubeTrack = activeYouTubeTrack();
+    if (youtubeTrack) {
+      if (!authorizeYouTubeImport()) return;
+      const accepted = enqueueSelectedYouTube(youtubeTrack, true);
+      setPlayerActionMessage(accepted ? "Downloading selected YouTube source — see Downloads popup." : "Already queued or downloaded.");
+      return;
+    }
     const candidate = currentPreview?.candidate;
     if (!candidate) {
       setPlayerActionMessage("Choose a Discovery track to download.");
@@ -898,7 +937,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   async function addCurrentToPlaylist(playlist: PlaylistSummary) {
     if (playerActionBusy) return;
     if (currentPreview?.candidate) {
-      const accepted = enqueueDiscoveryDownload(currentPreview.candidate, (selection) => {
+      const youtubeTrack = activeYouTubeTrack();
+      if (youtubeTrack && !authorizeYouTubeImport()) return;
+      const accepted = youtubeTrack
+        ? enqueueSelectedYouTube(youtubeTrack, true, playlist)
+        : enqueueDiscoveryDownload(currentPreview.candidate, (selection) => {
         if (previewManualImportRef.current) previewManualImportRef.current(selection);
         else setPlayerActionMessage("Select a source manually in Discovery.");
       }, playlist);
@@ -1198,6 +1241,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                   {mode === "navidrome" && currentSong
                     ? <CoverArtwork coverId={currentSong.coverArt || currentSong.albumId}
                         seed={currentSong.albumId || currentSong.id} size={160} priority />
+                    : currentPreview?.thumbnail ? <img src={currentPreview.thumbnail} alt="" />
                     : <PlayerIcon name="music" size={25} />}
                 </span>
                 <span className="waxloom-mobile-mini-copy">

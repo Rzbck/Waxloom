@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "./api";
-import { enqueueSelectedYouTube, useDownloads } from "./downloadQueue";
+import { authorizeYouTubeImport, enqueueSelectedYouTube, useDownloads } from "./downloadQueue";
+import { YouTubeTrackArt, YouTubeCollectionArt } from "./YouTubeArt";
+import { CoverArtwork } from "./CoverArtwork";
 import { usePlayer } from "./Player";
 import type {
   DiscoveryCandidate, ImportResult, PlaylistSummary, YouTubeBrowseCollection,
-  YouTubeBrowseTrack, YouTubeRuntime,
+  YouTubeBrowseTrack, YouTubeBrowseChannel, YouTubeRuntime,
 } from "./types";
 import "./imports-v2.css";
+import "./imports-v3.css";
 
 type Filter = "all" | "tracks" | "collections";
 const previewCache = new Map<string, { at: number; url: string; duration?: number }>();
@@ -45,13 +48,16 @@ export function ImportsView({
   const [runtime, setRuntime] = useState<YouTubeRuntime | null>(null);
   const [tracks, setTracks] = useState<YouTubeBrowseTrack[]>([]);
   const [collections, setCollections] = useState<YouTubeBrowseCollection[]>([]);
+  const [channels, setChannels] = useState<YouTubeBrowseChannel[]>([]);
+  const [openedChannel, setOpenedChannel] = useState<YouTubeBrowseChannel | null>(null);
   const [expanded, setExpanded] = useState<YouTubeBrowseCollection | null>(null);
   const [selection, setSelection] = useState<Record<string, YouTubeBrowseTrack>>({});
   const [filter, setFilter] = useState<Filter>("all");
   const [busy, setBusy] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState<string | null>(null);
-  const [prefetched, setPrefetched] = useState<string | null>(null);
+  const [unavailableIds, setUnavailableIds] = useState<string[]>([]);
+  const [collectionLoading, setCollectionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [authorized, setAuthorized] = useState(false);
@@ -61,11 +67,13 @@ export function ImportsView({
   const requestEpochRef = useRef(0);
   const hoverTimerRef = useRef<number | null>(null);
   const searchedTermRef = useRef("");
+  const searchSnapshotRef = useRef<{tracks:YouTubeBrowseTrack[];collections:YouTubeBrowseCollection[]}|null>(null);
   const currentId = player.currentPreview?.recording_mbid?.startsWith("yt:")
     ? player.currentPreview.recording_mbid.slice(3) : null;
   const currentDuration = Math.max(player.duration || 0, player.currentPreview?.duration || 0);
   const localDownloads = downloads.filter((job) => job.id.startsWith("yt:"));
   const selectedItems = useMemo(() => Object.values(selection), [selection]);
+  const visibleTracks = tracks.filter((item) => !unavailableIds.includes(item.id));
   const runtimeReady = Boolean(runtime?.status.yt_dlp && runtime?.library_configured);
 
   useEffect(() => {
@@ -81,6 +89,18 @@ export function ImportsView({
     requestEpochRef.current += 1;
   }, []);
 
+  function removeUnplayable(id: string) {
+    setUnavailableIds((ids) => ids.includes(id) ? ids : [...ids, id]);
+    setSelection((old) => {
+      if (!old[id]) return old;
+      const next = { ...old };
+      delete next[id];
+      return next;
+    });
+  }
+  const isUnavailable = (caught: unknown) =>
+    caught instanceof Error && /no directly playable|no usable audio|does not offer a playable|audio preview is unavailable/i.test(caught.message);
+
   const performSearch = useCallback(async (text: string) => {
     const clean = text.trim();
     if (clean.length < 2) return;
@@ -91,23 +111,48 @@ export function ImportsView({
     setExpanded(null);
     setTracks([]);
     setCollections([]);
+    setChannels([]);
+    setOpenedChannel(null);
     setSelection({});
+    setUnavailableIds([]);
+    searchSnapshotRef.current = null;
     try {
       const data = await api.youtubeBrowse(clean, 24);
       if (epoch !== requestEpochRef.current) return;
       setTracks(data.items);
       setCollections(data.collections);
       searchedTermRef.current = clean;
+      searchSnapshotRef.current = { tracks: data.items, collections: data.collections };
       if (!clean.startsWith("http")) {
         // Album/playlist search is independently slow on YouTube. Don't make
         // a user wait for it before displaying songs.
-        void api.youtubeCollections(clean, 8).then((extra) => {
-          if (epoch === requestEpochRef.current) setCollections(extra.items);
+        void api.youtubeChannels(clean, 4).then((extra) => {
+          if (epoch === requestEpochRef.current) setChannels(extra.items);
         }).catch(() => undefined);
-        // Prewarm first playable source in the background after results paint.
-        if (data.items[0]) window.setTimeout(() => {
-          if (epoch === requestEpochRef.current) void cachePreview(data.items[0]).catch(() => undefined);
-        }, 300);
+        void api.youtubeCollections(clean, 8).then((extra) => {
+          if (epoch === requestEpochRef.current) {
+            setCollections(extra.items);
+            if (searchSnapshotRef.current) searchSnapshotRef.current.collections = extra.items;
+          }
+        }).catch(() => undefined);
+        // Validate the first visible previews without blocking first paint.
+        // Two workers only: slow YouTube providers must not flood the API.
+        if (data.items.length) window.setTimeout(() => {
+          let nextItem = 0;
+          const candidates = data.items.slice(0, 6);
+          async function verifyVisible() {
+            while (epoch === requestEpochRef.current && nextItem < candidates.length) {
+              const track = candidates[nextItem++];
+              try { await cachePreview(track); }
+              catch (caught) {
+                if (epoch === requestEpochRef.current && isUnavailable(caught))
+                  removeUnplayable(track.id);
+              }
+            }
+          }
+          void verifyVisible();
+          void verifyVisible();
+        }, 350);
       }
       if (guessAlbumMode(clean) && data.collections.length === 1) {
         // URL album/playlist: expand after the lightweight header is visible.
@@ -139,12 +184,14 @@ export function ImportsView({
     setExpanded(collection);
     setError(null);
     setSelection({});
+    setTracks([]);
     try {
       const result = await api.youtubeExpand(collection.url, 80);
       if (epoch !== requestEpochRef.current) return;
       setTracks(result.items);
       setExpanded(result.collection);
       setCollections([]);
+      setUnavailableIds([]);
       if (result.truncated) setNotice("Showing the first 80 tracks. Narrow your selection if needed.");
     } catch (caught) {
       if (epoch === requestEpochRef.current) setError(
@@ -171,9 +218,17 @@ export function ImportsView({
         title: track.suggested_title, artist: track.suggested_artist,
         source_title: track.title, duration: source.duration ?? track.duration ?? undefined,
         preview_url: source.preview_url,
+        thumbnail: track.thumbnail,
+        candidate: { recording_mbid: `yt:${track.id}`, artist: track.suggested_artist,
+          title: track.suggested_title, similarity: 0, underground: 0, rank: 0,
+          tags: [], musicbrainz_url: "", source: "youtube_dig" },
       }], 0, undefined, { useProvidedUrls: true });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not preview this audio.");
+      const reason = caught instanceof Error ? caught.message : "Could not preview this audio.";
+      if (isUnavailable(caught)) {
+        removeUnplayable(track.id);
+        setNotice("Unavailable preview removed from results.");
+      } else setError(reason);
     } finally {
       setPreviewing(null);
     }
@@ -181,8 +236,10 @@ export function ImportsView({
   const warmPreview = (track: YouTubeBrowseTrack) => {
     if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
     hoverTimerRef.current = window.setTimeout(() => {
-      setPrefetched(track.id);
-      void cachePreview(track).catch(() => undefined);
+      void cachePreview(track).catch((caught) => {
+        if (isUnavailable(caught))
+          removeUnplayable(track.id);
+      });
     }, 180);
   };
   const clearWarm = () => {
@@ -198,20 +255,81 @@ export function ImportsView({
   }
   const selectAll = () => {
     setSelection((previous) => {
-      if (tracks.every((track) => previous[track.id])) {
+      if (visibleTracks.every((track) => previous[track.id])) {
         const next = { ...previous };
-        for (const track of tracks) delete next[track.id];
+        for (const track of visibleTracks) delete next[track.id];
         return next;
       }
-      return { ...previous, ...Object.fromEntries(tracks.map((track) => [track.id, track])) };
+      return { ...previous, ...Object.fromEntries(visibleTracks.map((track) => [track.id, track])) };
     });
   };
+  function permitDownload(): boolean {
+    if (authorized) return true;
+    if (!authorizeYouTubeImport()) return false;
+    setAuthorized(true);
+    return true;
+  }
+  function downloadOne(track: YouTubeBrowseTrack) {
+    if (!runtimeReady || !permitDownload()) return;
+    const playlist = playlists.find((entry) => entry.id === destination);
+    const added = enqueueSelectedYouTube(track, true, playlist, tagOverrides[track.id]);
+    setNotice(added ? 'Downloading ' + track.suggested_title + ' — see Downloads popup.'
+      : 'Already downloading or saved — see Downloads popup.');
+  }
+  async function downloadCollection(item: YouTubeBrowseCollection) {
+    if (!runtimeReady || !permitDownload()) return;
+    const playlist = playlists.find((entry) => entry.id === destination);
+    setCollectionLoading(item.id);
+    setError(null);
+    try {
+      const data = await api.youtubeExpand(item.url, 80);
+      let accepted = 0;
+      for (const track of data.items) {
+        if (enqueueSelectedYouTube(track, true, playlist, tagOverrides[track.id])) accepted++;
+      }
+      setNotice(accepted + ' songs queued from ' + data.collection.title
+        + (data.truncated ? ' (first 80 tracks only).' : '.')
+        + ' Follow progress in the Downloads popup.');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not open this collection.');
+    } finally { setCollectionLoading(null); }
+  }
+  async function openArtistChannel(channel: YouTubeBrowseChannel) {
+    const epoch = ++requestEpochRef.current;
+    setOpenedChannel(channel);
+    setExpanded(null);
+    setFilter("collections");
+    setCollections([]);
+    setTracks([]);
+    setOpening(channel.id);
+    try {
+      const result = await api.youtubeChannelPlaylists(channel.id, 20);
+      if (epoch === requestEpochRef.current) setCollections(result.items);
+    } catch (caught) {
+      if (epoch === requestEpochRef.current) setError(caught instanceof Error ? caught.message : "Channel playlists unavailable.");
+    } finally {
+      if (epoch === requestEpochRef.current) setOpening(null);
+    }
+  }
+  function backFromAlbum() {
+    if (openedChannel) {
+      requestEpochRef.current += 1;
+      setExpanded(null); setTracks([]); setSelection({}); setFilter("collections");
+    } else backToResults();
+  }
+  function backToResults() {
+    requestEpochRef.current += 1;
+    setExpanded(null); setOpening(null); setOpenedChannel(null);
+    setFilter("all"); setSelection({}); setUnavailableIds([]);
+    setTracks(searchSnapshotRef.current?.tracks ?? []);
+    setCollections(searchSnapshotRef.current?.collections ?? []);
+  }
   const queueDownloads = () => {
-    if (!authorized || !runtimeReady || !selectedItems.length) return;
+    if (!runtimeReady || !selectedItems.length || !permitDownload()) return;
     const playlist = playlists.find((entry) => entry.id === destination);
     let accepted = 0;
     for (const track of selectedItems) {
-      if (enqueueSelectedYouTube(track, authorized, playlist, tagOverrides[track.id])) accepted++;
+      if (enqueueSelectedYouTube(track, true, playlist, tagOverrides[track.id])) accepted++;
     }
     setNotice(accepted
       ? `${accepted} track${accepted > 1 ? "s" : ""} queued. Downloads continue while you browse.`
@@ -251,41 +369,90 @@ export function ImportsView({
               {entry === "all" ? "All" : entry === "tracks" ? "Tracks" : "Albums & playlists"}
             </button>)}
         </div>
-        {!!tracks.length && <button className="waxloom-import-select-all" type="button"
-          onClick={selectAll}>Select {tracks.every((track) => selection[track.id]) ? "none" : "all"} tracks</button>}
+        {!!visibleTracks.length && <button className="waxloom-import-select-all" type="button"
+          onClick={selectAll}>Select {visibleTracks.every((track) => selection[track.id]) ? "none" : "all"} tracks</button>}
       </div>
       {error && <div className="state-card state-card-error" role="alert">{error}</div>}
       {notice && <p className="waxloom-import-notice" role="status">{notice}</p>}
-      {expanded && <div className="waxloom-import-collection-head">
-        <div><small>{expanded.kind.toUpperCase()}</small><h3>{expanded.title}</h3>
-          <span>{tracks.length} available tracks · choose one or select all</span></div>
-        <button type="button" onClick={() => {
-          setExpanded(null); setTracks([]); setSelection({});
-          void performSearch(searchedTermRef.current || query);
-        }}>← Search results</button>
+      {!openedChannel && !expanded && filter === "all" && channels.length > 0 && (
+        <section className="waxloom-import-channel-section" aria-label="Artist YouTube channels">
+          <h3>Artist channels <small>Browse an artist’s playlists</small></h3>
+          <div className="waxloom-import-channel-row">
+            {channels.map((channel) => <button type="button" className="waxloom-import-channel-card"
+              key={channel.id} onClick={() => void openArtistChannel(channel)}>
+              <span className="waxloom-import-channel-art">
+                <CoverArtwork seed={channel.id} />
+                {channel.thumbnail && <img src={channel.thumbnail} loading="lazy" alt="" />}
+              </span>
+              <span><strong>{channel.title}</strong>
+                <small>{channel.verified ? "Verified channel" : "YouTube channel"}</small></span>
+              <span aria-hidden="true">›</span>
+            </button>)}
+          </div>
+        </section>
+      )}
+      {openedChannel && !expanded && <div className="waxloom-import-channel-expanded">
+        <button type="button" className="waxloom-import-back" onClick={backToResults}>← Results</button>
+        <div><small>ARTIST CHANNEL</small><h3>{openedChannel.title}</h3>
+          <span>{opening === openedChannel.id ? "Loading playlists…" : collections.length ? collections.length + " playlists" : "No public playlists found on this channel."}</span>
+        </div>
+      </div>}
+      {expanded && <div className="waxloom-import-album-detail">
+        <button type="button" className="waxloom-import-back" onClick={backFromAlbum}>
+          ← Results
+        </button>
+        <div className="waxloom-import-album-hero">
+          <div className="waxloom-import-album-art"><YouTubeCollectionArt collection={expanded} /></div>
+          <div className="waxloom-import-album-info">
+            <small>{expanded.kind === "album" ? "ALBUM" : "PLAYLIST"}</small>
+            <h3>{expanded.title}</h3>
+            <p>{expanded.channel || "YouTube"} · {tracks.length} available tracks</p>
+            <button type="button" className="waxloom-import-album-download"
+              disabled={!runtimeReady || collectionLoading === expanded.id || !tracks.length}
+              onClick={() => void downloadCollection(expanded)}>
+              {collectionLoading === expanded.id ? "Preparing…" : "↓ Download all tracks"}
+            </button>
+          </div>
+        </div>
+        <div className="waxloom-import-album-tracks-heading">
+          <strong>Tracks</strong><span>Play before saving · + saves a single track</span>
+        </div>
       </div>}
       {filter !== "tracks" && !expanded && collections.length > 0 && (
         <section className="waxloom-import-collections" aria-label="Albums and playlists">
-          {collections.map((item) => <button key={item.id} className="waxloom-import-collection"
-            type="button" disabled={opening === item.id} onClick={() => void expandCollection(item)}>
-            <span className="waxloom-import-collection-art" aria-hidden="true">{item.thumbnail
-              ? <img src={item.thumbnail} loading="lazy" alt="" /> : "◉"}</span>
-            <span><small>{item.kind === "album" ? "Album" : "Playlist"}</small>
-              <strong>{item.title}</strong><em>{item.channel || "YouTube"}</em></span>
-            <span aria-hidden="true">{opening === item.id ? "…" : "→"}</span>
-          </button>)}
+          {collections.map((item, index) =>
+            <article key={item.id} className="waxloom-import-collection">
+              <button type="button" className="waxloom-import-collection-open"
+                disabled={opening === item.id} onClick={() => void expandCollection(item)}
+                aria-label={`Open ${item.title} tracks`}>
+                <span className="waxloom-import-collection-art">
+                  <YouTubeCollectionArt collection={item} warm={index < 3} />
+                </span>
+                <span className="waxloom-import-collection-caption">
+                  <small>{item.kind === "album" ? "ALBUM" : "PLAYLIST"}</small>
+                  <strong title={item.title}>{item.title}</strong>
+                  <em>{item.channel || "YouTube"}{item.count ? ` · ${item.count} tracks` : ""}</em>
+                </span>
+              </button>
+              <button type="button" className="waxloom-import-collection-download"
+                aria-label={`Download all tracks from ${item.title}`}
+                title="Download album / playlist" disabled={!runtimeReady || collectionLoading === item.id}
+                onClick={() => void downloadCollection(item)}>
+                {collectionLoading === item.id ? "…" : "+"}
+              </button>
+            </article>)}
         </section>
       )}
       {(filter !== "collections" || expanded) && (
-        <section className="waxloom-import-results" aria-label="Search tracks">
-          {!busy && tracks.length === 0 && !error && !expanded && <div className="waxloom-import-empty">
+        <section className={expanded ? "waxloom-import-results is-expanded" : "waxloom-import-results"} aria-label="Search tracks">
+          {!busy && !visibleTracks.length && !collections.length && !error && !expanded && <div className="waxloom-import-empty">
             <span aria-hidden="true">♫</span>
-            <strong>Search by anything.</strong>
-            <p>Type a song or artist, or paste a YouTube playlist URL. Choose what to preview and download.</p>
+            <strong>{searchedTermRef.current ? "No reliable matches." : "Search by anything."}</strong>
+            <p>{searchedTermRef.current ? "Try the exact track or artist name, or paste its YouTube link. We no longer fill results with unrelated music." : "Search for an artist or track, or paste a YouTube album/playlist link."}</p>
           </div>}
           {busy && !tracks.length && Array.from({ length: 6 }, (_, index) =>
             <div className="waxloom-import-placeholder" key={index} aria-hidden="true"><span /><div><i /><i /></div></div>)}
-          {tracks.map((track, index) => {
+          {visibleTracks.map((track, index) => {
             const active = currentId === track.id;
             const queued = localDownloads.find((job) => job.id === `yt:${track.id}`);
             const edits = tagOverrides[track.id];
@@ -297,9 +464,9 @@ export function ImportsView({
                 <div className="waxloom-import-thumbnail" onPointerEnter={(event) => {
                     if (event.pointerType === "mouse" && index < 8) warmPreview(track);
                   }} onPointerLeave={clearWarm}>
-                  {track.thumbnail && <img src={track.thumbnail} loading={index < 4 ? "eager" : "lazy"}
-                    decoding="async" alt="" />}
-                  <button type="button" title={active ? (player.playing ? "Pause" : "Resume") : "Listen"}
+                  <YouTubeTrackArt track={track} priority={index < 4} />
+                  <button type="button" className="waxloom-import-play"
+                    title={active ? (player.playing ? "Pause" : "Resume") : "Preview with seeking"}
                     aria-label={`${active && player.playing ? "Pause" : "Preview"} ${track.title}`}
                     disabled={previewing === track.id} onClick={() => void playSample(track)}>
                     {previewing === track.id ? "…" : active && player.playing ? "Ⅱ" : "▶"}
@@ -331,14 +498,15 @@ export function ImportsView({
                   </div>}
                 </div>
                 <div className="waxloom-import-track-tools">
-                  <span className="waxloom-import-duration">{queued ? queued.phase : "Track"}</span>
+                  <span className="waxloom-import-duration">{queued ? queued.phase : displayTime(track.duration)}</span>
                   <button type="button" className="waxloom-import-tag-button"
                     aria-label={`Edit tags for ${track.title}`} title="Edit imported artist/title"
                     onClick={() => setEditId((value) => value === track.id ? null : track.id)}>✎</button>
                   <button type="button" className="waxloom-import-add-button"
-                    aria-label={`Select ${track.title}`} title="Add to selection"
-                    onClick={() => toggleSelected(track)}>
-                    {selection[track.id] ? "✓" : "+"}
+                    aria-label={`Download ${track.title} now`} title="Download now"
+                    disabled={!runtimeReady || ["queued","searching","downloading","indexed","existing"].includes(queued?.phase ?? "")}
+                    onClick={() => downloadOne(track)}>
+                    {queued && ["queued","searching","downloading"].includes(queued.phase) ? "…" : queued?.downloaded ? "✓" : "+"}
                   </button>
                 </div>
               </article>
@@ -351,7 +519,7 @@ export function ImportsView({
           <strong>{selectedItems.length} selected</strong>
           <label><input type="checkbox" checked={authorized}
             onChange={(event) => setAuthorized(event.target.checked)} />
-            I have permission to save these tracks</label>
+            I have the rights to save this music</label>
         </div>
         <div className="waxloom-import-action-controls">
           <select aria-label="Import destination" value={destination}
@@ -364,20 +532,11 @@ export function ImportsView({
           <button className="waxloom-import-clear" type="button" disabled={!selectedItems.length}
             onClick={() => setSelection({})}>Clear</button>
           <button className="waxloom-import-download" type="button"
-            disabled={!runtimeReady || !authorized || !selectedItems.length}
-            onClick={queueDownloads}>↓ Download {selectedItems.length || ""}</button>
+            disabled={!runtimeReady || !selectedItems.length}
+            onClick={queueDownloads}>↓ Download selected {selectedItems.length || ""}</button>
         </div>
       </div>
-      {localDownloads.length > 0 && (
-        <section className="waxloom-import-queue">
-          <h3>Download queue <span>{localDownloads.length}</span></h3>
-          <div>{localDownloads.slice(0, 80).map((job) => <div key={job.id} className="waxloom-import-job">
-            <span><strong>{job.title}</strong><small>{job.artist}</small></span>
-            <span className={`waxloom-import-job-phase phase-${job.phase}`}
-              title={job.detail}>{job.phase} · {job.detail}</span>
-          </div>)}</div>
-        </section>
-      )}
+
     </div>
   );
 }
