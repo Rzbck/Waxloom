@@ -63,6 +63,7 @@ jobs:
         run: |
           npm.cmd run build
           npm.cmd run qa:ios-background
+          npm.cmd run qa:home-album
 
       - name: Synthetic Chrome regressions (isolated, no real music)
         shell: pwsh

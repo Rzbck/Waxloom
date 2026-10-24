@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api";
+import { albumDisplayTitle } from "./albumDisplay";
 import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
 import { MobileNavigation } from "./MobileNavigation";
@@ -37,7 +38,7 @@ function formatDuration(totalSeconds?: number): string {
 }
 
 function itemName(album: Album): string {
-  return album.name ?? album.album ?? album.title ?? "Unknown album";
+  return albumDisplayTitle(album, album.song?.[0]);
 }
 
 function statusLabel(status?: string): string {
@@ -191,12 +192,12 @@ export default function App() {
         index = (index + 1) % songs.length;
       }
       performance.mark("waxloom-shuffle-click");
-      player.playSongs(songs, index);
+      player.playSongs(songs, index, { shuffled: true });
       // Album art repaints should not compete with the first audio frame.
       if (shuffleHomeTimerRef.current !== null) window.clearTimeout(shuffleHomeTimerRef.current);
       shuffleHomeTimerRef.current = window.setTimeout(() => {
         shuffleHomeTimerRef.current = null;
-        setHomeSongs(songs.slice(0, 16));
+        setHomeSongs(songs);
       }, 350);
       // Refill only AFTER the audio start has had bandwidth priority.
       // Repeated quick taps still play instantly from the existing pool.
@@ -380,7 +381,7 @@ export default function App() {
     if (!items.length) return <p className="muted">No albums in this collection.</p>;
     return (
       <div className="waxloom-album-vinyl">
-        <VinylAlbums albums={items} batchSize={40}
+        <VinylAlbums albums={items} trackHints={recentSongs} batchSize={40}
           label="Album covers. Swipe through the record bin."
           onOpenAlbum={(album) => void openAlbum(album)}
           onPlayAlbum={(album) => void playAlbum(album)}

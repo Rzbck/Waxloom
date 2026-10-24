@@ -13,6 +13,14 @@ let saveActive=0,maxSaves=0;
 const wait=(ms)=>new Promise(r=>setTimeout(r,ms));
 const json=(id,payload,status=200)=>rpc("Fetch.fulfillRequest",{requestId:id,responseCode:status,responseHeaders:[{name:"Content-Type",value:"application/json"}],body:Buffer.from(JSON.stringify(payload)).toString("base64")});
 const songs=Array.from({length:40},(_,i)=>({id:"qa-random-"+i,title:"Random QA "+i,artist:"QA Artist",album:"QA Album",duration:14}));
+const albums=[
+  {id:"qa-album-untagged",name:"[Unknown Album]",artist:"Synthetic One",songCount:1,coverArt:"fixture-a"},
+  {id:"qa-album-named",name:"BRIGHT LIGHT",artist:"Synthetic Two",songCount:1,coverArt:"fixture-b"},
+];
+const recent=[
+  {id:"qa-home-untagged",title:"Cafe Azul",artist:"Synthetic One",albumId:"qa-album-untagged",album:"[Unknown Album]",duration:15},
+  {id:"qa-home-named",title:"Dusk",artist:"Synthetic Two",albumId:"qa-album-named",album:"BRIGHT LIGHT",duration:15},
+];
 const wav=Buffer.alloc(44+44100*2);
 wav.write("RIFF",0);wav.writeUInt32LE(wav.length-8,4);wav.write("WAVEfmt ",8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(44100,24);wav.writeUInt32LE(88200,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write("data",36);wav.writeUInt32LE(wav.length-44,40);
 ws.onmessage=async({data})=>{
@@ -31,7 +39,7 @@ ws.onmessage=async({data})=>{
     }else if(path==="/api/library/albums"){
       counts.albums++;
       await wait(3400);
-      await json(requestId,{items:[],count:0});
+      await json(requestId,{items:albums,count:albums.length});
     }else if(path==="/api/library/artists"){
       counts.artists++;
       await json(requestId,{items:[],count:0});
@@ -51,7 +59,11 @@ ws.onmessage=async({data})=>{
     }else if(path.startsWith("/api/integrations/")){
       await json(requestId,{status:"ok"});
     }else if(path==="/api/library/recent-tracks"){
-      await json(requestId,{items:[],count:0});
+      await json(requestId,{items:recent,count:recent.length});
+    }else if(path==="/api/albums/qa-album-untagged"){
+      await json(requestId,{...albums[0],song:[recent[0]]});
+    }else if(path==="/api/albums/qa-album-named"){
+      await json(requestId,{...albums[1],song:[recent[1]]});
     }else if(path==="/api/playlists"){
       await json(requestId,{items:[],count:0});
     }else if(request.method!=="GET"&&request.method!=="HEAD"){
@@ -91,6 +103,33 @@ try{
   check(maxSaves<=1,"Overlapping Navidrome queue writes: "+maxSaves);
   check(writes.length<=4,"Too many queue writes for three Shuffle clicks: "+writes.length);
   check(counts.random<=2,"Excessive random-songs requests: "+counts.random);
+  // A Home Shuffle must remain shuffled after a natural track end, even with Repeat off.
+  const active=await evaluate('Boolean(document.querySelector(\'button[aria-label="Shuffle"]\')?.classList.contains("icon-button-active"))');
+  check(active,"Home shuffle must set player Shuffle mode");
+  const before=await evaluate('document.querySelector("audio")?.getAttribute("src")');
+  await evaluate('document.querySelector("audio")?.dispatchEvent(new Event("ended",{bubbles:true}))');
+  await wait(240);
+  const after=await evaluate('document.querySelector("audio")?.getAttribute("src")');
+  check(before!==after && after?.includes("/api/media/stream/qa-random-"),
+    "Home shuffle must choose another track after the previous track ends");
+  // Two fake albums: Unknown Album single + named single. UI must be consistent.
+  await rpc("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await wait(500);
+  const labels=await evaluate('[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-label")].map(x=>x.textContent)');
+  check(labels.some(x=>x.includes("Cafe Azul")&&!x.includes("[Unknown Album]")),
+    "Unknown single album must show the playable song title");
+  check(labels.some(x=>x.includes("BRIGHT LIGHT")&&x.includes("Dusk")),
+    "Named single album must show both album title and song title");
+  await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-play")[0]?.click()');
+  await wait(360);
+  const firstAlbum=await evaluate('({audio:document.querySelector("audio")?.getAttribute("src"),playing:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].findIndex(x=>x.classList.contains("is-current"))})');
+  check(firstAlbum.audio?.includes("qa-home-untagged") && firstAlbum.playing===0,
+    "First vinyl must mark the actual playing album");
+  await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-play")[1]?.click()');
+  await wait(480);
+  const secondAlbum=await evaluate('({audio:document.querySelector("audio")?.getAttribute("src"),playing:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].findIndex(x=>x.classList.contains("is-current")),center:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].findIndex(x=>x.getAttribute("data-centered")==="true")})');
+  check(secondAlbum.audio?.includes("qa-home-named") && secondAlbum.playing===1 && secondAlbum.center===1,
+    "Second vinyl must center on the now-playing album");
   const result={passed:failures.length===0,failures,errors,initial,first,elapsedMs:elapsed,counts,writes:writes.length,maxConcurrentSaves:maxSaves};
   console.log(JSON.stringify(result,null,2));
   if(failures.length||errors.length)process.exitCode=1;

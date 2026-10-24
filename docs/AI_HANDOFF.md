@@ -1,3 +1,11 @@
+## 2026-10-24 - iOS Home Shuffle and vinyl metadata/playback follow
+
+- Owner reported on physical iPhone that many locked-screen modes now continue, but Home Shuffle fails to continue randomly; Home vinyl album cards differ from player song titles and do not track the playing song.
+- **Verified root cause:** Home Shuffle randomized only the initial index; `setShuffle(true)` was never invoked. When it selected the final item and repeat was off, the queue ended. Full 40-track pool was truncated to 16 visible tracks.
+- **Web-only changes:** `playSongs(...,{shuffled:true})` enables shuffle and clears Repeat One; Home displays complete shuffle pool after first audio start; single-track Unknown Album sleeves show matching recent song title while named albums also show their track subtitle; VinylAlbums, VinylSongs and mobile recent-track rail react to actual player song/album IDs.
+- Tests: synthetic Chrome Home Shuffle actual `ended` transition + album label + vinyl tracking PASS; isolated iOS browser and mobile suite PASS; TypeScript/Vite and metadata/18 iOS helper asserts PASS; npm audit 0 high vulnerabilities. All test API requests mocked, no real music writes. See `docs/HOME_SHUFFLE_VINYL_AUDIT_20261024.md`.
+- API/NAVIDROME/USER DATA unchanged. No CI to main without separate owner instruction. **Physical iPhone locked-screen shuffle AFTER deploy is not yet USER VALIDATED**; WebKit JS suspension remains a possible limitation. Production Web baseline `3dbc4f3`; API stays `3acca2c`.
+
 ## 2026-10-24 - Workstream: production/source consolidation (phase 2)
 
 - Branch: `chore/production-consolidation-20261024` based on live Web `3dbc4f3`, also containing live API ancestor `3acca2c`. No merge into `main`, no Docker rollout. See `docs/BRANCH_RECONCILIATION_20261024.md` and `docs/DEVELOPMENT_RELEASE.md`.

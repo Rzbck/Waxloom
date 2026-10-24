@@ -333,6 +333,7 @@
     color: #eee7f2;
   }
   .waxloom-home-track-card small { font-size: 10px; color: #a79aae; }
+  .waxloom-home-track-card.is-current .waxloom-home-track-cover { outline: 2px solid #d4a6f5; outline-offset: 1px; }
 
   .waxloom-home-explore {
     display: flex;

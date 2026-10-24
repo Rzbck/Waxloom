@@ -210,6 +210,8 @@
 .waxloom-track-action:nth-child(3) { color:#c1dff4; background:#304354; border-color:#577992; }
 .waxloom-track-remove { color:#f0a5b1; font-size:20px; }
 .waxloom-track-sleeve.is-current .waxloom-track-face { border-color:#d4a6f5; }
+/* Reflect the actual playing album in every vinyl crate, not just the manually centered cover. */
+.waxloom-vinyl-sleeve.is-current .waxloom-vinyl-face { border-color: #d4a6f5; box-shadow: 0 0 0 2px #b877e950, 3px 5px 12px #0007; }
 .waxloom-vinyl-load-more {
   display:flex; align-items:center; justify-content:space-between;
   width:100%; min-height:42px; padding:10px 14px;
