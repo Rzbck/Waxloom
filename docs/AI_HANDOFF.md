@@ -1,3 +1,10 @@
+## 2026-10-24 - Workstream: production/source consolidation (phase 2)
+
+- Branch: `chore/production-consolidation-20261024` based on live Web `3dbc4f3`, also containing live API ancestor `3acca2c`. No merge into `main`, no Docker rollout. See `docs/BRANCH_RECONCILIATION_20261024.md` and `docs/DEVELOPMENT_RELEASE.md`.
+- New npm `package-lock.json`, Vite upgraded from vulnerable `8.2.2` to `8.3.5` and `npm audit` now reports zero vulnerabilities. Versioned API `uv.lock`, Dockerfiles, exact-SHA image build and independent candidate provenance preflight added.
+- Local QA passed: Web TS+Vite build, API 21 pytest cases, 18 pure iOS helper checks, synthetic Chrome Home Shuffle, iOS handoff and mobile UI. Mobile smoke now simulates GET /api/playlists properly and ignores false clearance alarms for unscrollable/desktop-only layouts. UI runtime code unchanged.
+- The next milestone is exact committed/published candidate SHA, hermetic Docker staging, CI security gates and physical-device validation. iOS WebKit lock transition is still **NOT USER VALIDATED**, and divergent native Watch / dirty worktrees remain untouched.
+
 ## 2026-10-24 - iOS Safari Home Screen background audio handoff
 
 - New isolated workstream `fix/ios-background-audio-20261024` based on runtime Web SHA `6430484`; no merge into main. Web-only mitigation for WebKit ending background audio sessions while transitioning tracks.

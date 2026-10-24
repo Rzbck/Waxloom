@@ -44,20 +44,32 @@ jobs:
         shell: pwsh
         run: |
           python -m venv .ci-venv
-          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check -e .\apps\api
+          .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check -e '.\apps\api[dev]'
           .\.ci-venv\Scripts\python.exe -m compileall -q .\apps\api\src
           .\.ci-venv\Scripts\python.exe -c "from waxloom_api.main import app; assert app.title == 'Waxloom API'; print('Waxloom API import PASS')"
           .\.ci-venv\Scripts\python.exe .\scripts\CHECK_DISCOVERY_ENGINE.py
+          .\.ci-venv\Scripts\python.exe -m pytest -q .\apps\api\tests
 
       - name: Install web dependencies
         shell: pwsh
         working-directory: apps/web
-        run: npm.cmd install --package-lock=false
+        run: |
+          npm.cmd ci --no-fund
+          npm.cmd audit --audit-level=high
 
       - name: Build web
         shell: pwsh
         working-directory: apps/web
-        run: npm.cmd run build
+        run: |
+          npm.cmd run build
+          npm.cmd run qa:ios-background
+
+      - name: Synthetic Chrome regressions (isolated, no real music)
+        shell: pwsh
+        run: |
+          .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite ios-background
+          .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite home-fluidity
+          .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite mobile
 
       - name: Smoke direct Vite launcher
         shell: pwsh
