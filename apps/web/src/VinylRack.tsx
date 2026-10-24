@@ -287,32 +287,18 @@ export function VinylRack({
     suppressClickRef.current = false;
   }
 
-  // Keep the selected sleeve, footer label and Options pointing at the same
-  // recording as the player. Sync immediately, not after smooth-scroll ticks.
+  // Track/album playback follows the SAME spring as the arrow buttons.
+  // Do not jump straight to scrollLeft: this caused Media Session Next to
+  // teleport the artwork, unlike manual navigation. The source index is
+  // changed by the audio player; the centered label follows visual progress.
   useEffect(() => {
     if (followIndex === undefined || followIndex < 0 || followIndex >= count) return;
     const frame = requestAnimationFrame(() => {
-      const rack = rackRef.current;
-      if (!rack) return;
-      const sleeves = [...rack.querySelectorAll<HTMLElement>(".waxloom-vinyl-sleeve")];
-      const sleeve = sleeves[followIndex];
-      if (!sleeve) return;
-      stopMotion();
-      wheelTargetRef.current = followIndex;
-      const center = sleeve.offsetLeft + sleeve.offsetWidth / 2;
-      rack.scrollLeft = Math.max(0, Math.min(
-        rack.scrollWidth - rack.clientWidth, center - rack.clientWidth / 2,
-      ));
-      sleeves.forEach((item, index) => {
-        if (index === followIndex) item.setAttribute("data-centered", "true");
-        else item.removeAttribute("data-centered");
-      });
-      selectedIndexRef.current = followIndex;
-      setSelectedIndex(followIndex);
-      onSelectionRef.current?.(followIndex);
+      if (!rackRef.current || !geometryRef.current) return;
+      moveToIndex(followIndex);
     });
     return () => cancelAnimationFrame(frame);
-  }, [followIndex, followRequest, contentKey, stopMotion]);
+  }, [followIndex, followRequest, contentKey, moveToIndex]);
 
   function shift(delta: -1 | 1) {
     moveToIndex((wheelTargetRef.current ?? selectedIndexRef.current) + delta);
