@@ -1,4 +1,6 @@
+import { useEffect, useRef } from "react";
 import { api } from "./api";
+import { usePlayer } from "./Player";
 import type { Album, Song } from "./types";
 import { VinylAlbums } from "./VinylRack";
 
@@ -16,6 +18,19 @@ export function MobileHome({
   albums, recent, onOpenAlbum, onPlayAlbum, onPlayRecent,
   onBrowseAlbums, onRefreshRecent,
 }: MobileHomeProps) {
+  const player = usePlayer();
+  const recentRail = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const rail = recentRail.current;
+    if (!rail || !player.currentSong?.id) return;
+    const index = recent.slice(0, 14).findIndex((song) => song.id === player.currentSong?.id);
+    if (index < 0) return;
+    const card = rail.children.item(index) as HTMLElement | null;
+    if (!card) return;
+    rail.scrollTo({ left: Math.max(0,
+      card.offsetLeft - rail.offsetLeft - (rail.clientWidth - card.offsetWidth) / 2),
+      behavior: "smooth" });
+  }, [player.currentSong?.id, recent]);
   return (
     <div className="waxloom-mobile-home" aria-label="Home music collection">
       <section className="waxloom-mobile-home-crate" aria-labelledby="waxloom-crate-heading">
@@ -30,7 +45,7 @@ export function MobileHome({
           </button>
         </header>
 
-        {albums.length ? <VinylAlbums albums={albums}
+        {albums.length ? <VinylAlbums albums={albums} trackHints={recent}
           onOpenAlbum={onOpenAlbum} onPlayAlbum={onPlayAlbum}
           label="Latest albums in the vinyl crate. Swipe horizontally to browse."
         /> : <div className="waxloom-home-empty">Your albums will appear here when indexed.</div>}
@@ -47,10 +62,11 @@ export function MobileHome({
           </button>
         </header>
         {recent.length > 0 ? (
-          <div className="waxloom-home-track-rail" role="region" tabIndex={0}
+          <div className="waxloom-home-track-rail" ref={recentRail} role="region" tabIndex={0}
             aria-label="Recent music, swipe sideways to browse">
             {recent.slice(0, 14).map((song, index) => (
-              <button key={song.id} className="waxloom-home-track-card" type="button"
+              <button key={song.id} className={player.currentSong?.id === song.id
+                  ? "waxloom-home-track-card is-current" : "waxloom-home-track-card"} type="button"
                 onClick={() => onPlayRecent(index)}
                 title={`Play ${song.title ?? "track"}`}>
                 <span className="waxloom-home-track-cover">

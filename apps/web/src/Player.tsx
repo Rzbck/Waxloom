@@ -26,7 +26,7 @@ type PlayerContextValue = {
   currentPreview: PreviewTrack | null;
   currentIndex: number;
   playing: boolean;
-  playSongs: (songs: Song[], startIndex?: number, options?: { ordered?: boolean }) => void;
+  playSongs: (songs: Song[], startIndex?: number, options?: { ordered?: boolean; shuffled?: boolean }) => void;
   playNow: (song: Song) => void;
   addToQueue: (song: Song) => void;
   playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number, onManualImport?: (candidate: DiscoveryCandidate) => void) => void;
@@ -355,7 +355,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id);
   }, [queue, currentSong?.id, mode]);
 
-  const playSongs = useCallback((songs: Song[], startIndex = 0, options?: { ordered?: boolean }) => {
+  const playSongs = useCallback((songs: Song[], startIndex = 0, options?: { ordered?: boolean; shuffled?: boolean }) => {
     if (songs.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, songs.length - 1));
     const song = songs[safeIndex];
@@ -365,6 +365,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     // even after the user previously enabled Shuffle or Repeat one.
     if (options?.ordered) {
       setShuffle(false);
+      setRepeat("off");
+    } else if (options?.shuffled) {
+      // Home Shuffle is a playback MODE, not merely a random first index.
+      // Clearing stale Repeat One also keeps iOS's next-track handoff eligible.
+      setShuffle(true);
       setRepeat("off");
     }
     explicitQueueRef.current = true;

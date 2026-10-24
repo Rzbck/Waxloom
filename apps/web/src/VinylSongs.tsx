@@ -30,8 +30,17 @@ export function VinylSongs({
     setOptionsOpen(false);
   }, [songs.length, songs[0]?.id, songs[songs.length - 1]?.id]);
 
+  useEffect(() => {
+    if (!player.currentSong) return;
+    const index = songs.findIndex((song) => song.id === player.currentSong?.id);
+    if (index >= 0) setVisibleCount((count) => Math.max(count,
+      Math.min(songs.length, Math.ceil((index + 1) / PAGE_SIZE) * PAGE_SIZE)));
+  }, [player.currentSong?.id, songs]);
+
   if (!songs.length) return <div className="empty-state">No songs.</div>;
   const selected = songs.slice(0, visibleCount);
+  const followingIndex = player.currentSong
+    ? selected.findIndex((song) => song.id === player.currentSong?.id) : -1;
   const selectedSong = selected[Math.min(selectedIndex, selected.length - 1)] ?? selected[0];
   const starred = starOverrides[selectedSong.id] ?? Boolean(selectedSong.starred);
 
@@ -45,6 +54,7 @@ export function VinylSongs({
       <VinylRack
         count={selected.length}
         contentKey={selected[0]?.id}
+        followIndex={followingIndex}
         variant="track"
         label="Swipe through records. Tap a cover to play. Additional actions are in the full player or Options."
         records={selected.map((song) => ({ title: song.title ?? "Unknown track", artist: song.artist }))}

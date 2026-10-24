@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useId, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent } from "react";
 import { api } from "./api";
 import { MarqueeText } from "./MobilePlayerPanel";
-import type { Album } from "./types";
+import { usePlayer } from "./Player";
+import { albumDisplaySubtitle, albumDisplayTitle, findPlayingAlbumIndex, recentTracksByAlbum } from "./albumDisplay";
+import type { Album, Song } from "./types";
 
 export function albumTitle(album: Album): string {
   return album.name ?? album.album ?? album.title ?? "Unknown album";
@@ -348,15 +350,18 @@ export function VinylRack({
 }
 
 export function VinylAlbums({
-  albums, label, onOpenAlbum, onPlayAlbum, batchSize = 0,
+  albums, label, onOpenAlbum, onPlayAlbum, trackHints = [], batchSize = 0,
 }: {
   albums: Album[];
   label?: string;
+  trackHints?: Song[];
   batchSize?: number;
   onOpenAlbum: (album: Album) => void;
   onPlayAlbum: (album: Album) => void;
 }) {
+  const player = usePlayer();
   if (!albums.length) return null;
+  const hinted = recentTracksByAlbum(trackHints);
   const size = batchSize > 0 ? Math.max(8, batchSize) : albums.length;
   const batches: Album[][] = [];
   for (let index = 0; index < albums.length; index += size) {
@@ -373,16 +378,23 @@ export function VinylAlbums({
             </h3>
           )}
           <VinylRack count={batch.length} contentKey={batch[0]?.id}
+            followIndex={findPlayingAlbumIndex(batch, player.currentSong)}
             label={label ?? "Browse albums in the vinyl crate"}
-            records={batch.map((album) => ({ title: albumTitle(album), artist: album.artist }))}>
+            records={batch.map((album) => ({
+              title: albumDisplayTitle(album, hinted.get(album.id)),
+              artist: albumDisplaySubtitle(album, hinted.get(album.id)),
+            }))}>
             {batch.map((album, index) => (
-              <article className="waxloom-vinyl-sleeve" key={album.id}
-                aria-label={`${albumTitle(album)} — ${album.artist ?? "Unknown artist"}`}>
+              <article className={player.currentSong?.albumId === album.id
+                  ? "waxloom-vinyl-sleeve is-current" : "waxloom-vinyl-sleeve"}
+                  aria-current={player.currentSong?.albumId === album.id ? "true" : undefined}
+                  key={album.id}
+                aria-label={`${albumDisplayTitle(album, hinted.get(album.id))} — ${album.artist ?? "Unknown artist"}`}>
                 <button className="waxloom-vinyl-face" type="button"
                   onClick={() => onOpenAlbum(album)}
-                  title={`Open ${albumTitle(album)}`}>
+                  title={`Open ${albumDisplayTitle(album, hinted.get(album.id))}`}>
                   <span className="waxloom-vinyl-fallback" aria-hidden="true">
-                    {albumTitle(album).slice(0, 1).toUpperCase()}
+                    {albumDisplayTitle(album, hinted.get(album.id)).slice(0, 1).toUpperCase()}
                   </span>
                   {album.coverArt && <img src={api.coverUrl(album.coverArt, 350)}
                     loading={index < 2 ? "eager" : "lazy"} alt=""
@@ -390,12 +402,12 @@ export function VinylAlbums({
                   <span className="waxloom-vinyl-shine" aria-hidden="true" />
                 </button>
                 <button className="waxloom-vinyl-play" type="button"
-                  title={`Play ${albumTitle(album)}`}
-                  aria-label={`Play album ${albumTitle(album)}`}
+                  title={`Play ${albumDisplayTitle(album, hinted.get(album.id))}`}
+                  aria-label={`Play album ${albumDisplayTitle(album, hinted.get(album.id))}`}
                   onClick={() => onPlayAlbum(album)}>▶</button>
                 <div className="waxloom-vinyl-label">
-                  <strong title={albumTitle(album)}>{albumTitle(album)}</strong>
-                  <small title={album.artist ?? "Unknown artist"}>{album.artist ?? "Unknown artist"}</small>
+                  <strong title={albumDisplayTitle(album, hinted.get(album.id))}>{albumDisplayTitle(album, hinted.get(album.id))}</strong>
+                  <small title={albumDisplaySubtitle(album, hinted.get(album.id))}>{albumDisplaySubtitle(album, hinted.get(album.id))}</small>
                 </div>
               </article>
             ))}
