@@ -69,15 +69,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const [homeAlbums, setHomeAlbums] = useState<Album[]>([]);
-  const [homeSongs, setHomeSongs] = useState<Song[]>([]);
   const [shuffling, setShuffling] = useState(false);
   // Ready random queue lives off-screen. A user's Shuffle never waits for
   // a fresh Navidrome request once Home has loaded its first suggestions.
   const randomPoolRef = useRef<Song[]>([]);
   const randomRequestRef = useRef<Promise<Song[]> | null>(null);
   const shuffleTimerRef = useRef<number | null>(null);
-  const shuffleHomeTimerRef = useRef<number | null>(null);
   const shufflePendingRef = useRef(false);
   const [recentSongs, setRecentSongs] = useState<Song[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -106,7 +103,6 @@ export default function App() {
     void loadPlaylists(false);
     return () => {
       if (shuffleTimerRef.current !== null) window.clearTimeout(shuffleTimerRef.current);
-      if (shuffleHomeTimerRef.current !== null) window.clearTimeout(shuffleHomeTimerRef.current);
     };
   }, []);
 
@@ -162,19 +158,15 @@ export default function App() {
   function loadHome() {
     // Independent sections: a slow album query must not freeze the Shuffle
     // button or hide the already available random tracks.
-    void api.albums("newest", 18)
-      .then((payload) => setHomeAlbums(payload.items))
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load latest albums."));
-    void requestRandomPool()
-      .then((songs) => { if (songs.length) setHomeSongs(songs.slice(0, 16)); })
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "Could not load random tracks."));
+    // Home is one song collection. Prewarm Shuffle without a duplicate list.
+    void requestRandomPool().catch(() => undefined);
   }
 
   async function shuffleSomething() {
     if (shufflePendingRef.current) return;
     shufflePendingRef.current = true;
     setError(null);
-    const available = randomPoolRef.current.length ? randomPoolRef.current : homeSongs;
+    const available = randomPoolRef.current;
     // This fast path needs NO await, no global loading spinner and no network.
     if (!available.length) setShuffling(true);
     try {
@@ -189,12 +181,6 @@ export default function App() {
       }
       performance.mark("waxloom-shuffle-click");
       player.playSongs(songs, index, { shuffled: true });
-      // Album art repaints should not compete with the first audio frame.
-      if (shuffleHomeTimerRef.current !== null) window.clearTimeout(shuffleHomeTimerRef.current);
-      shuffleHomeTimerRef.current = window.setTimeout(() => {
-        shuffleHomeTimerRef.current = null;
-        setHomeSongs(songs);
-      }, 350);
       // Refill only AFTER the audio start has had bandwidth priority.
       // Repeated quick taps still play instantly from the existing pool.
       if (shuffleTimerRef.current !== null) window.clearTimeout(shuffleTimerRef.current);
@@ -243,7 +229,7 @@ export default function App() {
   async function playAlbum(summary: Album) {
     try {
       const detail = await api.album(summary.id);
-      player.playSongs(detail.song ?? [], 0);
+      player.playSongs(detail.song ?? [], 0, { ordered: true });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Could not play album.");
     }
@@ -486,29 +472,29 @@ export default function App() {
               </span>
             </section>
 
-            <MobileHome albums={homeAlbums} recent={recentSongs}
-              onOpenAlbum={(album) => void openAlbum(album)}
-              onPlayAlbum={(album) => void playAlbum(album)}
-              onPlayRecent={(index) => player.playSongs(recentSongs, index, { ordered: true })}
+            <MobileHome recent={recentSongs}
+              starOverrides={starOverrides}
+              onToggleStar={(song) => void toggleStar(song)}
+              onAddPlaylist={setPlaylistSongTarget}
               onBrowseAlbums={() => navigate("albums")}
               onRefreshRecent={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}
             />
             <div className="waxloom-home-desktop">
-            <section>
-              <div className="section-toolbar"><div><p className="eyebrow">Recently imported tracks</p><h2>New songs in your library</h2></div><button className="secondary-action" type="button" onClick={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}>Refresh</button></div>
-              {recentSongs.length > 0 ? (
-                <SongTable songs={recentSongs} ordered starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
-              ) : <p className="muted">New tracks are indexed by Navidrome; new albums appear below.</p>}
-            </section>
-            <section>
-              <div className="section-toolbar"><div><p className="eyebrow">Recently added albums</p><h2>New albums</h2></div><button className="secondary-action" type="button" onClick={() => navigate("albums")}>All albums →</button></div>
-              {renderAlbumGrid(homeAlbums)}
-            </section>
-
-            <section>
-              <div className="section-toolbar"><div><p className="eyebrow">Random</p><h2>Play something</h2></div><button className="secondary-action" type="button" onClick={() => void shuffleSomething()} disabled={shuffling}>Fresh shuffle</button></div>
-              <SongTable songs={homeSongs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
-            </section>
+              <section className="waxloom-home-tracks-main">
+                <div className="section-toolbar">
+                  <div><p className="eyebrow">Just arrived</p><h2>Fresh tracks</h2>
+                    <p className="muted">Choose a song, then let Autoplay keep the music going.</p>
+                  </div>
+                  <button className="secondary-action" type="button"
+                    onClick={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}>
+                    Refresh
+                  </button>
+                </div>
+                {recentSongs.length > 0
+                  ? <SongTable songs={recentSongs} ordered starOverrides={starOverrides}
+                      onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
+                  : <p className="muted">Recently imported music will appear here.</p>}
+              </section>
             </div>
           </div>
         )}
@@ -532,7 +518,7 @@ export default function App() {
                     </div>
                     <p className="muted">{selectedAlbum.song?.length ?? selectedAlbum.songCount ?? 0} tracks · {formatDuration(selectedAlbum.duration)}
                       {selectedAlbum.year ? ` · ${selectedAlbum.year}` : ""}
-                      {knownMusicValue(selectedAlbum.genre) ? ` · ${selectedAlbum.genre}` : ""}</p><div className="button-row"><button className="primary-action" type="button" onClick={() => player.playSongs(selectedAlbum.song ?? [], 0)}>▶ Play album</button><button className="secondary-action" type="button" onClick={() => (selectedAlbum.song ?? []).forEach(player.addToQueue)}>+ Add to queue</button></div></div>
+                      {knownMusicValue(selectedAlbum.genre) ? ` · ${selectedAlbum.genre}` : ""}</p><div className="button-row"><button className="primary-action" type="button" onClick={() => player.playSongs(selectedAlbum.song ?? [], 0, { ordered: true })}>▶ Play album</button><button className="secondary-action" type="button" onClick={() => (selectedAlbum.song ?? []).forEach(player.addToQueue)}>+ Add to queue</button></div></div>
                 </section>
                 <SongTable songs={selectedAlbum.song ?? []} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
               </>
@@ -574,7 +560,7 @@ export default function App() {
             {selectedPlaylist ? (
               <>
                 <div className="detail-toolbar"><button className="secondary-action" type="button" onClick={() => setSelectedPlaylist(null)}>← Playlists</button><div className="button-row"><button className="secondary-action" type="button" onClick={() => void renamePlaylist()}>Rename</button><button className="secondary-action danger-action" type="button" onClick={() => void deleteCurrentPlaylist()}>Delete</button></div></div>
-                <section className="panel playlist-header"><div><p className="eyebrow">Playlist</p><h2>{selectedPlaylist.name}</h2><p className="muted">{selectedPlaylist.entry?.length ?? selectedPlaylist.songCount ?? 0} tracks · {formatDuration(selectedPlaylist.duration)}</p></div><button className="primary-action" type="button" onClick={() => player.playSongs(selectedPlaylist.entry ?? [], 0)}>▶ Play</button></section>
+                <section className="panel playlist-header"><div><p className="eyebrow">Playlist</p><h2>{selectedPlaylist.name}</h2><p className="muted">{selectedPlaylist.entry?.length ?? selectedPlaylist.songCount ?? 0} tracks · {formatDuration(selectedPlaylist.duration)}</p></div><button className="primary-action" type="button" onClick={() => player.playSongs(selectedPlaylist.entry ?? [], 0, { ordered: true })}>▶ Play</button></section>
                 <SongTable songs={selectedPlaylist.entry ?? []} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} onRemove={(index) => void removePlaylistSong(index)} />
               </>
             ) : (
@@ -586,14 +572,14 @@ export default function App() {
         {view === "favorites" && (
           <div className="workspace-stack">
             <div className="section-toolbar"><div><p className="eyebrow">Navidrome starred</p><h2>Favorites</h2></div><button className="secondary-action" type="button" onClick={() => void loadFavorites()}>Refresh</button></div>
-            {favorites && <><section><h3>Artists</h3><VinylArtists artists={favorites.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums</h3>{renderAlbumGrid(favorites.albums)}</section><section><div className="section-toolbar"><h3>Tracks</h3><button className="secondary-action" type="button" onClick={() => player.playSongs(favorites.songs, 0)} disabled={favorites.songs.length === 0}>▶ Play favorites</button></div><SongTable songs={favorites.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
+            {favorites && <><section><h3>Artists</h3><VinylArtists artists={favorites.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums</h3>{renderAlbumGrid(favorites.albums)}</section><section><div className="section-toolbar"><h3>Tracks</h3><button className="secondary-action" type="button" onClick={() => player.playSongs(favorites.songs, 0, { ordered: true })} disabled={favorites.songs.length === 0}>▶ Play favorites</button></div><SongTable songs={favorites.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
           </div>
         )}
 
         {view === "search" && (
           <div className="workspace-stack">
             {!searchResults && <div className="state-card">Use the search box above to search your whole Navidrome library.</div>}
-            {searchResults && <><section><h3>Artists <span className="muted-count">{searchResults.artists.length}</span></h3><VinylArtists artists={searchResults.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums <span className="muted-count">{searchResults.albums.length}</span></h3>{renderAlbumGrid(searchResults.albums)}</section><section><div className="section-toolbar"><h3>Tracks <span className="muted-count">{searchResults.songs.length}</span></h3><button className="secondary-action" type="button" onClick={() => player.playSongs(searchResults.songs, 0)} disabled={searchResults.songs.length === 0}>▶ Play results</button></div><SongTable songs={searchResults.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
+            {searchResults && <><section><h3>Artists <span className="muted-count">{searchResults.artists.length}</span></h3><VinylArtists artists={searchResults.artists} onOpen={(artist) => void openArtist(artist)} /></section><section><h3>Albums <span className="muted-count">{searchResults.albums.length}</span></h3>{renderAlbumGrid(searchResults.albums)}</section><section><div className="section-toolbar"><h3>Tracks <span className="muted-count">{searchResults.songs.length}</span></h3><button className="secondary-action" type="button" onClick={() => player.playSongs(searchResults.songs, 0, { ordered: true })} disabled={searchResults.songs.length === 0}>▶ Play results</button></div><SongTable songs={searchResults.songs} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} /></section></>}
           </div>
         )}
 

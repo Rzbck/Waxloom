@@ -219,6 +219,9 @@ export const api = {
   albums: (type = "newest", size = 80, offset = 0) => loadAlbumsCached(type, size, offset),
   artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
+  genreSongs: (genre: string, count = 40) => request<ListResponse<Song>>(
+    `/api/library/genres/${encodeURIComponent(genre)}/songs?count=${Math.max(1, Math.min(100, count))}`,
+  ),
   recentSongs: (size = 24) => request<ListResponse<Song>>(`/api/library/recent-tracks?size=${size}`, { cache: "no-store" }),
   album: (id: string) => loadAlbumDetailCached(id),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),

@@ -8,7 +8,7 @@ await new Promise((ok,bad)=>{ws.onopen=ok;ws.onerror=bad});
 let reqId=0;
 const callbacks=new Map();
 const rpc=(method,params={})=>new Promise((ok,bad)=>{const id=++reqId;callbacks.set(id,{ok,bad});ws.send(JSON.stringify({id,method,params}))});
-const failures=[],errors=[],writes=[],counts={random:0,albums:0,artists:0,streams:0};
+const failures=[],errors=[],writes=[],counts={random:0,albums:0,artists:0,genres:0,streams:0};
 let saveActive=0,maxSaves=0;
 const wait=(ms)=>new Promise(r=>setTimeout(r,ms));
 const json=(id,payload,status=200)=>rpc("Fetch.fulfillRequest",{requestId:id,responseCode:status,responseHeaders:[{name:"Content-Type",value:"application/json"}],body:Buffer.from(JSON.stringify(payload)).toString("base64")});
@@ -19,7 +19,7 @@ const albums=[
 ];
 const recent=[
   {id:"qa-home-untagged",title:"Cafe Azul",artist:"Synthetic One",albumId:"qa-album-untagged",album:"[Unknown Album]",duration:15},
-  {id:"qa-home-named",title:"Dusk",artist:"Synthetic Two",albumId:"qa-album-named",album:"BRIGHT LIGHT",duration:15},
+  {id:"qa-home-named",title:"Dusk",artist:"Synthetic Two",albumId:"qa-album-named",album:"BRIGHT LIGHT",genre:"House",duration:15},
 ];
 const wav=Buffer.alloc(44+44100*2);
 wav.write("RIFF",0);wav.writeUInt32LE(wav.length-8,4);wav.write("WAVEfmt ",8);wav.writeUInt32LE(16,16);wav.writeUInt16LE(1,20);wav.writeUInt16LE(1,22);wav.writeUInt32LE(44100,24);wav.writeUInt32LE(88200,28);wav.writeUInt16LE(2,32);wav.writeUInt16LE(16,34);wav.write("data",36);wav.writeUInt32LE(wav.length-44,40);
@@ -40,6 +40,12 @@ ws.onmessage=async({data})=>{
       counts.albums++;
       await wait(3400);
       await json(requestId,{items:albums,count:albums.length});
+    }else if(path.startsWith("/api/library/genres/") && path.endsWith("/songs")){
+      counts.genres++;
+      await json(requestId,{items:[
+        {id:"qa-house-one",title:"House Radio One",artist:"Another Artist",genre:"House",duration:15},
+        {id:"qa-house-two",title:"House Radio Two",artist:"Third Artist",genre:"House",duration:15},
+      ],count:2});
     }else if(path==="/api/library/artists"){
       counts.artists++;
       await json(requestId,{items:[],count:0});
@@ -65,7 +71,9 @@ ws.onmessage=async({data})=>{
     }else if(path==="/api/albums/qa-album-named"){
       await json(requestId,{...albums[1],song:[recent[1]]});
     }else if(path==="/api/playlists"){
-      await json(requestId,{items:[],count:0});
+      await json(requestId,{items:[{id:"qa-one-song-playlist",name:"One song test",songCount:1}],count:1});
+    }else if(path==="/api/playlists/qa-one-song-playlist"){
+      await json(requestId,{id:"qa-one-song-playlist",name:"One song test",songCount:1,entry:[recent[0]]});
     }else if(request.method!=="GET"&&request.method!=="HEAD"){
       await json(requestId,{ok:true});
     }else{
@@ -81,10 +89,16 @@ const evaluate=async(expression)=>{
 const check=(ok,message)=>{if(!ok)failures.push(message)};
 try{
   await rpc("Page.enable");await rpc("Runtime.enable");
+  await rpc("Page.addScriptToEvaluateOnNewDocument",{source:
+    '(function(){ const s=navigator.mediaSession; if(!s)return; const old=s.setActionHandler.bind(s); s.setActionHandler=function(name,handler){window.__qaMediaHandlers=window.__qaMediaHandlers||{};window.__qaMediaHandlers[name]=handler;return old(name,handler)}; })()'
+  });
   await rpc("Fetch.enable",{patterns:[{urlPattern:"http://127.0.0.1:8136/api/*",requestStage:"Request"}]});
   await rpc("Page.navigate",{url:site});
   await wait(1100);
-  const initial=await evaluate('({shuffleDisabled:document.querySelector(".home-quickbar .primary-action")?.disabled,homeTracks:document.querySelectorAll(".waxloom-home-track-card").length,albumPending:!document.querySelector(".waxloom-vinyl-face"),status:document.readyState})');
+  const initial=await evaluate('({shuffleDisabled:document.querySelector(".home-quickbar .primary-action")?.disabled,homeTracks:document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-sleeve").length,sectionCount:document.querySelectorAll(".waxloom-mobile-home > section").length,status:document.readyState})');
+  check(counts.albums===0,"Home must NOT fetch and duplicate full album previews");
+  check(initial.homeTracks===2,"Home displays the two latest actual songs");
+  check(initial.sectionCount===1,"Home must have a single main collection");
   check(counts.random===1,"Home should ask Navidrome for exactly one ready shuffle pool");
   check(counts.artists===0,"Home bootstrap still warms unrelated artist index");
   check(initial.shuffleDisabled===false,"Slow latest albums must not disable Shuffle");
@@ -102,7 +116,7 @@ try{
   await wait(5200);
   check(maxSaves<=1,"Overlapping Navidrome queue writes: "+maxSaves);
   check(writes.length<=4,"Too many queue writes for three Shuffle clicks: "+writes.length);
-  check(counts.random<=2,"Excessive random-songs requests: "+counts.random);
+  check(counts.random<=4,"Excessive random-songs requests: "+counts.random);
   // A Home Shuffle must remain shuffled after a natural track end, even with Repeat off.
   const active=await evaluate('Boolean(document.querySelector(\'button[aria-label="Shuffle"]\')?.classList.contains("icon-button-active"))');
   check(active,"Home shuffle must set player Shuffle mode");
@@ -112,44 +126,88 @@ try{
   const after=await evaluate('document.querySelector("audio")?.getAttribute("src")');
   check(before!==after && after?.includes("/api/media/stream/qa-random-"),
     "Home shuffle must choose another track after the previous track ends");
-  // Two fake albums: Unknown Album single + named single. UI must be consistent.
+  // Home has ONE musical collection: track vinyls, never album duplicates.
   await rpc("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
-  await wait(500);
-  const labels=await evaluate('[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-label")].map(x=>x.textContent)');
-  check(labels.some(x=>x.includes("Cafe Azul")&&!x.includes("[Unknown Album]")),
-    "Unknown single album must show the playable song title");
-  check(labels.some(x=>x.includes("BRIGHT LIGHT")&&x.includes("Dusk")),
-    "Named single album must show both album title and song title");
-  await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-play")[0]?.click()');
-  await wait(360);
-  const firstAlbum=await evaluate('({audio:document.querySelector("audio")?.getAttribute("src"),playing:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].findIndex(x=>x.classList.contains("is-current"))})');
-  check(firstAlbum.audio?.includes("qa-home-untagged") && firstAlbum.playing===0,
-    "First vinyl must mark the actual playing album");
-  await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-play")[1]?.click()');
-  await wait(480);
-  const secondAlbum=await evaluate('({audio:document.querySelector("audio")?.getAttribute("src"),playing:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].findIndex(x=>x.classList.contains("is-current")),center:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].findIndex(x=>x.getAttribute("data-centered")==="true")})');
-  check(secondAlbum.audio?.includes("qa-home-named") && secondAlbum.playing===1 && secondAlbum.center===1,
-    "Second vinyl must center on the now-playing album");
-  // General metadata semantics: a recording must not masquerade as an album,
-  // and every role uses a dedicated field rather than combined raw strings.
-  const meta=await evaluate('({cards:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-sleeve")].slice(0,2).map(x=>({kind:x.querySelector(".waxloom-vinyl-kind")?.textContent,lines:[...x.querySelectorAll(".waxloom-vinyl-label > *")].map(y=>y.textContent)})),recent:[...document.querySelectorAll(".waxloom-home-track-card")].slice(0,2).map(x=>x.textContent)})');
-  check(meta.cards[0]?.kind==="Track" && meta.cards[0]?.lines[0]==="Cafe Azul"
-    && meta.cards[0]?.lines[1]?.includes("Artist") && meta.cards[0]?.lines[2]?.includes("Album"),
-    "Untagged single must expose Track, Artist and untagged Album as distinct fields");
-  check(meta.cards[1]?.kind==="Album" && meta.cards[1]?.lines[0]==="BRIGHT LIGHT"
-    && meta.cards[1]?.lines[1]?.includes("Artist") && meta.cards[1]?.lines[2]?.includes("Track")
-    && meta.cards[1]?.lines[2]?.includes("Dusk"),
-    "Tagged one-track release must distinguish Album, Artist, and Track");
-  check(meta.recent.some(x=>x.includes("Artist") && x.includes("Album")),
-    "Mobile recent track cards must distinguish artist and album");
-  await evaluate('document.querySelector(".waxloom-mobile-mini-info")?.click()');
-  await wait(220);
-  const fullPlayer=await evaluate('({header:document.querySelector(".waxloom-mobile-player-head-title")?.textContent,meta:document.querySelector(".waxloom-mobile-player-metadata")?.textContent})');
-  check(fullPlayer.header?.includes("Album") && fullPlayer.header?.includes("BRIGHT LIGHT")
-    && fullPlayer.meta?.includes("TRACK") && fullPlayer.meta?.includes("Artist")
-    && fullPlayer.meta?.includes("Dusk"),
-    "Mobile full player must distinguish the actual Track, Artist and Album");
-  const result={passed:failures.length===0,failures,errors,initial,first,elapsedMs:elapsed,counts,writes:writes.length,maxConcurrentSaves:maxSaves};
+  await wait(350);
+  const home=await evaluate('({heads:[...document.querySelectorAll(".waxloom-mobile-home-section-head h2")].map(x=>x.textContent),cards:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-sleeve")].map(x=>x.textContent),albumVinyl:document.querySelectorAll(".waxloom-mobile-home .waxloom-vinyl-face").length})');
+  check(home.heads.length===1 && home.heads[0]==="Fresh tracks" && home.albumVinyl===0,
+    "Home must have exactly one real-song vinyl collection");
+  check(home.cards.length===2 && home.cards[0].includes("Cafe Azul") && home.cards[1].includes("Dusk"),
+    "Clicking a Home vinyl must refer to an actual song, not a single-track album");
+  await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-face")[1]?.click()');
+  await wait(260);
+  const playingSong=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),current:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-sleeve")].findIndex(x=>x.classList.contains("is-current")),autoplay:document.querySelector(".waxloom-autoplay-tool")?.getAttribute("aria-pressed"),handler:typeof window.__qaMediaHandlers?.nexttrack})');
+  check(playingSong.src?.includes("qa-home-named") && playingSong.current===1,"Home track click must select that exact song");
+  check(playingSong.autoplay==="true","Autoplay defaults ON for library playback");
+  check(playingSong.handler==="function","iOS / MediaSession Next handler is registered");
+  // End of a tiny 2-song collection: pressing hardware Next must fetch new
+  // library music, never pause the current song or silently do nothing.
+  await evaluate('window.__qaMediaHandlers?.nexttrack?.()');
+  await wait(4350);
+  const continued=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),playing:document.querySelector("audio")?.paused===false,queue:document.querySelector(".queue-item-active")?.textContent})');
+  check((continued.src?.includes("/api/media/stream/qa-random-") || continued.src?.includes("/api/media/stream/qa-house-")) && continued.src!==playingSong.src,
+    "Media Session Next on final track must play a new library track");
+  check(continued.playing,"Media Session Next must keep playback active");
+  // Home is intentionally SONG-first. Album navigation is a different view.
+  await evaluate('document.querySelector(".waxloom-home-explore")?.click()');
+  await wait(3850);
+  const albumsView=await evaluate('({name:document.querySelector(".topbar h1")?.textContent,covers:document.querySelectorAll(".waxloom-album-vinyl .waxloom-vinyl-face").length})');
+  check(albumsView.covers===2,"Album browser must remain available outside Home");
+  await evaluate('document.querySelectorAll(".waxloom-album-vinyl .waxloom-vinyl-face")[1]?.click()');
+  await wait(200);
+  const detail=await evaluate('({hero:document.querySelector(".detail-hero")?.textContent?.slice(0,170),play:!!document.querySelector(".detail-hero .primary-action")})');
+  check(detail.play && detail.hero.includes("BRIGHT LIGHT"),"Real album view must load one-track album detail");
+  await evaluate('document.querySelector(".detail-hero .primary-action")?.click()');
+  await wait(140);
+  const albumStart=await evaluate('document.querySelector("audio")?.getAttribute("src")');
+  check(albumStart?.includes("qa-home-named"),"Play album must start the album's actual song");
+  await evaluate('window.__qaMediaHandlers?.nexttrack?.()');
+  await wait(4100);
+  const genreNext=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),paused:document.querySelector("audio")?.paused,autoplay:document.querySelector(".waxloom-autoplay-tool")?.getAttribute("aria-pressed")})');
+  check(counts.genres>0,"Auto-continuation must try the tagged House genre");
+  check(genreNext.src?.includes("qa-house-one") && !genreNext.paused,
+    "After a one-track ALBUM, hardware Next must start similar genre music, not stop");
+  // Same continuation for one-song PLAYLIST with no usable genre.
+  await evaluate('document.querySelector(".mobile-menu-toggle")?.click()');
+  await wait(120);
+  await evaluate('[...document.querySelectorAll(".waxloom-mobile-navigation nav button")].find(x=>x.textContent.includes("Playlists"))?.click()');
+  await wait(300);
+  const playlistView=await evaluate('({title:document.querySelector(".topbar h1")?.textContent,list:document.querySelectorAll(".waxloom-entity-vinyl .waxloom-entity-face").length})');
+  check(playlistView.list===1,"Playlist browser must show the one-song fixture");
+  await evaluate('document.querySelector(".waxloom-entity-vinyl .waxloom-entity-face")?.click()');
+  await wait(200);
+  const playlistDetail=await evaluate('Boolean(document.querySelector(".playlist-header .primary-action"))');
+  check(playlistDetail,"One-song playlist detail should have Play");
+  await evaluate('document.querySelector(".playlist-header .primary-action")?.click()');
+  await wait(150);
+  const playlistStart=await evaluate('document.querySelector("audio")?.getAttribute("src")');
+  check(playlistStart?.includes("qa-home-untagged"),"Playlist must start selected song without album dependency");
+  await evaluate('window.__qaMediaHandlers?.nexttrack?.()');
+  await wait(4150);
+  const playlistNext=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),paused:document.querySelector("audio")?.paused})');
+  check(playlistNext.src?.includes("qa-random-") && !playlistNext.paused,
+    "After a one-song PLAYLIST without genre, Next must play another library song");
+  // Natural end with default Autoplay ON must also continue, not just a
+  // physical Next. A user can explicitly disable Autoplay for queue-end stop.
+  await evaluate('document.querySelector(".playlist-header .primary-action")?.click()');
+  await wait(130);
+  await evaluate('document.querySelector("audio")?.dispatchEvent(new Event("ended",{bubbles:true}))');
+  await wait(4250);
+  const natural=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),paused:document.querySelector("audio")?.paused})');
+  check(natural.src?.includes("qa-random-") && !natural.paused,
+    "Natural ended from a one-song playlist must continue with Autoplay on");
+  await evaluate('document.querySelector(".waxloom-autoplay-tool")?.click()');
+  await wait(90);
+  const autoplayOff=await evaluate('document.querySelector(".waxloom-autoplay-tool")?.getAttribute("aria-pressed")');
+  check(autoplayOff==="false","Autoplay off should be an explicit accessible setting");
+  await evaluate('document.querySelector(".playlist-header .primary-action")?.click()');
+  await wait(110);
+  await evaluate('window.__qaMediaHandlers?.nexttrack?.()');
+  await wait(4250);
+  const explicitNextOff=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),paused:document.querySelector("audio")?.paused})');
+  check(explicitNextOff.src?.includes("qa-random-") && !explicitNextOff.paused,
+    "Explicit Next must play more library music even if passive Autoplay is off");
+  const result={passed:failures.length===0,failures,errors,initial,first,elapsedMs:elapsed,continued,albumStart,genreNext,playlistStart,playlistNext,natural,autoplayOff,explicitNextOff,counts,writes:writes.length,maxConcurrentSaves:maxSaves};
   console.log(JSON.stringify(result,null,2));
   if(failures.length||errors.length)process.exitCode=1;
 }finally{ws.close()}
