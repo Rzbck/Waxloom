@@ -497,7 +497,7 @@ export default function App() {
   }
 
   return (
-    <main className={`app-shell ${player.currentSong || player.currentPreview ? "app-shell-with-player" : ""} ${view === "discovery" ? "app-shell-discovery" : ""} ${view === "home" ? "app-shell-home" : ""}`}>
+    <main className={`app-shell ${player.currentSong || player.currentPreview ? "app-shell-with-player" : ""} ${view === "discovery" ? "app-shell-discovery" : ""} ${view === "home" ? "app-shell-home" : ""} ${view === "imports" ? "app-shell-imports" : ""}`}>
       <aside className="sidebar">
         <div className="brand">Waxloom</div>
         <nav aria-label="Waxloom sections">

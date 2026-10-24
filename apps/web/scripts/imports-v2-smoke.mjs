@@ -108,8 +108,8 @@ try{
   await rpc("Page.navigate",{url:site});await wait(620);
   await evaluate('[...document.querySelectorAll(".sidebar .nav-item")].find(x=>x.textContent.trim()==="Imports")?.click()');
   await wait(260);
-  const initial=await evaluate('({search:!!document.querySelector(".waxloom-import-search input"),fields:document.querySelectorAll(".import-search-form input").length,text:document.querySelector(".waxloom-import-header h2")?.textContent})');
-  check(initial.search&&initial.fields===0&&initial.text==="Find it. Listen. Save it.","Unified one-field importer not shown");
+  const initial=await evaluate('({search:!!document.querySelector(".waxloom-import-search input"),fields:document.querySelectorAll(".import-search-form input").length,text:document.querySelector(".waxloom-import-header h2")?.textContent,topbar:getComputedStyle(document.querySelector(".topbar")).display,headerHeight:document.querySelector(".waxloom-import-header").getBoundingClientRect().height,searchTop:document.querySelector(".waxloom-import-search").getBoundingClientRect().top})');
+  check(initial.search&&initial.fields===0&&initial.text==="Import music"&&initial.topbar==="none"&&initial.headerHeight<36&&initial.searchTop<110,"Compact Import must show just small title plus one search near top");
   await evaluate('(()=>{const el=document.querySelector(".waxloom-import-search input");const proto=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value");proto.set.call(el,"Artist One");el.dispatchEvent(new Event("input",{bubbles:true}));document.querySelector(".waxloom-import-search button").click()})()');
   await wait(580);
   const results=await evaluate('({tracks:document.querySelectorAll(".waxloom-import-track").length,collections:document.querySelectorAll(".waxloom-import-collection").length})');

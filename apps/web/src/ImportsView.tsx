@@ -344,13 +344,9 @@ export function ImportsView({
   return (
     <div className="waxloom-import-v2">
       <header className="waxloom-import-header">
-        <div>
-          <p className="eyebrow">Music import</p>
-          <h2>Find it. Listen. Save it.</h2>
-          <p>One search for tracks, artists, albums or playlists. Preview and choose what to keep.</p>
-        </div>
+        <h2>Import music</h2>
         <span className={runtimeReady ? "waxloom-import-status is-ready" : "waxloom-import-status"}>
-          {runtimeReady ? "Importer ready" : "Importer unavailable"}
+          {runtimeReady ? "Ready" : "Unavailable"}
         </span>
       </header>
       <form className="waxloom-import-search" role="search" onSubmit={search}>
