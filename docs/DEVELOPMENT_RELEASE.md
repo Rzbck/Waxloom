@@ -36,6 +36,8 @@ git diff --check
 .\scripts\CHECK_RELEASE_CANDIDATE.ps1 -RuntimeManifestPath "<private-runtime-manifest>" -RequirePublished
 ```
 
+**Important cross-platform npm lock rule:** TypeScript 7 publishes OS-specific optional binaries. Generate or refresh `package-lock.json` from a **clean temporary directory containing only `package.json`**, not from an existing Windows `node_modules`: otherwise npm can omit `@typescript/typescript-linux-x64` and break Linux Docker builds. A valid lock must include both Linux and Windows optional binaries. The hermetic Docker build is the blocking proof, not only the Windows build.
+
 The `CHECK_RELEASE_CANDIDATE.ps1` preflight requires a clean, published, non-main worktree whose HEAD descends from **both** live Web and live API commits. It compares actual Docker **image IDs**, not only mutable tags. Any divergence is a blocking failure. Synthetic tests never access the actual user library.
 
 ## Building from the exact published Git commit
