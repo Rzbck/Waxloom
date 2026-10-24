@@ -18,7 +18,7 @@ type VinylSongsProps = {
 const PAGE_SIZE = 24;
 
 export function VinylSongs({
-  songs, starOverrides, onToggleStar, onAddPlaylist, onRemove, ordered = false,
+  songs, starOverrides, onToggleStar, onAddPlaylist, onRemove, ordered = true,
 }: VinylSongsProps) {
   const player = usePlayer();
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);

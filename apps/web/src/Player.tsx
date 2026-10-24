@@ -13,6 +13,7 @@ import {
 
 import { api } from "./api";
 import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
+import { compactPlayedHistory, nextFromQueue, radioGenre, selectRadioTracks } from "./smartAutoplay";
 import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
 import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
@@ -57,6 +58,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // when an HTMLAudioElement changes source (or an old play promise rejects).
   const wantsPlaybackRef = useRef(false);
   const preEndHandoffSourceRef = useRef<string | null>(null);
+  // Media Session callbacks must not rely on stale React renders.
+  const liveQueueRef = useRef<Song[]>([]);
+  const liveIndexRef = useRef(-1);
+  const queueEpochRef = useRef(0);
+  const radioRequestRef = useRef<{ epoch: number; promise: Promise<Song[]> } | null>(null);
+  const nextInProgressRef = useRef(false);
+  const [autoplay, setAutoplay] = useState(() => {
+    try { return localStorage.getItem("waxloom.autoplay.v1") !== "off"; }
+    catch { return true; } // Private browser mode may deny localStorage.
+  });
+  const [radioNotice, setRadioNotice] = useState<string | null>(null);
   const previewManualImportRef = useRef<((candidate: DiscoveryCandidate) => void) | null>(null);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
@@ -96,6 +108,15 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [restoreDone, setRestoreDone] = useState(false);
   const downloads = useDownloads();
   const owned = useLibraryPresence();
+
+  useEffect(() => {
+    liveQueueRef.current = queue;
+    liveIndexRef.current = currentIndex;
+  }, [queue, currentIndex]);
+  useEffect(() => {
+    try { localStorage.setItem("waxloom.autoplay.v1", autoplay ? "on" : "off"); }
+    catch { /* Playback must work even when storage is restricted. */ }
+  }, [autoplay]);
 
   const currentSong = mode === "navidrome" && currentIndex >= 0 ? queue[currentIndex] ?? null : null;
   const currentPreview = mode === "preview" && previewIndex >= 0 ? previewQueue[previewIndex] ?? null : null;
@@ -196,9 +217,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (explicitQueueRef.current) return;
         const entries = saved.entry ?? [];
         if (entries.length === 0) return;
+        liveQueueRef.current = entries;
         setQueue(entries);
         const index = saved.current ? entries.findIndex((song) => song.id === saved.current) : 0;
-        setCurrentIndex(index >= 0 ? index : 0);
+        liveIndexRef.current = index >= 0 ? index : 0;
+        setCurrentIndex(liveIndexRef.current);
         setCurrentTime((saved.position ?? 0) / 1000);
       })
       .catch(() => undefined)
@@ -356,6 +379,47 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id);
   }, [queue, currentSong?.id, mode]);
 
+  const refillAutoplay = useCallback((seed: Song, epoch: number): Promise<Song[]> => {
+    const running = radioRequestRef.current;
+    if (running?.epoch === epoch) return running.promise;
+    const task = (async () => {
+      const genre = radioGenre(seed);
+      // Read-only Navidrome genre matches with a varied local fallback.
+      const [related, random] = await Promise.all([
+        genre ? api.genreSongs(genre, 36).then((res) => res.items).catch(() => [] as Song[])
+          : Promise.resolve([] as Song[]),
+        api.randomSongs(45).then((res) => res.items).catch(() => [] as Song[]),
+      ]);
+      if (epoch !== queueEpochRef.current) return [];
+      let selected = selectRadioTracks(liveQueueRef.current, seed, related, random, 24);
+      if (!selected.length && random.length) {
+        // Small libraries may exhaust their unique records.
+        const recent = new Set(liveQueueRef.current.slice(-12).map((song) => song.id));
+        selected = random.filter((song) => song.id && song.id !== seed.id && !recent.has(song.id)).slice(0, 20);
+        if (!selected.length) selected = random.filter((song) => song.id && song.id !== seed.id).slice(0, 20);
+      }
+      if (selected.length && epoch === queueEpochRef.current) {
+        const extended = [...liveQueueRef.current, ...selected];
+        liveQueueRef.current = extended;
+        setQueue(extended);
+        setRadioNotice(null);
+      }
+      return selected;
+    })();
+    radioRequestRef.current = { epoch, promise: task };
+    void task.finally(() => {
+      if (radioRequestRef.current?.promise === task) radioRequestRef.current = null;
+    }).catch(() => undefined);
+    return task;
+  }, []);
+
+  // Preload before the current song ends, without delaying its first audio frame.
+  useEffect(() => {
+    if (!autoplay || mode !== "navidrome" || !currentSong || !wantsPlaybackRef.current
+      || queue.length - currentIndex > 8) return;
+    void refillAutoplay(currentSong, queueEpochRef.current).catch(() => undefined);
+  }, [autoplay, mode, currentSong?.id, currentIndex, queue, playing, refillAutoplay]);
+
   const playSongs = useCallback((songs: Song[], startIndex = 0, options?: { ordered?: boolean; shuffled?: boolean }) => {
     if (songs.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, songs.length - 1));
@@ -374,8 +438,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setRepeat("off");
     }
     explicitQueueRef.current = true;
+    queueEpochRef.current += 1;
+    liveQueueRef.current = [...songs];
+    liveIndexRef.current = safeIndex;
+    nextInProgressRef.current = false;
+    setRadioNotice(null);
     setMode("navidrome");
-    setQueue([...songs]);
+    setQueue(liveQueueRef.current);
     setCurrentIndex(safeIndex);
     setCurrentTime(0);
     setPreviewError(null);
@@ -387,6 +456,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     onManualImport?: (candidate: DiscoveryCandidate) => void,
   ) => {
     if (tracks.length === 0) return;
+    queueEpochRef.current += 1;
+    radioRequestRef.current = null;
     previewManualImportRef.current = onManualImport ?? null;
     const preparedTracks = tracks.map((track) => ({
       ...track,
@@ -433,66 +504,90 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     explicitQueueRef.current = true;
     setQueue((current) => {
       if (current.length === 0) {
+        liveIndexRef.current = 0;
         setCurrentIndex(0);
+        liveQueueRef.current = [song];
         return [song];
       }
-      return [...current, song];
+      const extended = [...current, song];
+      liveQueueRef.current = extended;
+      return extended;
     });
   }, []);
 
-  const next = useCallback(() => {
-    if (activeLength === 0) return;
-    if (repeat === "one") {
-      const audio = audioRef.current;
-      if (audio) {
-        audio.currentTime = 0;
-        setCurrentTime(0);
-        void audio.play().catch(() => undefined);
-      }
-      return;
-    }
-
-    let nextIndex: number | null = null;
-    if (shuffle && activeLength > 1) {
-      nextIndex = activeIndex;
-      while (nextIndex === activeIndex) nextIndex = Math.floor(Math.random() * activeLength);
-    } else if (activeIndex < activeLength - 1) {
-      nextIndex = activeIndex + 1;
-    } else if (repeat === "all") {
-      nextIndex = 0;
-    }
-
-    if (nextIndex === null) {
-      wantsPlaybackRef.current = false;
-      setPlaying(false);
-      audioRef.current?.pause();
-      return;
-    }
-
+  const next = useCallback((cause: "manual" | "ended" | "preend" = "manual") => {
+    if (nextInProgressRef.current) return;
     if (mode === "preview") {
+      if (activeLength === 0) return;
+      if (repeat === "one" && cause !== "manual") {
+        const audio = audioRef.current;
+        if (audio) { audio.currentTime = 0; setCurrentTime(0); void audio.play().catch(() => undefined); }
+        return;
+      }
+      const index = activeIndex < activeLength - 1 ? activeIndex + 1 : repeat === "all" && cause !== "manual" ? 0 : -1;
+      if (index < 0) {
+        if (cause !== "manual") { wantsPlaybackRef.current = false; setPlaying(false); }
+        return;
+      }
       const audio = audioRef.current;
       wantsPlaybackRef.current = true;
       previewStartAtZeroRef.current = true;
       audio?.pause();
-      if (audio) {
-        try {
-          audio.currentTime = 0;
-        } catch {
-          // loadedmetadata performs the hard reset for the new preview.
-        }
-      }
+      if (audio) { try { audio.currentTime = 0; } catch { /* reset after metadata */ } }
       setCurrentTime(0);
-      setDuration(previewQueue[nextIndex]?.duration ?? 0);
-      setPreviewIndex(nextIndex);
+      setDuration(previewQueue[index]?.duration ?? 0);
+      setPreviewIndex(index);
       setPlaying(true);
       return;
     }
-
-    const song = queue[nextIndex];
-    if (!song) return;
-    startLocalPlayback(song, "next");
-    setCurrentIndex(nextIndex);
-  }, [activeLength, activeIndex, repeat, shuffle, mode, queue, previewQueue, startLocalPlayback]);
+    if (!liveQueueRef.current.length) return;
+    if (repeat === "one" && cause !== "manual") {
+      const audio = audioRef.current;
+      if (audio) { audio.currentTime = 0; setCurrentTime(0); void audio.play().catch(() => undefined); }
+      return;
+    }
+    nextInProgressRef.current = true;
+    const epoch = queueEpochRef.current;
+    void (async () => {
+      try {
+        const index = liveIndexRef.current;
+        const current = liveQueueRef.current[index];
+        if (!current) return;
+        // A hardware/UI Next always skips Repeat One, even from a single.
+        const nextRepeat = cause === "manual" && liveQueueRef.current.length <= 1 ? "off" : repeat;
+        let target = nextFromQueue(liveQueueRef.current, index, shuffle, nextRepeat);
+        if (!target && (autoplay || cause === "manual")) {
+          traceLocalPlayer("next-request", current.id);
+          await refillAutoplay(current, epoch);
+          if (epoch !== queueEpochRef.current) return; // Newer selection wins.
+          target = nextFromQueue(liveQueueRef.current, liveIndexRef.current, shuffle, "off");
+        }
+        if (!target) {
+          if (cause !== "manual") { wantsPlaybackRef.current = false; setPlaying(false); }
+          setRadioNotice("No more library tracks are available right now.");
+          return;
+        }
+        const upcoming = target.queue[target.index];
+        if (!upcoming || epoch !== queueEpochRef.current) return;
+        const compacted = compactPlayedHistory(target.queue, target.index);
+        liveQueueRef.current = compacted.queue;
+        liveIndexRef.current = compacted.index;
+        setQueue(compacted.queue);
+        setCurrentIndex(compacted.index);
+        setCurrentTime(0);
+        setRadioNotice(null);
+        startLocalPlayback(upcoming, "next");
+      } catch {
+        if (epoch === queueEpochRef.current) {
+          setRadioNotice("Could not load more tracks. Press Next to retry.");
+          if (cause !== "manual" && audioRef.current?.ended) setPlaying(false);
+        }
+      } finally {
+        nextInProgressRef.current = false;
+      }
+    })();
+  }, [mode, activeLength, activeIndex, previewQueue, repeat, shuffle,
+      autoplay, refillAutoplay, traceLocalPlayer, startLocalPlayback]);
 
   useEffect(() => {
     if (!isIOSHomeScreenAudio()) return;
@@ -502,7 +597,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (!audio) return;
       if (audio.ended && !audio.loop) {
         // On iOS the ended callback or the next play() may have been suspended.
-        next();
+        next("ended");
         return;
       }
       if (audio.paused) {
@@ -588,7 +683,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       // A source latch prevents duplicate handoffs from adjacent timeupdate events.
       preEndHandoffSourceRef.current = source;
       submitScrobble();
-      next();
+      next("preend");
       return;
     }
     if (effectiveDuration > 0) {
@@ -896,7 +991,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       artwork: currentSong?.coverArt ? [{ src: api.coverUrl(currentSong.coverArt, 600), sizes: "600x600" }] : [],
     });
     const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
-      ["nexttrack", () => next()],
+      ["nexttrack", () => next("manual")],
       ["previoustrack", () => previous()],
       ["play", () => {
         if (mode === "navidrome" && currentSong) {
@@ -996,7 +1091,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           const source = audioRef.current?.getAttribute("src") ?? audioRef.current?.currentSrc;
           if (source && preEndHandoffSourceRef.current === source) return;
           submitScrobble();
-          next();
+          next("ended");
         }}
         onError={() => {
           if (mode !== "preview" || !currentPreview) {
@@ -1030,6 +1125,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 </div>
                 <button className="icon-button" type="button" onClick={() => setQueueOpen(false)} aria-label="Close queue">×</button>
               </div>
+              {mode === "navidrome" && (
+                <button type="button" className={autoplay ? "waxloom-autoplay-toggle is-on" : "waxloom-autoplay-toggle"}
+                  aria-pressed={autoplay} onClick={() => setAutoplay((enabled) => !enabled)}>
+                  ∞ Autoplay {autoplay ? "on" : "off"} · {autoplay ? "More music follows your queue" : "Stop at queue end"}
+                </button>
+              )}
               <div className="queue-items">
                 {activeQueue.map((item, index) => {
                   const title = "recording_mbid" in item ? item.title : item.title ?? "Unknown title";
@@ -1107,7 +1208,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 aria-label={playing ? "Pause" : "Play"}>
                 <PlayerIcon name={playing ? "pause" : "play"} size={24} />
               </button>
-              <button className="waxloom-mobile-mini-next" type="button" onClick={next} aria-label="Next track">
+              <button className="waxloom-mobile-mini-next" type="button" onClick={() => next("manual")} aria-label="Next track">
                 <PlayerIcon name="next" size={22} />
               </button>
             </div>
@@ -1130,7 +1231,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 <button className="play-button" type="button" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"} disabled={mode === "preview" && Boolean(previewResolving)}>
                   {mode === "preview" && previewResolving ? "…" : playing ? "Ⅱ" : "▶"}
                 </button>
-                <button className="icon-button" type="button" onClick={next} aria-label="Next">▶▶</button>
+                <button className="icon-button" type="button" onClick={() => next("manual")} aria-label="Next">▶▶</button>
                 <button className={repeat !== "off" ? "icon-button icon-button-active" : "icon-button"} type="button" onClick={cycleRepeat} aria-label={`Repeat ${repeat}`}>
                   {repeat === "one" ? "↻1" : "↻"}
                 </button>
@@ -1141,6 +1242,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 <span>{formatTime(duration)}</span>
               </div>
               {previewError && <small className="player-preview-error">{previewError}</small>}
+              {radioNotice && mode === "navidrome" && <small className="player-preview-error" role="status">{radioNotice}</small>}
             </div>
 
             <div className="player-tools">
@@ -1175,6 +1277,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                   : <PlayerIcon name="download" size={19} />}
               </button>
               )}
+              {mode === "navidrome" && <button type="button"
+                className={autoplay ? "waxloom-autoplay-tool is-on" : "waxloom-autoplay-tool"}
+                onClick={() => setAutoplay((enabled) => !enabled)} aria-pressed={autoplay}
+                title={autoplay ? "Autoplay similar library tracks: on" : "Autoplay similar library tracks: off"}
+                aria-label="Autoplay similar music">∞ Auto</button>}
               <button className="icon-button" type="button" onClick={() => setQueueOpen((value) => !value)} aria-label="Queue">☷ {activeQueue.length}</button>
               <span>🔊</span>
               <input className="volume-slider" type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="Volume" />
@@ -1208,7 +1315,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             suspended={playlistPickerOpen || queueOpen}
             onPlayPause={togglePlayback}
             onPrevious={previous}
-            onNext={next}
+            onNext={() => next("manual")}
             onSeek={seek}
             onShuffle={() => setShuffle((value) => !value)}
             onRepeat={cycleRepeat}

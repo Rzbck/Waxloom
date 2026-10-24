@@ -1,3 +1,12 @@
+## 2026-10-24 — Song-first Home and Smart Autoplay (Next from media controls)
+
+- User asked to remove duplicate Home album/Fresh Tracks sections, make Home track-based and maintain continuous music for single-track albums/playlists in every view. Based on actually deployed Web `37a5d3a`, not old main; work isolated in `fix/ios-media-next-continuation-20261024`.
+- Real `After Earth` Navidrome album contains one song; old Media Session nexttrack invoked `next()` which intentionally paused at the queue end. Existing API has usable genre-specific songs and random library endpoints. No API/DB/media changes needed.
+- Replaced redundant mobile/desktop Home sections with a SINGLE Fresh tracks vinyl collection. Cover click plays the actual track. Albums remain available only under their dedicated navigation.
+- Added default-on togglable Smart Autoplay, prefetches matching-genre and varied random tracks, dedupes, preserves selected queue/explicit user song, prevents async stale responses, bounds played-history length, and handles manual Next at the last track (including Media Session controls). Natural ended also continues with Autoplay on. Scope excludes Discovery previews.
+- Browser synthetic Home Shuffle, one-song House album, one-song untagged playlist, direct MediaSession Next and audio active after transitions PASS; pure smart-autoplay and existing metadata/iOS tests PASS. More details and exact committed SHA/deploy evidence: `docs/SONG_FIRST_HOME_SMART_AUTOPLAY_20261024.md`.
+- No main merge; running Web unchanged until CI, Docker staging, local+remote health and guarded Web-only release PASS. Real iPhone lock-screen acceptance still needed.
+
 ## 2026-10-24 - General semantic artist/album/track metadata
 
 - The owner's request is **global consistency**, not fixing only two sample songs. Read `docs/METADATA_SEMANTIC_AUDIT_20261024.md`.
