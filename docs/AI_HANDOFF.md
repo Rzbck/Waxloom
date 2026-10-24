@@ -1,3 +1,10 @@
+## 2026-10-24 - iOS Safari Home Screen background audio handoff
+
+- New isolated workstream `fix/ios-background-audio-20261024` based on runtime Web SHA `6430484`; no merge into main. Web-only mitigation for WebKit ending background audio sessions while transitioning tracks.
+- iOS standalone hidden-page pre-end handoff (<0.65 seconds) with guarded next-track detection; native Repeat One loop; AudioSession playback type; lock-screen Play actually calls `audio.play`; foreground retry when interrupted. The old web image is retained for rollback.
+- Automated checks: TypeScript/Vite build and 18 isolated helper assertions PASS; headless React browser mock iOS advance/no duplicate PASS; baseline home Shuffle/queue smoke PASS. The mobile layout smoke reports three failures **identical to baseline**; no regression introduced, but do not claim full mobile UI QA pass.
+- **IMPLEMENTED / NOT USER VALIDATED** until physical iPhone PWA test with locked screen succeeds. WebKit can still block JS/audio entirely. See `docs/IOS_BACKGROUND_PLAYBACK_20261024.md` for reproduction, limitations, safe rollout and rollback.
+
 ## 2026-10-20 - Global responsiveness audit: home Shuffle / Navidrome queue contention
 
 - Workstream fix/global-fluidity-shuffle-20261020, separate branch/worktree stacked on deployed Discovery. No main merge. API code/media unchanged; release gate needed on exact SHA.

@@ -1,4 +1,5 @@
 import { prewarmedUrlOrStream } from "./previewWarmCache";
+import { isIOSHomeScreenAudio, setIOSPlaybackAudioSession, shouldHandoffBeforeEnd } from "./iosBackgroundAudio";
 import {
   createContext,
   type ReactNode,
@@ -54,6 +55,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   // User playback intent must not be overwritten by a transient pause fired
   // when an HTMLAudioElement changes source (or an old play promise rejects).
   const wantsPlaybackRef = useRef(false);
+  const preEndHandoffSourceRef = useRef<string | null>(null);
   const previewManualImportRef = useRef<((candidate: DiscoveryCandidate) => void) | null>(null);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
@@ -159,6 +161,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const source = api.streamUrl(song.id);
     if (localSongIdRef.current !== song.id || audio.getAttribute("src") !== source) {
       localSongIdRef.current = song.id;
+      preEndHandoffSourceRef.current = null;
       audio.src = source;
       audio.load();
     }
@@ -169,6 +172,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       .then(() => traceLocalPlayer("audio-playing", song.id, Date.now()))
       .catch((error: unknown) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
+        if (event === "next" && isIOSHomeScreenAudio() && document.hidden
+          && error instanceof DOMException && error.name === "NotAllowedError") {
+          // Keep intent: WebKit may reject a background handoff. Resume on foreground.
+          setPlaying(false);
+          return;
+        }
         if (wantsPlaybackRef.current && localSongIdRef.current === song.id) {
           wantsPlaybackRef.current = false;
           setPlaying(false);
@@ -199,6 +208,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!audioRef.current) return;
     audioRef.current.volume = volume;
   }, [volume]);
+
+  useEffect(() => { setIOSPlaybackAudioSession(); }, []);
 
   useEffect(() => {
     if (mode !== "navidrome" || !currentSong) return;
@@ -276,6 +287,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     localSongIdRef.current = null;
     if (audio.getAttribute("src") !== currentPreview.preview_url) {
+      preEndHandoffSourceRef.current = null;
       audio.pause();
       setCurrentTime(0);
       audio.src = currentPreview.preview_url;
@@ -296,6 +308,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         // AbortError is expected when a newer track supersedes a pending
         // play() promise. Only real current-source failures stop playback.
         if (error instanceof DOMException && error.name === "AbortError") return;
+        if (isIOSHomeScreenAudio() && document.hidden
+          && error instanceof DOMException && error.name === "NotAllowedError") {
+          // Preserve intent for visibility recovery when WebKit disallows playback.
+          setPlaying(false);
+          return;
+        }
         if (wantsPlaybackRef.current && audio.getAttribute("src") === currentPreview.preview_url) {
           wantsPlaybackRef.current = false;
           setPlaying(false);
@@ -470,6 +488,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setCurrentIndex(nextIndex);
   }, [activeLength, activeIndex, repeat, shuffle, mode, queue, previewQueue, startLocalPlayback]);
 
+  useEffect(() => {
+    if (!isIOSHomeScreenAudio()) return;
+    const recoverOnForeground = () => {
+      if (document.hidden || !wantsPlaybackRef.current) return;
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (audio.ended && !audio.loop) {
+        // On iOS the ended callback or the next play() may have been suspended.
+        next();
+        return;
+      }
+      if (audio.paused) {
+        void audio.play().then(() => setPlaying(true)).catch(() => {
+          // Keep the existing paused UI until a real playback succeeds.
+          setPlaying(false);
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", recoverOnForeground);
+    window.addEventListener("pageshow", recoverOnForeground);
+    return () => {
+      document.removeEventListener("visibilitychange", recoverOnForeground);
+      window.removeEventListener("pageshow", recoverOnForeground);
+    };
+  }, [next]);
+
   const previous = useCallback(() => {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 4) {
@@ -517,6 +561,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!audio) return;
     setCurrentTime(audio.currentTime);
     const effectiveDuration = audio.duration || activeDuration || 0;
+    const source = audio.getAttribute("src") ?? audio.currentSrc;
+    if (source && preEndHandoffSourceRef.current !== source
+      && shouldHandoffBeforeEnd({
+        enabled: isIOSHomeScreenAudio(),
+        hidden: document.hidden,
+        wantsPlayback: wantsPlaybackRef.current,
+        hasNext: repeat !== "one" && (
+          (shuffle && activeLength > 1)
+          || activeIndex < activeLength - 1
+          || (repeat === "all" && activeLength > 1)
+        ),
+        paused: audio.paused,
+        seeking: audio.seeking,
+        ended: audio.ended,
+        currentTime: audio.currentTime,
+        duration: effectiveDuration,
+      })) {
+      // Transition before 'ended' shuts down the iOS background audio session.
+      // A source latch prevents duplicate handoffs from adjacent timeupdate events.
+      preEndHandoffSourceRef.current = source;
+      submitScrobble();
+      next();
+      return;
+    }
     if (effectiveDuration > 0) {
       setDuration(effectiveDuration);
       if (mode === "navidrome") {
@@ -825,8 +893,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       ["nexttrack", () => next()],
       ["previoustrack", () => previous()],
       ["play", () => {
-        wantsPlaybackRef.current = true;
-        setPlaying(true);
+        if (mode === "navidrome" && currentSong) {
+          startLocalPlayback(currentSong, "media-session-play");
+        } else {
+          wantsPlaybackRef.current = true;
+          setPlaying(true);
+          const audio = audioRef.current;
+          if (audio && !audio.ended) void audio.play().catch(() => undefined);
+        }
       }],
       ["pause", () => {
         wantsPlaybackRef.current = false;
@@ -842,7 +916,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         try { session.setActionHandler(action, null); } catch { /* Unsupported. */ }
       }
     };
-  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id, next, previous]);
+  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id, mode, next, previous, startLocalPlayback]);
 
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
@@ -869,6 +943,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       <audio
         ref={audioRef}
         preload={mode === "preview" ? "auto" : "none"}
+        loop={repeat === "one"}
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
@@ -911,6 +986,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           if (!wantsPlaybackRef.current) setPlaying(false);
         }}
         onEnded={() => {
+          // A previously advanced stream can emit a late ended event on iOS.
+          const source = audioRef.current?.getAttribute("src") ?? audioRef.current?.currentSrc;
+          if (source && preEndHandoffSourceRef.current === source) return;
           submitScrobble();
           next();
         }}
