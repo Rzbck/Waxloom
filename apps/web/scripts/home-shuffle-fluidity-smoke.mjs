@@ -89,6 +89,8 @@ const evaluate=async(expression)=>{
 const check=(ok,message)=>{if(!ok)failures.push(message)};
 try{
   await rpc("Page.enable");await rpc("Runtime.enable");
+  // Force animation preference for the motion tests, irrespective of CI host settings.
+  await rpc("Emulation.setEmulatedMedia",{features:[{name:"prefers-reduced-motion",value:"no-preference"}]});
   await rpc("Page.addScriptToEvaluateOnNewDocument",{source:
     '(function(){ const s=navigator.mediaSession; if(!s)return; const old=s.setActionHandler.bind(s); s.setActionHandler=function(name,handler){window.__qaMediaHandlers=window.__qaMediaHandlers||{};window.__qaMediaHandlers[name]=handler;return old(name,handler)}; })()'
   });
@@ -114,7 +116,11 @@ try{
   const first=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),song:document.querySelector(".player-dock")?.textContent?.slice(0,100),timing:performance.getEntriesByName("waxloom-shuffle-time-to-playing","measure").map(x=>Math.round(x.duration))})');
   const elapsed=Date.now()-start;
   check(first.src?.includes("/api/media/stream/qa-random-"),"Shuffle didn't start local audio immediately");
-  check(elapsed<430,"Shuffle unnecessarily waited for the network: "+elapsed);
+  // CDP roundtrips and the host's scheduler are NOT the user-perceived audio
+  // latency. Prefer the app's in-browser measurement, which still reliably
+  // detects accidentally waiting for the synthetic 3700 ms network delay.
+  const measuredShuffle = first.timing?.length ? first.timing.at(-1) : elapsed;
+  check(measuredShuffle<900,"Shuffle waited for slow network: in-browser="+measuredShuffle+"ms, CDP wall="+elapsed+"ms");
   await wait(700);
   await evaluate('document.querySelector(".home-quickbar .primary-action")?.click()');
   await wait(120);
@@ -168,26 +174,29 @@ try{
 
   // The arrows and MediaSession NEXT must share the SAME smooth spring,
   // never teleport the centered vinyl. Sample an in-between frame and end.
+  // Capture every actual in-browser scroll event, not a sample after a
+  // throttled Node/CDP roundtrip. This stays deterministic on slow CI VMs.
+  await evaluate('(()=>{const rack=document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack");window.__vinylMotionTrace=[];rack.addEventListener("scroll",()=>window.__vinylMotionTrace.push(rack.scrollLeft),{passive:true});})()');
   await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-arrows button")[1]?.click()');
-  await wait(83);
-  const arrowMiddle=await evaluate('document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft');
-  await wait(510);
-  const arrowEnd=await evaluate('document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft');
-  check(arrowMiddle>3 && arrowMiddle<arrowEnd-9 && arrowEnd>165,
-    "Arrow vinyl transition must have intermediate animated positions instead of jumping");
+  await wait(550);
+  const arrowTrace=await evaluate('({samples:window.__vinylMotionTrace.slice(),end:document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft})');
+  const arrowMiddle=arrowTrace.samples.find(x=>x>3&&x<arrowTrace.end-9)??null;
+  const arrowEnd=arrowTrace.end;
+  check(arrowMiddle!==null && arrowEnd>165 && arrowTrace.samples.length>=2,
+    "Arrow vinyl transition must include intermediate scroll frames, not teleport");
   await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-vinyl-arrows button")[0]?.click()');
   await wait(510);
   await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-face")[0]?.click()');
   await wait(160);
   const audioFirst=await evaluate('document.querySelector("audio")?.getAttribute("src")');
   check(audioFirst?.includes("qa-home-untagged"),"First record should play its own title");
+  await evaluate('window.__vinylMotionTrace=[]');
   await evaluate('window.__qaMediaHandlers?.nexttrack?.()');
-  await wait(83);
-  const mediaMiddle=await evaluate('document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft');
-  await wait(530);
-  const mediaEnd=await evaluate('({scroll:document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft,center:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-sleeve")].findIndex(x=>x.getAttribute("data-centered")==="true"),audio:document.querySelector("audio")?.getAttribute("src")})');
-  check(mediaMiddle>3 && mediaMiddle<mediaEnd.scroll-9 && mediaEnd.scroll>165 && mediaEnd.center===1,
-    "Media Session NEXT must animate progressively to center exactly like arrows");
+  await wait(580);
+  const mediaEnd=await evaluate('({scroll:document.querySelector(".waxloom-mobile-home-crate .waxloom-vinyl-rack")?.scrollLeft,center:[...document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-sleeve")].findIndex(x=>x.getAttribute("data-centered")==="true"),audio:document.querySelector("audio")?.getAttribute("src"),samples:window.__vinylMotionTrace.slice()})');
+  const mediaMiddle=mediaEnd.samples.find(x=>x>3&&x<mediaEnd.scroll-9)??null;
+  check(mediaMiddle!==null && mediaEnd.scroll>165 && mediaEnd.center===1 && mediaEnd.samples.length>=2,
+    "Media Session NEXT must animate across intermediate scroll frames, same as arrows");
   check(mediaEnd.audio?.includes("qa-home-named"),
     "Animated Next must not change which recording actually plays");
   await evaluate('document.querySelectorAll(".waxloom-mobile-home-crate .waxloom-track-face")[1]?.click()');
@@ -263,7 +272,7 @@ try{
   const explicitNextOff=await evaluate('({src:document.querySelector("audio")?.getAttribute("src"),paused:document.querySelector("audio")?.paused})');
   check(explicitNextOff.src?.includes("qa-random-") && !explicitNextOff.paused,
     "Explicit Next must play more library music even if passive Autoplay is off");
-  const result={passed:failures.length===0,failures,errors,initial,desktopFocus,phoneFocus,responsiveWidths,arrowMiddle,arrowEnd,mediaMiddle,mediaEnd,first,elapsedMs:elapsed,continued,albumStart,genreNext,playlistStart,playlistNext,natural,autoplayOff,explicitNextOff,counts,writes:writes.length,maxConcurrentSaves:maxSaves};
+  const result={passed:failures.length===0,failures,errors,initial,desktopFocus,phoneFocus,responsiveWidths,arrowTrace,arrowMiddle,arrowEnd,mediaMiddle,mediaEnd,measuredShuffle,first,elapsedMs:elapsed,continued,albumStart,genreNext,playlistStart,playlistNext,natural,autoplayOff,explicitNextOff,counts,writes:writes.length,maxConcurrentSaves:maxSaves};
   console.log(JSON.stringify(result,null,2));
   if(failures.length||errors.length)process.exitCode=1;
 }finally{ws.close()}
