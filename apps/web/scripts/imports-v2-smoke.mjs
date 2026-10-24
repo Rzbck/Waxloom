@@ -136,6 +136,13 @@ try{
   check(await evaluate('!!document.querySelector(".waxloom-import-channel-expanded")&&!!document.querySelector(".waxloom-import-collection-open")'),
     "Selected verified artist channel shows cached playlist covers instantly");
   const initialRequests=counts.browse,initialChannelRequests=counts.channelLists;
+  check(await evaluate('location.hash.includes("#/imports/channel/")'),"Artist-channel view must own a history route");
+  await evaluate('history.back()'); await wait(180);
+  check(await evaluate('location.hash==="#/imports"&&document.querySelectorAll(".waxloom-import-track").length===3'),
+    "Native browser Back from channel restores original search");
+  await evaluate('history.forward()');await wait(175);
+  check(await evaluate('location.hash.includes("#/imports/channel/")&&!!document.querySelector(".waxloom-import-channel-expanded")'),
+    "Native browser Forward reopens cached artist channel without new network request");
   await evaluate('document.querySelector(".waxloom-import-channel-expanded .waxloom-import-back")?.click()');
   await wait(110);
   const restored=await evaluate('({query:document.querySelector(".waxloom-import-search input")?.value,tracks:document.querySelectorAll(".waxloom-import-track").length,collections:document.querySelectorAll(".waxloom-import-collection").length,channels:document.querySelectorAll(".waxloom-import-channel-card").length,filter:document.querySelector(".waxloom-import-filters .is-active")?.textContent})');
@@ -147,6 +154,13 @@ try{
   await wait(350);
   check(await evaluate('!!document.querySelector(".waxloom-import-album-detail")&&document.querySelectorAll(".waxloom-import-track").length===3'),
     "Opening playlist under channel renders its songs");
+  check(await evaluate('location.hash.includes("/album/")'),"Imported playlist detail has a deep link and browser history entry");
+  await evaluate('history.back()');await wait(180);
+  check(await evaluate('!!document.querySelector(".waxloom-import-channel-expanded")&&document.querySelectorAll(".waxloom-import-collection").length===1'),
+    "Native Back from playlist restores artist-channel playlists without refetch");
+  await evaluate('history.forward()');await wait(220);
+  check(await evaluate('!!document.querySelector(".waxloom-import-album-detail")&&document.querySelectorAll(".waxloom-import-track").length===3'),
+    "Native Forward reopens cached playlist tracks without requerying YouTube");
   const albumCenter=await evaluate('(()=>{const art=document.querySelector(".waxloom-import-results.is-expanded .waxloom-import-thumbnail");const play=art?.querySelector(".waxloom-import-play");if(!art||!play)return null;const a=art.getBoundingClientRect(),b=play.getBoundingClientRect();return {dx:Math.abs(a.left+a.width/2-b.left-b.width/2),dy:Math.abs(a.top+a.height/2-b.top-b.height/2),opacity:Number(getComputedStyle(play).opacity)}})()');
   check(albumCenter&&albumCenter.dx<2&&albumCenter.dy<2&&albumCenter.opacity>.8,"Play centered in expanded playlist too");
   await evaluate('document.querySelector(".waxloom-import-album-detail .waxloom-import-back")?.click()');
@@ -157,6 +171,13 @@ try{
   await wait(100);
   check(await evaluate('document.querySelectorAll(".waxloom-import-track").length===3&&document.querySelectorAll(".waxloom-import-collection").length===1')&&counts.browse===initialRequests&&counts.channelLists===initialChannelRequests,
     "Two consecutive Back actions restore original results, no network re-search or channel re-fetch");
+  await evaluate('([...document.querySelectorAll(".sidebar .nav-item")].find(x=>x.textContent.trim()==="Home"))?.click()');await wait(130);
+  check(await evaluate('location.hash==="#/home"'),"Leaving Import preserves source history");
+  await evaluate('history.back()');await wait(185);
+  check(await evaluate('location.hash==="#/imports"&&document.querySelector(".waxloom-import-search input")?.value==="Artist One"&&document.querySelectorAll(".waxloom-import-track").length===3'),
+    "Returning to Import restores input and results without a new YouTube search");
+  check(counts.browse===initialRequests&&counts.channelLists===initialChannelRequests,
+    "Going to Home and back does not duplicate YouTube metadata requests");
   await evaluate('document.querySelector(".waxloom-import-track .waxloom-import-thumbnail button")?.click()');
   await wait(760);
   const sample=await evaluate('({active:!!document.querySelector(".waxloom-import-track.is-playing"),slider:!!document.querySelector(".waxloom-import-seek input"),src:document.querySelector("audio")?.getAttribute("src"),duration:document.querySelector(".waxloom-import-seek")?.textContent})');
@@ -181,6 +202,19 @@ try{
   check(!jobs.inlineQueue&&jobs.hero&&jobs.cards===3&&counts.imports===3&&counts.maxActive<=2&&counts.playlistWrites===3,
     "3 songs must reuse 2 workers and playlist with no duplicate inline queue");
   check(counts.active===0,"All selected songs completed via Discovery queue");
+  // Completed imports intentionally clear selection; select again to verify
+  // pending manual choices survive Back/Forward without downloading anything.
+  await evaluate('document.querySelector(".waxloom-import-select-all")?.click()');
+  check(await evaluate('document.querySelector(".waxloom-import-action-meta strong")?.textContent')==="3 selected","User selections exist before leaving album");
+  await evaluate('history.back()'); await wait(140);
+  check(await evaluate('location.hash==="#/imports"&&document.querySelectorAll(".waxloom-import-track").length===3'),
+    "Browser Back restores search from selected playlist");
+  await evaluate('history.forward()'); await wait(170);
+  const savedSelection=await evaluate('({hash:location.hash,count:document.querySelector(".waxloom-import-action-meta strong")?.textContent,tracks:document.querySelectorAll(".waxloom-import-track").length})');
+  check(savedSelection.hash.includes("/album/")&&savedSelection.count==="3 selected"&&savedSelection.tracks===3,
+    "Browser Forward restores exact album and selected tracks, without downloading again");
+  check(counts.imports===3&&counts.channelLists===initialChannelRequests&&counts.browse===initialRequests,
+    "History replay never triggers another YouTube download or search");
   // Revisit iPhone widths: fast unified controls and one-line actionbar.
   const mobile=[];
   for(const width of [320,390,768]){

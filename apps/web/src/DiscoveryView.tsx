@@ -357,7 +357,7 @@ function DiscoveryShelf({
   );
 }
 
-export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candidate: DiscoveryCandidate) => void }) {
+export function DiscoveryView({ onImportCandidate, active = true }: { onImportCandidate: (candidate: DiscoveryCandidate) => void; active?: boolean }) {
   const player = usePlayer();
   const [bundle, setBundle] = useState<DiscoveryFeedResponse | null>(() => readBrowserFeed());
   const [feedStatus, setFeedStatus] = useState<string>(bundle?.status ?? "starting");
@@ -382,6 +382,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
   // before its background preview downloads finished. Retain the current
   // shelf until the new one has enough independently playable previews.
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     const readFeed = async () => {
       try {
@@ -450,7 +451,7 @@ export function DiscoveryView({ onImportCandidate }: { onImportCandidate: (candi
     // Periodic inexpensive reads keep the visible reserve freshly populated.
     const timer = window.setInterval(() => { void readFeed(); }, refreshing || hydrationPending ? 5_000 : 12_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [Boolean(bundle), refreshing, hydrationPending]);
+  }, [Boolean(bundle), refreshing, hydrationPending, active]);
 
   useEffect(() => {
     const onTaste = () => setTaste(readTaste());

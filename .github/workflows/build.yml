@@ -73,6 +73,7 @@ jobs:
           .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite home-fluidity
           .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite library-grids
           .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite imports-v2
+          .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite navigation-history
           .\scripts\QA_BROWSER_ISOLATED.ps1 -Suite mobile
 
       - name: Smoke direct Vite launcher

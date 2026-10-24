@@ -1,3 +1,9 @@
+## 2026-10-25 — Unified browser navigation and iPhone-safe history
+
+- History used to be absent (`App.tsx` only stored a React `view`); native browser Back could lose context and reset to Home. New `musicNavigation.ts` provides pushState/popstate with safe hash routes, browser and in-app Back/Forward, scroll position, cached detail/search restoration. Imports channel/playlist navigation integrated and Discovery/Import keep state while hidden.
+- Native Safari edge-swipe works through browser `popstate` when Safari exposes it; accessible arrow controls remain on mobile/standalone. No custom horizontal touch gesture or audio remount. Tests in `navigation-history-smoke.mjs` and extended Import browser QA exercise transitions, 320/390/768 and selections. Manual physical Safari/iPhone acceptance remains required.
+- Source branch `feat/navigation-history-desktop-ios-20261025`; Web-only rollout from currently deployed 9d6bda8, API remains V3. Full notes `docs/NAVIGATION_HISTORY_DESKTOP_IOS_20261025.md`. No main merge or new Windows services.
+
 ## 2026-10-24 — Import V3: pixel sleeves, accurate YouTube search and direct downloads
 
 - User wanted a music-first cover grid for song search and a true album hero with the tracks underneath, one-click "+" to download a song or whole collection, visual thumbnails on every song/playlist, artist channels and their playlists, and direct download from the bottom preview player. Remove duplicate inline Download queue; keep the shared Discovery popup but show complete errors.

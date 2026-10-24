@@ -1,7 +1,7 @@
 # Run one synthetic browser regression with a disposable Chrome profile.
 # Never connect to the live Waxloom server or a personal browser session.
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][ValidateSet('mobile','home-fluidity','ios-background','library-grids','imports-v2')][string]$Suite)
+param([Parameter(Mandatory=$true)][ValidateSet('mobile','home-fluidity','ios-background','library-grids','imports-v2','navigation-history')][string]$Suite)
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -12,6 +12,7 @@ $suites = @{
  'ios-background'=@{WebPort=8138;CdpPort=9258;File='ios-background-browser-smoke.mjs'}
  'library-grids'=@{WebPort=8148;CdpPort=9262;File='library-grids-smoke.mjs'}
  'imports-v2'=@{WebPort=8151;CdpPort=9263;File='imports-v2-smoke.mjs'}
+ 'navigation-history'=@{WebPort=8152;CdpPort=9264;File='navigation-history-smoke.mjs'}
 }
 $chosen=$suites[$Suite]
 $webPort=[int]$chosen.WebPort; $cdpPort=[int]$chosen.CdpPort

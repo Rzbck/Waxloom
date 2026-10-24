@@ -16,6 +16,7 @@ import "./discovery-v3.css";
 import "./polish.css";
 import "./icons.css";
 import "./mobile.css";
+import "./navigation-history.css";
 import "./mobile-hotfix.css";
 import "./discovery-icons-hotfix.css";
 import "./layout-polish-v4.css";

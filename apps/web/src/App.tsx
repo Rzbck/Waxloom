@@ -13,6 +13,8 @@ import { VinylSongs } from "./VinylSongs";
 import { VinylArtists, VinylPlaylists } from "./VinylEntities";
 import { DownloadTray } from "./downloadQueue";
 import { usePlayer } from "./Player";
+import { useMusicNavigation, routeHash } from "./musicNavigation";
+import type { MusicRoute, ImportLocation } from "./musicNavigation";
 import type {
   Album,
   Artist,
@@ -64,7 +66,10 @@ function SongTable(props: SongTableProps) {
 
 export default function App() {
   const player = usePlayer();
-  const [view, setView] = useState<View>("home");
+  const navigation = useMusicNavigation();
+  const { route, push, back, forward, canBack, canForward } = navigation;
+  const view = route.view;
+  const routeKey = routeHash(route);
   const [health, setHealth] = useState<Health | null>(null);
   const [navidromeHealth, setNavidromeHealth] = useState<IntegrationHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +110,91 @@ export default function App() {
   const [playlistSongTarget, setPlaylistSongTarget] = useState<Song | null>(null);
   const [starOverrides, setStarOverrides] = useState<Record<string, boolean>>({});
   const [importTarget, setImportTarget] = useState<DiscoveryCandidate | null>(null);
+  const [importsMounted, setImportsMounted] = useState(view === "imports");
+  const [discoveryMounted, setDiscoveryMounted] = useState(view === "discovery");
+  const albumCacheRef = useRef(new Map<string, Album>());
+  const artistCacheRef = useRef(new Map<string, Artist>());
+  const playlistCacheRef = useRef(new Map<string, PlaylistDetail>());
+  const searchCacheRef = useRef(new Map<string, SearchResults>());
+  const routeRequestRef = useRef(0);
+  useEffect(() => {
+    if (view === "imports") setImportsMounted(true);
+    if (view === "discovery") setDiscoveryMounted(true);
+  }, [view]);
+
+  // One route restoration path for clicks, browser Back/Forward, native iOS
+  // Safari edge swipes, and direct bookmarked #/album or #/artist links.
+  useEffect(() => {
+    const epoch = ++routeRequestRef.current;
+    albumOpenEpochRef.current += 1;
+    setAlbumDetailPending(false);
+    setAlbumDetailError(null);
+    setSelectedAlbum(null);
+    setSelectedArtist(null);
+    setSelectedPlaylist(null);
+    setError(null);
+    setNotice(null);
+    setMobileMenuOpen(false);
+    const item = route.detail;
+    if (item?.kind === "album") {
+      const album = albumCacheRef.current.get(item.id) ?? null;
+      setSelectedAlbum(album);
+      const complete = Boolean(album?.song);
+      setAlbumDetailPending(!complete);
+      if (!complete) {
+        void api.album(item.id).then((detail) => {
+          albumCacheRef.current.set(item.id, detail);
+          if (epoch === routeRequestRef.current) {
+            setSelectedAlbum(detail); setAlbumDetailPending(false);
+          }
+        }).catch((caught) => {
+          if (epoch === routeRequestRef.current) {
+            setAlbumDetailPending(false);
+            setAlbumDetailError(caught instanceof Error ? caught.message : "Album unavailable.");
+          }
+        });
+      }
+    } else if (item?.kind === "artist") {
+      const cached = artistCacheRef.current.get(item.id);
+      if (cached) setSelectedArtist(cached);
+      if (!cached?.album) void api.artist(item.id).then((detail) => {
+        artistCacheRef.current.set(item.id, detail);
+        if (epoch === routeRequestRef.current) setSelectedArtist(detail);
+      }).catch((caught) => {
+        if (epoch === routeRequestRef.current) setError(caught instanceof Error ? caught.message : "Artist unavailable.");
+      });
+    } else if (item?.kind === "playlist") {
+      const cached = playlistCacheRef.current.get(item.id);
+      if (cached) setSelectedPlaylist(cached);
+      if (!cached?.entry) void api.playlist(item.id).then((detail) => {
+        playlistCacheRef.current.set(item.id, detail);
+        if (epoch === routeRequestRef.current) setSelectedPlaylist(detail);
+      }).catch((caught) => {
+        if (epoch === routeRequestRef.current) setError(caught instanceof Error ? caught.message : "Playlist unavailable.");
+      });
+    }
+    if (route.view === "search") {
+      const query = route.query ?? "";
+      setSearchQuery(query);
+      setSearchInput(query);
+      const cached = searchCacheRef.current.get(query);
+      setSearchResults(cached ?? null);
+      if (query && !cached) void api.search(query, 60).then((result) => {
+        searchCacheRef.current.set(query, result);
+        if (epoch === routeRequestRef.current) setSearchResults(result);
+      }).catch((caught) => {
+        if (epoch === routeRequestRef.current) setError(caught instanceof Error ? caught.message : "Search failed.");
+      });
+    }
+    if (route.view === "albums" && albums.length === 0) void loadAlbums("newest");
+    if (route.view === "artists" && artists.length === 0) void loadArtists();
+    if (route.view === "playlists" && playlists.length === 0) void loadPlaylists();
+    if (route.view === "favorites" && !favorites) void loadFavorites();
+  // Route changes are the only triggers. Listing state is managed by the existing
+  // cached list loaders and must NOT retrigger this effect when arrays update.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routeKey]);
+
 
   useEffect(() => {
     void api.health().then(setHealth).catch(() => setHealth(null));
@@ -302,26 +392,25 @@ export default function App() {
   }
 
   function openAlbum(summary: Album) {
-    const epoch = ++albumOpenEpochRef.current;
-    // Show the REAL summary + instantly generated artwork in this frame.
-    // This is the FitBoyRepack split-catalog pattern: lightweight list first,
-    // detailed song list loaded independently. Never block navigation on API.
-    setView("albums");
-    setSelectedAlbum(summary);
-    setAlbumDetailPending(true);
-    setAlbumDetailError(null);
-    void api.album(summary.id)
-      .then((detail) => {
-        if (epoch !== albumOpenEpochRef.current) return;
-        setSelectedAlbum(detail);
-      })
-      .catch((caught) => {
-        if (epoch !== albumOpenEpochRef.current) return;
-        setAlbumDetailError(caught instanceof Error ? caught.message : "Could not load album tracks.");
-      })
-      .finally(() => {
+    const known = albumCacheRef.current.get(summary.id);
+    albumCacheRef.current.set(summary.id, known?.song?.length ? known : summary);
+    const next: MusicRoute = { view: "albums", detail: { kind: "album", id: summary.id } };
+    if (routeHash(route) === routeHash(next)) {
+      // Retry a previously unavailable album without creating a duplicate
+      // Back entry. The normal route effect handles initial opens.
+      const epoch = ++albumOpenEpochRef.current;
+      setAlbumDetailError(null);
+      setAlbumDetailPending(true);
+      void api.album(summary.id).then((result) => {
+        albumCacheRef.current.set(summary.id, result);
+        if (epoch === albumOpenEpochRef.current) setSelectedAlbum(result);
+      }).catch((caught) => {
+        if (epoch === albumOpenEpochRef.current)
+          setAlbumDetailError(caught instanceof Error ? caught.message : "Album unavailable.");
+      }).finally(() => {
         if (epoch === albumOpenEpochRef.current) setAlbumDetailPending(false);
       });
+    } else push(next);
   }
 
   async function playAlbum(summary: Album) {
@@ -333,14 +422,14 @@ export default function App() {
     }
   }
 
-  async function openArtist(summary: Artist) {
-    setView("artists");
-    await run(() => api.artist(summary.id), setSelectedArtist);
+  function openArtist(summary: Artist) {
+    const saved = artistCacheRef.current.get(summary.id);
+    if (!saved?.album) artistCacheRef.current.set(summary.id, summary);
+    push({ view: "artists", detail: { kind: "artist", id: summary.id } });
   }
 
-  async function openPlaylist(summary: PlaylistSummary) {
-    setView("playlists");
-    await run(() => api.playlist(summary.id), setSelectedPlaylist);
+  function openPlaylist(summary: PlaylistSummary) {
+    push({ view: "playlists", detail: { kind: "playlist", id: summary.id } });
   }
 
   async function toggleStar(item: { id: string; starred?: string }) {
@@ -356,13 +445,11 @@ export default function App() {
     }
   }
 
-  async function submitSearch(event?: FormEvent) {
+  function submitSearch(event?: FormEvent) {
     event?.preventDefault();
     const query = searchInput.trim();
     if (!query) return;
-    setSearchQuery(query);
-    setView("search");
-    await run(() => api.search(query, 60), setSearchResults);
+    push({ view: "search", query });
   }
 
   async function createPlaylist() {
@@ -427,19 +514,7 @@ export default function App() {
   }
 
   function navigate(next: View) {
-    albumOpenEpochRef.current += 1;
-    setAlbumDetailPending(false);
-    setAlbumDetailError(null);
-    setView(next);
-    setError(null);
-    setNotice(null);
-    setSelectedAlbum(null);
-    setSelectedArtist(null);
-    setSelectedPlaylist(null);
-    if (next === "albums" && albums.length === 0) void loadAlbums("newest");
-    if (next === "artists" && artists.length === 0) void loadArtists();
-    if (next === "playlists") void loadPlaylists();
-    if (next === "favorites") void loadFavorites();
+    push({ view: next, ...(next === "imports" ? { importLocation: { kind: "search" } as ImportLocation } : {}) });
   }
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -479,9 +554,7 @@ export default function App() {
 
   function handleDiscoveryImport(candidate: DiscoveryCandidate) {
     setImportTarget(candidate);
-    setView("imports");
-    setError(null);
-    setNotice(null);
+    push({ view: "imports", importLocation: { kind: "search" } });
   }
 
   function handleImported(result: ImportResult) {
@@ -530,6 +603,14 @@ export default function App() {
         onNavigate={(id) => { navigate(id); closeMobileMenu(); }}
       />
       <section className="content">
+        <nav className="waxloom-history-controls" aria-label="Navigation history">
+          <button type="button" aria-label="Back to previous screen"
+            title="Back · Alt+Left" disabled={!canBack}
+            onClick={back}>←</button>
+          <button type="button" aria-label="Forward to next screen"
+            title="Forward · Alt+Right" disabled={!canForward}
+            onClick={forward}>→</button>
+        </nav>
         <header className="topbar">
           <div className="topbar-title">
             <p className="eyebrow">Self-hosted music workspace</p>
@@ -607,7 +688,7 @@ export default function App() {
             {selectedAlbum ? (
               <>
                 <div className="detail-toolbar">
-                  <button className="secondary-action" type="button" onClick={() => { albumOpenEpochRef.current += 1; setSelectedAlbum(null); setAlbumDetailPending(false); setAlbumDetailError(null); }}>← Albums</button>
+                  <button className="secondary-action" type="button" onClick={back}>← Albums</button>
                   <button className={starOverrides[selectedAlbum.id] ?? Boolean(selectedAlbum.starred) ? "secondary-action active-star" : "secondary-action"} type="button" onClick={() => void toggleStar(selectedAlbum)}>★ Favorite</button>
                 </div>
                 <section className="detail-hero">
@@ -646,7 +727,7 @@ export default function App() {
           <div className="workspace-stack">
             {selectedArtist ? (
               <>
-                <div className="detail-toolbar"><button className="secondary-action" type="button" onClick={() => setSelectedArtist(null)}>← Artists</button><button className={starOverrides[selectedArtist.id] ?? Boolean(selectedArtist.starred) ? "secondary-action active-star" : "secondary-action"} type="button" onClick={() => void toggleStar(selectedArtist)}>★ Favorite</button></div>
+                <div className="detail-toolbar"><button className="secondary-action" type="button" onClick={back}>← Artists</button><button className={starOverrides[selectedArtist.id] ?? Boolean(selectedArtist.starred) ? "secondary-action active-star" : "secondary-action"} type="button" onClick={() => void toggleStar(selectedArtist)}>★ Favorite</button></div>
                 <section className="detail-hero artist-detail-hero">
                   <div className="artist-avatar artist-avatar-large"><CoverArtwork coverId={selectedArtist.coverArt} seed={selectedArtist.id} size={320} priority /></div>
                   <div><p className="eyebrow">Artist</p><h2>{knownMusicValue(selectedArtist.name) ?? "Artist not tagged"}</h2><p className="muted">{selectedArtist.album?.length ?? selectedArtist.albumCount ?? 0} albums</p></div>
@@ -663,7 +744,7 @@ export default function App() {
           <div className="workspace-stack">
             {selectedPlaylist ? (
               <>
-                <div className="detail-toolbar"><button className="secondary-action" type="button" onClick={() => setSelectedPlaylist(null)}>← Playlists</button><div className="button-row"><button className="secondary-action" type="button" onClick={() => void renamePlaylist()}>Rename</button><button className="secondary-action danger-action" type="button" onClick={() => void deleteCurrentPlaylist()}>Delete</button></div></div>
+                <div className="detail-toolbar"><button className="secondary-action" type="button" onClick={back}>← Playlists</button><div className="button-row"><button className="secondary-action" type="button" onClick={() => void renamePlaylist()}>Rename</button><button className="secondary-action danger-action" type="button" onClick={() => void deleteCurrentPlaylist()}>Delete</button></div></div>
                 <section className="panel playlist-header"><div><p className="eyebrow">Playlist</p><h2>{selectedPlaylist.name}</h2><p className="muted">{selectedPlaylist.entry?.length ?? selectedPlaylist.songCount ?? 0} tracks · {formatDuration(selectedPlaylist.duration)}</p></div><button className="primary-action" type="button" onClick={() => player.playSongs(selectedPlaylist.entry ?? [], 0, { ordered: true })}>▶ Play</button></section>
                 <SongTable songs={selectedPlaylist.entry ?? []} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} onRemove={(index) => void removePlaylistSong(index)} />
               </>
@@ -698,11 +779,16 @@ export default function App() {
           </div>
         )}
 
-        {view === "discovery" && <DiscoveryView onImportCandidate={handleDiscoveryImport} />}
+        {discoveryMounted && <div className="waxloom-preserved-view" hidden={view !== "discovery"}>
+          <DiscoveryView active={view === "discovery"} onImportCandidate={handleDiscoveryImport} />
+        </div>}
 
-        {view === "imports" && (
-          <ImportsView target={importTarget} playlists={playlists} onImported={handleImported} />
-        )}
+        {importsMounted && <div className="waxloom-preserved-view" hidden={view !== "imports"}>
+          <ImportsView target={importTarget} playlists={playlists} onImported={handleImported}
+            active={view === "imports"} navigationLocation={view === "imports" ? route.importLocation : null}
+            onNavigateInternal={(location) => push({ view: "imports", importLocation: location })}
+            onBackInternal={back} />
+        </div>}
       </section>
 
       <DownloadTray />

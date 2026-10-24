@@ -4,6 +4,7 @@ import { authorizeYouTubeImport, enqueueSelectedYouTube, useDownloads } from "./
 import { YouTubeTrackArt, YouTubeCollectionArt } from "./YouTubeArt";
 import { CoverArtwork } from "./CoverArtwork";
 import { usePlayer } from "./Player";
+import type { ImportLocation } from "./musicNavigation";
 import type {
   DiscoveryCandidate, ImportResult, PlaylistSummary, YouTubeBrowseCollection,
   YouTubeBrowseTrack, YouTubeBrowseChannel, YouTubeRuntime,
@@ -49,11 +50,16 @@ function cachePreview(track: YouTubeBrowseTrack) {
 function guessAlbumMode(value: string) { return /(?:[?&]list=|\/playlist\?)/i.test(value); }
 
 export function ImportsView({
-  target, playlists, onImported,
+  target, playlists, onImported, active = true,
+  navigationLocation, onNavigateInternal, onBackInternal,
 }: {
   target: DiscoveryCandidate | null;
   playlists: PlaylistSummary[];
   onImported?: (result: ImportResult) => void;
+  active?: boolean;
+  navigationLocation?: ImportLocation | null;
+  onNavigateInternal?: (location: ImportLocation) => void;
+  onBackInternal?: () => void;
 }) {
   const player = usePlayer();
   const downloads = useDownloads();
@@ -82,6 +88,83 @@ export function ImportsView({
   const searchedTermRef = useRef("");
   const searchSnapshotRef = useRef<SearchSnapshot | null>(null);
   const channelPlaylistsRef = useRef(new Map<string, YouTubeBrowseCollection[]>());
+  const collectionCacheRef = useRef(new Map<string, { collection: YouTubeBrowseCollection; items: YouTubeBrowseTrack[] }>());
+  const activeImportKeyRef = useRef("search");
+  const selectionByPageRef = useRef(new Map<string, Record<string, YouTubeBrowseTrack>>());
+  const importRouteKey = navigationLocation?.kind === "channel"
+    ? `channel:${navigationLocation.channelId}`
+    : navigationLocation?.kind === "album"
+      ? `album:${navigationLocation.channelId || ""}:${navigationLocation.albumId}`
+      : "search";
+
+  // Native browser popstate is propagated by the parent app. Restore a
+  // previously visited channel/album immediately from in-memory metadata.
+  // This component stays mounted while hidden, so search and selections survive.
+  useEffect(() => {
+    if (!active || activeImportKeyRef.current === importRouteKey) return;
+    selectionByPageRef.current.set(activeImportKeyRef.current, { ...selection });
+    activeImportKeyRef.current = importRouteKey;
+    const epoch = ++requestEpochRef.current;
+    setOpening(null); setError(null); setBusy(false);
+    const previousSelection = selectionByPageRef.current.get(importRouteKey) ?? {};
+    if (!navigationLocation || navigationLocation.kind === "search") {
+      backToResults();
+      if (Object.keys(previousSelection).length) setSelection(previousSelection);
+      return;
+    }
+    const channelId = navigationLocation.kind === "channel"
+      ? navigationLocation.channelId : navigationLocation.channelId;
+    const channel = channelId
+      ? (searchSnapshotRef.current?.channels.find((item) => item.id === channelId)
+        ?? (openedChannel?.id === channelId ? openedChannel : null)
+        ?? { kind: "channel" as const, id: channelId, title: "Artist channel",
+             url: `https://www.youtube.com/channel/${channelId}` })
+      : null;
+    setOpenedChannel(channel);
+    if (navigationLocation.kind === "channel") {
+      setExpanded(null); setTracks([]); setFilter("collections"); setSelection(previousSelection);
+      const cached = channelPlaylistsRef.current.get(navigationLocation.channelId);
+      setCollections(cached ?? []);
+      if (!cached) {
+        setOpening(navigationLocation.channelId);
+        void api.youtubeChannelPlaylists(navigationLocation.channelId, 20)
+          .then((response) => {
+            if (epoch !== requestEpochRef.current) return;
+            const list = usableChannelPlaylists(response.items);
+            channelPlaylistsRef.current.set(navigationLocation.channelId, list);
+            setCollections(list);
+          }).catch(() => undefined).finally(() => {
+            if (epoch === requestEpochRef.current) setOpening(null);
+          });
+      }
+      return;
+    }
+    const albumId = navigationLocation.albumId;
+    const cachedAlbum = collectionCacheRef.current.get(albumId);
+    const album = cachedAlbum?.collection
+      ?? channelPlaylistsRef.current.get(channelId || "")?.find((item) => item.id === albumId)
+      ?? searchSnapshotRef.current?.collections.find((item) => item.id === albumId)
+      ?? { kind: "playlist" as const, id: albumId, title: "YouTube playlist",
+           url: `https://www.youtube.com/playlist?list=${albumId}` };
+    setExpanded(album); setFilter("collections"); setCollections([]);
+    setSelection(previousSelection); setTracks(cachedAlbum?.items ?? []);
+    if (!cachedAlbum) {
+      setOpening(albumId);
+      void api.youtubeExpand(album.url, 80).then((result) => {
+        collectionCacheRef.current.set(albumId, { collection: result.collection, items: result.items });
+        if (epoch === requestEpochRef.current) {
+          setExpanded(result.collection); setTracks(result.items);
+        }
+      }).catch((caught) => {
+        if (epoch === requestEpochRef.current)
+          setError(caught instanceof Error ? caught.message : "Playlist unavailable.");
+      }).finally(() => {
+        if (epoch === requestEpochRef.current) setOpening(null);
+      });
+    }
+  // Only React route transitions trigger restoration, never local downloads.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importRouteKey, active]);
   const currentId = player.currentPreview?.recording_mbid?.startsWith("yt:")
     ? player.currentPreview.recording_mbid.slice(3) : null;
   const currentDuration = Math.max(player.duration || 0, player.currentPreview?.duration || 0);
@@ -224,6 +307,8 @@ export function ImportsView({
   }, []);
   function search(event?: FormEvent) {
     event?.preventDefault();
+    activeImportKeyRef.current = "search";
+    if (importRouteKey !== "search") onNavigateInternal?.({ kind: "search" });
     void performSearch(query);
   }
 
@@ -236,6 +321,13 @@ export function ImportsView({
 
   const expandCollection = async (collection: YouTubeBrowseCollection) => {
     if (!openedChannel && !expanded) rememberSearchResults();
+    selectionByPageRef.current.set(activeImportKeyRef.current, { ...selection });
+    const location: ImportLocation = {
+      kind: "album", albumId: collection.id,
+      ...(openedChannel?.id ? { channelId: openedChannel.id } : {}),
+    };
+    activeImportKeyRef.current = `album:${openedChannel?.id || ""}:${collection.id}`;
+    onNavigateInternal?.(location);
     const epoch = ++requestEpochRef.current;
     setOpening(collection.id);
     setExpanded(collection);
@@ -247,6 +339,7 @@ export function ImportsView({
       if (epoch !== requestEpochRef.current) return;
       setTracks(result.items);
       setExpanded(result.collection);
+      collectionCacheRef.current.set(collection.id, { collection: result.collection, items: result.items });
       setCollections([]);
       setUnavailableIds([]);
       if (result.truncated) setNotice("Showing the first 80 tracks. Narrow your selection if needed.");
@@ -353,6 +446,9 @@ export function ImportsView({
   }
   async function openArtistChannel(channel: YouTubeBrowseChannel) {
     rememberSearchResults();
+    selectionByPageRef.current.set(activeImportKeyRef.current, { ...selection });
+    activeImportKeyRef.current = `channel:${channel.id}`;
+    onNavigateInternal?.({ kind: "channel", channelId: channel.id });
     const epoch = ++requestEpochRef.current;
     setOpenedChannel(channel);
     setExpanded(null);
@@ -382,6 +478,10 @@ export function ImportsView({
     }
   }
   function backFromAlbum() {
+    if (onBackInternal && activeImportKeyRef.current.startsWith("album:")) {
+      onBackInternal();
+      return;
+    }
     if (!openedChannel) {
       backToResults();
       return;
@@ -478,7 +578,12 @@ export function ImportsView({
         </section>
       )}
       {openedChannel && !expanded && <div className="waxloom-import-channel-expanded">
-        <button type="button" className="waxloom-import-back" onClick={backToResults}>← Results</button>
+        <button type="button" className="waxloom-import-back"
+          onClick={() => {
+            if (onBackInternal && activeImportKeyRef.current.startsWith("channel:"))
+              onBackInternal();
+            else backToResults();
+          }}>← Results</button>
         <div><small>ARTIST CHANNEL</small><h3>{openedChannel.title}</h3>
           <span>{opening === openedChannel.id ? "Loading playlists…" : collections.length ? collections.length + " playlists" : "No public playlists found on this channel."}</span>
         </div>
