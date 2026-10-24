@@ -154,4 +154,11 @@ def youtube_track_quality(item: dict[str, Any]) -> tuple[bool, str]:
         if pattern.search(title):
             return False, reason
 
+    # Video-title fragments are not reliable track identities or release names.
+    # Avoid turning a curator/uploader description into a fake library title.
+    if title.count("(") > title.count(")") or title.count("[") > title.count("]"):
+        return False, "truncated-video-title"
+    if re.match(r"^\s*\[?(?:free|type beat|prod)\]?(?:\s|$)", artist, re.I):
+        return False, "editorial-video-artist"
+
     return True, "tracklike"

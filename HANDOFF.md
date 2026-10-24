@@ -1,5 +1,19 @@
 # HANDOFF — Waxloom
 
+## CURRENT CONSOLIDATION / RELEASE IDENTITY (2026-10-24)
+
+**Read this first; September bootstrap recovery sections below are historical.** Follow `AI_PROJECT_RULES.md`, `docs/GITHUB_WORKFLOW.md` and `docs/LOCAL_MULTI_WORKTREE_POLICY.md` as before.
+
+- Published `main`: `35bb87d` — **not** the production Web revision.
+- Production Web: `3dbc4f3` (iOS background mitigation, **not validated on a physical locked iPhone**).
+- Production API: `3acca2c`. Verified ancestry: `main` -> API -> production Web.
+- Active chantier: `chore/production-consolidation-20261024`, a dedicated worktree based on production Web. **No main merge and no production rollout** from this branch without separate approval.
+- Read `docs/BRANCH_RECONCILIATION_20261024.md` and `docs/DEVELOPMENT_RELEASE.md` for branch disposition, locked builds, quality gates and rollback.
+- Production host keeps a **private** `CURRENT_RUNTIME.json` beside Compose and a read-only `CHECK_RUNTIME.ps1`. Run the check first. Never patch live software through the historical SelfHosted source snapshot.
+- Preserve the dirty `discovery-library-pipeline`, `recent-tracks` worktrees and main's untracked `apps/api/uv.lock`. Divergent Apple Watch branches require separate native review.
+
+## HISTORICAL GUIDANCE (retained for context)
+
 This file is the single entry point for resuming work on Waxloom.
 
 If a new session starts with `HANDOFF`, rebuild the current state from GitHub first. Never trust an old chat, local folder name, or remembered SHA as current authority.

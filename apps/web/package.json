@@ -6,7 +6,23 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "qa:mobile": "node scripts/mobile-smoke.mjs",
+    "qa:home": "node scripts/home-smoke.mjs",
+    "qa:vinyl": "node scripts/vinyl-everywhere-smoke.mjs",
+    "qa:parity": "node scripts/parity-qa.mjs",
+    "qa:discovery": "node scripts/discovery-playback-smoke.mjs",
+    "qa:discovery-actions": "node scripts/discovery-actions-smoke.mjs",
+    "qa:vinyl-sync": "node scripts/discovery-vinyl-sync-smoke.mjs",
+    "qa:vinyl-snap": "node scripts/discovery-vinyl-snap-smoke.mjs",
+    "qa:vinyl-wheel": "node scripts/discovery-vinyl-wheel-smoke.mjs",
+    "qa:discovery-fill": "node scripts/discovery-feed-fill-smoke.mjs",
+    "qa:discovery-stability": "node scripts/discovery-stability-smoke.mjs",
+    "qa:discovery-fast-play": "node scripts/discovery-fast-play-smoke.mjs",
+    "qa:vinyl-one-motion": "node scripts/discovery-one-motion-smoke.mjs",
+    "qa:discovery-instant": "node scripts/discovery-instant-neutral-smoke.mjs",
+    "qa:home-fluidity": "node scripts/home-shuffle-fluidity-smoke.mjs",
+    "qa:ios-background": "node --experimental-strip-types scripts/ios-background-audio-smoke.mjs"
   },
   "dependencies": {
     "react": "19.3.0",
@@ -17,6 +33,6 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "typescript": "7.0.2",
-    "vite": "8.2.2"
+    "vite": "8.3.5"
   }
 }

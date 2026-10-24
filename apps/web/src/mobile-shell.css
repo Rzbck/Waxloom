@@ -1,0 +1,535 @@
+/* Waxloom responsive shell v2.
+   One mobile-only UI layer: mini player, immersive player, navigation and lists.
+   Desktop rules in styles.css remain unchanged. */
+.waxloom-mobile-mini,
+.waxloom-mobile-player,
+.waxloom-mobile-navigation,
+.mobile-menu-toggle { display: none; }
+
+.waxloom-marquee {
+  display: block;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.waxloom-marquee-inner {
+  display: inline-block;
+  min-width: max-content;
+  white-space: nowrap;
+}
+.waxloom-marquee-active .waxloom-marquee-inner {
+  animation: waxloom-title-scroll var(--marquee-duration, 10s) ease-in-out infinite;
+}
+@keyframes waxloom-title-scroll {
+  0%, 12%, 100% { transform: translateX(0); }
+  48%, 64% { transform: translateX(calc(-1 * var(--marquee-distance, 0px))); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .waxloom-marquee-active .waxloom-marquee-inner { animation: none; }
+}
+
+@media (max-width: 820px) {
+  :root { --mobile-player-h: 68px; }
+
+  /* Single navigation trigger; sections live in the accessible full-screen menu. */
+  .app-shell > .sidebar {
+    display: flex !important;
+    justify-content: center;
+    align-items: center;
+    height: calc(var(--mobile-nav-h, 58px) + env(safe-area-inset-bottom));
+    min-height: 0;
+    padding: 4px 8px calc(4px + env(safe-area-inset-bottom));
+    z-index: 95;
+  }
+  .app-shell > .sidebar > nav { display: none !important; }
+  .app-shell > .sidebar > .mobile-menu-toggle {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: min(100%, 520px);
+    min-height: 44px;
+    padding: 7px 20px;
+    border: 1px solid #554663;
+    border-radius: 12px;
+    background: #2b2235;
+    color: #eee8f5;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: .01em;
+    cursor: pointer;
+  }
+  .mobile-menu-toggle:focus-visible, .waxloom-mobile-navigation button:focus-visible,
+  .waxloom-mobile-player button:focus-visible, .waxloom-mobile-mini button:focus-visible {
+    outline: 2px solid #d2b6f6;
+    outline-offset: 2px;
+  }
+
+  .waxloom-mobile-navigation {
+    position: fixed;
+    inset: 0;
+    z-index: 205;
+    display: flex !important;
+    flex-direction: column;
+    gap: 20px;
+    background: #121018;
+    padding: calc(18px + env(safe-area-inset-top))
+      17px calc(24px + env(safe-area-inset-bottom));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    box-sizing: border-box;
+  }
+  .waxloom-mobile-navigation header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+  }
+  .waxloom-mobile-navigation header strong { font-size: 24px; letter-spacing: -.04em; }
+  .waxloom-mobile-navigation header button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 45px;
+    padding: 8px 14px;
+    border: 1px solid #584964;
+    background: #2b2234;
+    border-radius: 10px;
+    color: #eee5f2;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .waxloom-mobile-navigation nav { display: grid; grid-template-columns: 1fr; gap: 8px; }
+  .waxloom-mobile-navigation nav button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 56px;
+    padding: 12px 16px;
+    border: 1px solid #3d3348;
+    border-radius: 12px;
+    background: #201b28;
+    color: #e9e1ef;
+    font-size: 16px;
+    text-align: left;
+    cursor: pointer;
+  }
+  .waxloom-mobile-navigation nav button.is-current {
+    background: #3b2b4b;
+    border-color: #a181c2;
+    color: #fff;
+  }
+  .waxloom-mobile-navigation nav button span:last-child { color: #c3a3df; }
+
+  /* Mini player: a precise height instead of putting an extra row in the old grid. */
+  .player-dock {
+    position: fixed !important;
+    left: 7px !important;
+    right: 7px !important;
+    width: auto !important;
+    bottom: calc(var(--mobile-nav-h, 58px) + env(safe-area-inset-bottom) + 5px) !important;
+    height: var(--mobile-player-h) !important;
+    min-height: 0 !important;
+    display: block !important;
+    grid-template-columns: none !important;
+    padding: 5px !important;
+    gap: 0 !important;
+    border: 1px solid #443850;
+    border-radius: 12px;
+    background: #18141f;
+    box-shadow: 0 5px 24px rgba(0,0,0,.48);
+    z-index: 109;
+    box-sizing: border-box;
+  }
+  .player-dock > .player-track,
+  .player-dock > .player-center,
+  .player-dock > .player-tools { display: none !important; }
+  .waxloom-mobile-mini {
+    display: grid !important;
+    height: 100%;
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) 48px 42px;
+    gap: 3px;
+    align-items: center;
+  }
+  .player-dock-preview .waxloom-mobile-mini {
+    grid-template-columns: minmax(0, 1fr) 40px 48px 42px;
+  }
+  .waxloom-mobile-mini button {
+    border: 0;
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  .waxloom-mobile-mini-info {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-width: 0;
+    height: 100%;
+    padding: 2px 4px;
+    color: #f6f0f9;
+    background: transparent;
+    text-align: left;
+  }
+  .waxloom-mobile-mini-cover {
+    flex: 0 0 47px;
+    display: grid;
+    place-items: center;
+    width: 47px;
+    height: 47px;
+    overflow: hidden;
+    border-radius: 7px;
+    background: #41364d;
+    color: #dcc6f3;
+  }
+  .waxloom-mobile-mini-cover img { width: 100%; height: 100%; object-fit: cover; }
+  .waxloom-mobile-mini-copy { display: grid; gap: 4px; min-width: 0; flex: 1; overflow: hidden; }
+  .waxloom-mobile-mini-title { font-size: 12.5px; font-weight: 700; color: #f6f1fa; }
+  .waxloom-mobile-mini-artist {
+    font-size: 11px;
+    color: #b7aabd;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .waxloom-mobile-mini-chevron { flex: 0 0 17px; color: #a68dbf; transform: rotate(180deg); }
+  .waxloom-mobile-mini-download {
+    display: grid;
+    place-items: center;
+    height: 44px;
+    color: #dac2f1;
+    background: #443553;
+    font-size: 24px;
+    font-weight: 700;
+  }
+  .waxloom-mobile-mini-play {
+    display: grid;
+    place-items: center;
+    height: 47px;
+    color: #130c1b;
+    background: #d7b4f8;
+  }
+  .waxloom-mobile-mini-next {
+    display: grid;
+    place-items: center;
+    height: 47px;
+    color: #ebd9fa;
+    background: #392b49;
+  }
+  .waxloom-mobile-mini button:disabled { opacity: .5; cursor: default; }
+
+  /* Responsive song rows never clip titles or action buttons at 320px. */
+  .track-list { overflow-x: hidden !important; }
+  .track-list .track-row:not(.track-row-header) {
+    display: grid;
+    grid-template-columns: 38px minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+    align-items: center;
+    width: 100%;
+    min-width: 0 !important;
+    gap: 3px 9px;
+    padding: 10px 12px;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  .track-list .track-row .track-play {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    width: 36px;
+    height: 36px;
+    color: #e1c3f7;
+    background: #30243a;
+  }
+  .track-list .track-row .track-title-button {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 13px;
+    width: 100%;
+    min-width: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .track-list .track-row > span:nth-of-type(1) {
+    grid-column: 2;
+    grid-row: 2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    color: #aaa1b0;
+  }
+  .track-list .track-row > span:nth-of-type(2),
+  .track-list .track-row > span:nth-of-type(3) { display: none; }
+  .track-list .track-row .row-actions {
+    grid-column: 2;
+    grid-row: 3;
+    display: flex;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 7px;
+    padding-top: 6px;
+    min-width: 0;
+  }
+  .track-list .track-row .mini-action {
+    display: grid;
+    place-items: center;
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+    padding: 4px 8px;
+    border: 1px solid #5c4a6b;
+    border-radius: 9px;
+    background: #2b2235;
+    color: #e6d7ed;
+    font-size: 12px;
+  }
+  .track-list .track-row .mini-action-active {
+    border-color: #d59cba;
+    color: #f5b7d0;
+    background: #462a3c;
+  }
+
+  /* Immersive mobile player: independent of .player-dock and legacy mobile.css. */
+  .waxloom-mobile-player {
+    position: fixed;
+    inset: 0;
+    z-index: 180;
+    width: 100%;
+    height: 100dvh;
+    min-height: 0;
+    display: flex !important;
+    flex-direction: column;
+    align-items: stretch;
+    gap: clamp(9px, 1.7dvh, 16px);
+    padding: calc(12px + env(safe-area-inset-top))
+      clamp(14px, 4vw, 24px)
+      calc(24px + env(safe-area-inset-bottom));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    background: radial-gradient(ellipse at 50% 8%, #2b2038 0, #17131d 52%, #100e15 100%);
+    color: #f3edf8;
+    box-sizing: border-box;
+  }
+  .waxloom-mobile-player::-webkit-scrollbar { display: none; }
+  .waxloom-mobile-player-head {
+    flex: 0 0 auto;
+    display: grid;
+    grid-template-columns: 44px minmax(0,1fr) 44px;
+    align-items: center;
+    gap: 9px;
+    min-height: 44px;
+  }
+  .waxloom-mobile-player-close {
+    display: grid; place-items: center;
+    width: 44px; height: 44px;
+    border: 1px solid #59476a; border-radius: 11px;
+    background: #34273e; color: #e3d3f0;
+    cursor: pointer;
+  }
+  .waxloom-mobile-player-head-title { display: grid; gap: 3px; text-align: center; min-width: 0; }
+  .waxloom-mobile-player-head-title strong { font-size: 11px; letter-spacing: .13em; color: #ecdef9; }
+  .waxloom-mobile-player-head-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b6a8c4; font-size: 12px; }
+  .waxloom-mobile-player-art-wrap { flex: 0 0 auto; display: flex; justify-content: center; width: 100%; min-width: 0; }
+  .waxloom-mobile-player-art {
+    width: min(78vw, 38dvh, 340px);
+    aspect-ratio: 1 / 1;
+    flex: 0 0 auto;
+    display: grid; place-items: center;
+    overflow: hidden; border-radius: 14px;
+    background: linear-gradient(135deg, #6a537f, #2a2035);
+    color: #e9d7f8;
+    box-shadow: 0 14px 32px #0008;
+  }
+  .waxloom-mobile-player-art img { width: 100%; height: 100%; object-fit: cover; }
+  .waxloom-mobile-player-metadata { display: grid; gap: 5px; flex: 0 0 auto; width: 100%; min-width: 0; text-align: center; }
+  .waxloom-mobile-song-title { color: #fff; font-size: clamp(18px, 5vw, 22px); font-weight: 750; }
+  .waxloom-mobile-song-artist { color: #c8b3d7; font-size: clamp(13px, 3.6vw, 15px); }
+  .waxloom-mobile-player-progress { flex: 0 0 auto; display: grid; gap: 1px; width: 100%; }
+  .waxloom-mobile-player-progress input {
+    display: block; width: 100%; height: 42px; margin: 0; padding: 0;
+    appearance: none; -webkit-appearance: none;
+    background: transparent; accent-color: #d7affb; cursor: pointer;
+    touch-action: pan-y;
+  }
+  .waxloom-mobile-player-progress input::-webkit-slider-runnable-track {
+    height: 6px;
+    border: 0; border-radius: 6px;
+    background: linear-gradient(to right,
+      #dab5fc 0%, #dab5fc var(--progress),
+      #554860 var(--progress), #554860 100%);
+  }
+  .waxloom-mobile-player-progress input::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 19px; height: 19px; margin-top: -6.5px;
+    border: 2px solid #f8edff;
+    border-radius: 50%; background: #bd82e6;
+    box-shadow: 0 0 0 4px #b18cd52b;
+  }
+  .waxloom-mobile-player-progress input::-moz-range-track {
+    height: 6px; background: #554860; border-radius: 6px;
+  }
+  .waxloom-mobile-player-progress input::-moz-range-progress {
+    height: 6px; background: #dab5fc; border-radius: 6px;
+  }
+  .waxloom-mobile-player-progress input::-moz-range-thumb {
+    width: 19px; height: 19px; border: 2px solid #f8edff;
+    background: #bd82e6; border-radius: 50%;
+  }
+  .waxloom-mobile-player-timing {
+    display: flex; justify-content: space-between;
+    color: #c3b2ce; font-size: 12px; font-variant-numeric: tabular-nums;
+  }
+  .waxloom-mobile-player-transport {
+    flex: 0 0 auto; display: grid;
+    grid-template-columns: 1fr 1fr 1.24fr 1fr 1fr;
+    align-items: center; justify-items: center;
+    gap: 3px; width: 100%; min-height: 66px;
+  }
+  .waxloom-mobile-player-transport button {
+    display: grid; place-items: center;
+    border: 0; border-radius: 12px; cursor: pointer;
+    color: #ebe2f4; background: transparent;
+  }
+  .waxloom-mobile-player-transport .waxloom-transport-small {
+    width: 44px; height: 46px; color: #b1a2be;
+  }
+  .waxloom-mobile-player-transport .waxloom-transport-small.is-active {
+    color: #eacbff; background: #463152;
+  }
+  .waxloom-mobile-player-transport .waxloom-transport-skip {
+    width: 48px; height: 52px; color: #eee2f7;
+  }
+  .waxloom-mobile-player-transport .waxloom-transport-play {
+    width: 65px; height: 65px; border-radius: 50%;
+    color: #1e1129; background: #dab4f9;
+    box-shadow: 0 4px 20px #ab73d45b;
+  }
+  .waxloom-mobile-player-transport button:disabled { opacity: .45; cursor: default; }
+
+  .waxloom-mobile-player-actions {
+    flex: 0 0 auto;
+    display: grid; grid-template-columns: repeat(4, minmax(0,1fr));
+    gap: 7px; min-width: 0;
+  }
+  .waxloom-mobile-player-actions button {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 5px; min-width: 0; min-height: 67px;
+    border: 1px solid #675479; border-radius: 11px;
+    background: #33273f;
+    color: #f0e3f7; cursor: pointer;
+  }
+  .waxloom-mobile-player-actions button span {
+    display: block; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 11px; font-weight: 600;
+  }
+  .waxloom-mobile-player-actions .waxloom-action-favorite {
+    color: #ffc0d1; border-color: #87516b; background: #42293a;
+  }
+  .waxloom-mobile-player-actions .waxloom-action-favorite.is-active {
+    color: #ffcedb; background: #793952;
+  }
+  .waxloom-mobile-player-actions .waxloom-action-playlist {
+    color: #c1e3fa; border-color: #51738e; background: #263c50;
+  }
+  .waxloom-mobile-player-actions .waxloom-action-mix {
+    color: #ecc7ff; border-color: #82569d; background: #452e58;
+  }
+  .waxloom-mobile-player-actions .waxloom-action-queue {
+    color: #b4eddf; border-color: #48867b; background: #28453f;
+  }
+  .waxloom-mobile-player-actions button:disabled { opacity: .42; cursor: not-allowed; }
+  .waxloom-mobile-player-notice {
+    flex: 0 0 auto;
+    padding: 8px 10px; border-radius: 7px;
+    background: #362a3d; color: #e9cfe9;
+    font-size: 12px; line-height: 1.3; overflow-wrap: anywhere;
+  }
+  .waxloom-mobile-player-next {
+    display: grid; gap: 6px; flex: 0 0 auto; min-width: 0;
+    padding-top: 9px; border-top: 1px solid #493a55;
+  }
+  .waxloom-mobile-player-next-heading {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px; color: #e8deed; font-size: 13px;
+  }
+  .waxloom-mobile-player-next-heading span { font-size: 11px; color: #aea0bd; }
+  .waxloom-next-item {
+    display: grid; grid-template-columns: 22px minmax(0,1fr) 22px;
+    gap: 10px; align-items: center;
+    width: 100%; min-height: 44px; padding: 8px 10px;
+    border: 1px solid #3c3246; border-radius: 9px;
+    background: #24202d; color: #e9e0ef; text-align: left;
+    cursor: pointer;
+  }
+  .waxloom-next-index { color: #b08ccc; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .waxloom-next-copy { display: grid; min-width: 0; gap: 3px; }
+  .waxloom-next-copy .waxloom-marquee { font-size: 13px; font-weight: 600; }
+  .waxloom-next-copy small { color: #b4a8bf; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+  /* These sheets must sit ABOVE the immersive player and remain dismissible. */
+  .queue-drawer.waxloom-queue-sheet {
+    position: fixed !important;
+    z-index: 230 !important;
+    left: 10px; right: 10px;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    width: auto; max-height: 69dvh;
+    border-color: #705a80;
+    background: #201b29;
+  }
+  .player-playlist-picker.waxloom-playlist-sheet {
+    position: fixed !important;
+    z-index: 235 !important;
+    left: 10px; right: 10px;
+    width: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    max-height: 69dvh;
+    overflow-y: auto;
+    border-color: #796188;
+    background: #241d2e;
+  }
+  .player-playlist-picker.waxloom-playlist-sheet .player-playlist-options {
+    grid-template-columns: repeat(2, minmax(0,1fr));
+  }
+  .waxloom-download-tray { z-index: 120; }
+}
+
+/* Even at 320×568: readable controls, compact artwork and internal scrolling. */
+@media (max-width: 380px) and (max-height: 680px) {
+  .waxloom-mobile-player { gap: 8px; }
+  .waxloom-mobile-player-art { width: min(57vw, 30dvh); }
+  .waxloom-mobile-player-metadata { gap: 3px; }
+  .waxloom-mobile-player-transport { min-height: 58px; }
+  .waxloom-mobile-player-transport .waxloom-transport-play { width: 57px; height: 57px; }
+  .waxloom-mobile-player-actions button { min-height: 59px; }
+  .waxloom-mobile-player-actions button span { font-size: 10px; }
+  .waxloom-mobile-mini-cover { width: 42px; height: 42px; flex-basis: 42px; }
+}
+@media (max-width: 820px) and (orientation: landscape) and (max-height: 540px) {
+  .waxloom-mobile-player {
+    display: grid !important;
+    grid-template-columns: minmax(160px, 34vw) minmax(0,1fr);
+    grid-template-rows: 44px auto auto auto auto 1fr;
+    align-content: start;
+    gap: 7px 15px;
+  }
+  .waxloom-mobile-player-head { grid-column: 1 / -1; grid-row: 1; }
+  .waxloom-mobile-player-art-wrap { grid-column: 1; grid-row: 2 / span 5; align-self: start; }
+  .waxloom-mobile-player-art { width: min(33vw, 65dvh); }
+  .waxloom-mobile-player-metadata { grid-column: 2; grid-row: 2; }
+  .waxloom-mobile-player-progress { grid-column: 2; grid-row: 3; }
+  .waxloom-mobile-player-transport { grid-column: 2; grid-row: 4; }
+  .waxloom-mobile-player-actions { grid-column: 2; grid-row: 5; }
+  .waxloom-mobile-player-next { grid-column: 2; grid-row: 6; }
+  .waxloom-mobile-player-notice { grid-column: 2; }
+}

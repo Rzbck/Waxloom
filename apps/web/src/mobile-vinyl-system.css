@@ -1,0 +1,222 @@
+/* One phone record-bin system across Home, Albums, artist albums,
+   Favorites, Search and Discovery. Fixed navigation gets real scroll clearance. */
+.waxloom-album-vinyl,
+.waxloom-discovery-vinyl { display: none; }
+
+@media (max-width: 820px) {
+  :root { --waxloom-nav-reserve: calc(var(--mobile-nav-h, 58px) + env(safe-area-inset-bottom)); }
+
+  /* Fixed bottom navigation must never overlap the last item on any normal page.
+     The player case already reserves BOTH the mini-player and the menu; don't
+     duplicate that space or introduce the old 150px blank strip again. */
+  .app-shell:not(.app-shell-discovery):not(.app-shell-with-player) {
+    padding-bottom: var(--waxloom-nav-reserve) !important;
+    box-sizing: border-box;
+  }
+  .app-shell.app-shell-with-player:not(.app-shell-discovery) {
+    padding-bottom: calc(var(--waxloom-nav-reserve) + var(--mobile-player-h, 68px)) !important;
+    box-sizing: border-box;
+  }
+  html { scroll-padding-bottom: var(--waxloom-nav-reserve); }
+  .app-shell.app-shell-with-player { scroll-padding-bottom: calc(var(--waxloom-nav-reserve) + var(--mobile-player-h, 68px)); }
+  .app-shell > .sidebar {
+    bottom: 0 !important;
+    padding-bottom: calc(4px + env(safe-area-inset-bottom)) !important;
+  }
+
+  .waxloom-album-vinyl,
+  .waxloom-discovery-vinyl {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+  .waxloom-album-grid-desktop { display: none !important; }
+  .discovery-cover-grid.discovery-cover-grid-desktop { display: none !important; }
+  .waxloom-vinyl-display {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+  .waxloom-vinyl-crate {
+    /* A record-bin surface WITHOUT an overlay obscuring the cover artwork. */
+    background:
+      radial-gradient(ellipse 85% 100% at 50% -25%, rgba(167, 117, 201, .21), transparent 62%),
+      linear-gradient(180deg, #2a2032 0%, #15101c 60%, #241a2c 100%);
+  }
+  .waxloom-vinyl-sleeve {
+    /* Never animate scrolling covers or rasterized album images. */
+    transform: none !important;
+    filter: none !important;
+    will-change: auto !important;
+    transition: none !important;
+  }
+  /* Add a pronounced front shadow; no buttons are covered because the
+     translucent/shadow layer does not receive pointer events. */
+  .waxloom-vinyl-display--album {
+    padding-top: 1px;
+    margin-bottom: 5px;
+  }
+  .waxloom-album-vinyl .waxloom-vinyl-group + .waxloom-vinyl-group {
+    margin-top: 18px;
+    padding-top: 11px;
+    border-top: 1px solid #302637;
+  }
+  .waxloom-vinyl-group-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 1px 10px;
+    color: #dfcbe7;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -.02em;
+  }
+  .waxloom-vinyl-group-heading small {
+    color: #9888a2;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .waxloom-vinyl-controls {
+    min-height: 47px;
+    height: 47px;
+    flex-wrap: nowrap;
+  }
+  .waxloom-vinyl-count {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    min-width: 46px;
+  }
+  .waxloom-vinyl-arrows { flex: 0 0 auto; }
+  .waxloom-vinyl-selected {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    max-width: none;
+    overflow: hidden;
+    text-align: center;
+  }
+  .waxloom-vinyl-selected strong,
+  .waxloom-vinyl-selected small {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .waxloom-vinyl-selected strong {
+    color: #ebd8f4;
+    font-size: 11px;
+    font-weight: 760;
+  }
+  .waxloom-vinyl-selected small {
+    color: #ae9ab6;
+    font-size: 10px;
+  }
+  .waxloom-vinyl-display--album .waxloom-vinyl-crate {
+    height: 258px;
+  }
+
+  /* Discovery cards are real music suggestions, not library album records.
+     The same 3D rack is used, but the four Like/Less/Download actions remain
+     fully visible and operable under each artwork. */
+  .waxloom-discovery-vinyl {
+    padding: 5px 0 10px;
+  }
+  .waxloom-discovery-vinyl .waxloom-vinyl-crate {
+    height: 300px;
+  }
+  .waxloom-discovery-vinyl .waxloom-vinyl-rack {
+    padding-top: 22px;
+    scroll-padding-inline: max(14px, calc(50% - 87px));
+    padding-left: max(14px, calc(50% - 87px));
+    padding-right: max(14px, calc(50% - 87px));
+  }
+  .waxloom-discovery-vinyl .waxloom-vinyl-sleeve {
+    flex: 0 0 174px;
+    width: 174px;
+    min-width: 174px;
+    margin-right: -8px;
+  }
+  .waxloom-discovery-vinyl .discovery-cover-card {
+    width: 174px;
+    min-height: 0;
+    height: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    gap: 6px;
+    background: transparent;
+    border: 0;
+    overflow: visible;
+  }
+  .waxloom-discovery-vinyl .discovery-cover-art {
+    width: 166px;
+    aspect-ratio: 1;
+    flex: 0 0 auto;
+    border: 2px solid #73607e;
+    box-shadow: 3px 4px 9px #0008;
+    border-radius: 3px;
+  }
+  .waxloom-discovery-vinyl .discovery-cover-copy {
+    display: grid;
+    gap: 2px;
+    min-height: 29px;
+    text-align: center;
+    padding: 0 4px;
+  }
+  .waxloom-discovery-vinyl .discovery-cover-copy strong { color: #f5e6fa; font-size: 12px; }
+  .waxloom-discovery-vinyl .discovery-cover-copy small { color: #c8b8cc; font-size: 10px; }
+  .waxloom-discovery-vinyl .discovery-cover-actions {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    gap: 4px;
+    min-height: 36px;
+    flex: 0 0 36px;
+    z-index: 50;
+  }
+  .waxloom-discovery-vinyl .discovery-cover-actions button {
+    width: 33px;
+    height: 33px;
+    min-width: 33px;
+    border-color: #65526b;
+    border-radius: 9px;
+    background: #372a40;
+  }
+  .waxloom-discovery-vinyl .discovery-cover-like { color: #a0d3b5; }
+  .waxloom-discovery-vinyl .discovery-cover-less { color: #ef9cab; }
+  .waxloom-discovery-vinyl .discovery-cover-download { color: #dab2ff; }
+  .waxloom-discovery-vinyl .waxloom-vinyl-controls {
+    margin-top: 2px;
+  }
+
+  .discovery-cover-shelf:has(.waxloom-discovery-vinyl) {
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+  .waxloom-album-vinyl .waxloom-vinyl-rack,
+  .waxloom-discovery-vinyl .waxloom-vinyl-rack {
+    /* Keep native horizontal inertia AND allow vertical page gestures. */
+    touch-action: pan-x pan-y;
+  }
+  .waxloom-album-vinyl .waxloom-vinyl-controls,
+  .waxloom-discovery-vinyl .waxloom-vinyl-controls { padding-bottom: 1px; }
+}
+
+@media (max-width: 355px) {
+  .waxloom-vinyl-display--album .waxloom-vinyl-crate { height: 251px; }
+  .waxloom-discovery-vinyl .waxloom-vinyl-crate { height: 292px; }
+  .waxloom-discovery-vinyl .discovery-cover-art { width: 155px; }
+}
+
+@media (min-width: 821px) {
+  .waxloom-vinyl-display { display: none !important; }
+  .waxloom-album-vinyl,
+  .waxloom-discovery-vinyl { display: none !important; }
+}

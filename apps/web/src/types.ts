@@ -46,6 +46,7 @@ export type PreviewTrack = {
   duration?: number;
   preview_url?: string | null;
   source_title?: string;
+  candidate?: DiscoveryCandidate;
 };
 
 export type Album = {

@@ -1,3 +1,5 @@
+import { prewarmedUrlOrStream } from "./previewWarmCache";
+import { isIOSHomeScreenAudio, setIOSPlaybackAudioSession, shouldHandoffBeforeEnd } from "./iosBackgroundAudio";
 import {
   createContext,
   type ReactNode,
@@ -10,7 +12,10 @@ import {
 } from "react";
 
 import { api } from "./api";
-import type { PreviewTrack, Song } from "./types";
+import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
+import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
+import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
+import type { DiscoveryCandidate, PlaylistSummary, PreviewTrack, Song } from "./types";
 
 type RepeatMode = "off" | "all" | "one";
 type PlayerMode = "navidrome" | "preview";
@@ -21,10 +26,10 @@ type PlayerContextValue = {
   currentPreview: PreviewTrack | null;
   currentIndex: number;
   playing: boolean;
-  playSongs: (songs: Song[], startIndex?: number) => void;
+  playSongs: (songs: Song[], startIndex?: number, options?: { ordered?: boolean }) => void;
   playNow: (song: Song) => void;
   addToQueue: (song: Song) => void;
-  playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number) => void;
+  playPreviewTracks: (tracks: PreviewTrack[], startIndex?: number, onManualImport?: (candidate: DiscoveryCandidate) => void) => void;
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
@@ -45,7 +50,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const scrobbledRef = useRef<string | null>(null);
   const localSongIdRef = useRef<string | null>(null);
+  const explicitQueueRef = useRef(false);
   const previewStartAtZeroRef = useRef(false);
+  // User playback intent must not be overwritten by a transient pause fired
+  // when an HTMLAudioElement changes source (or an old play promise rejects).
+  const wantsPlaybackRef = useRef(false);
+  const preEndHandoffSourceRef = useRef<string | null>(null);
+  const previewManualImportRef = useRef<((candidate: DiscoveryCandidate) => void) | null>(null);
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
   const [mode, setMode] = useState<PlayerMode>("navidrome");
@@ -62,10 +73,70 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [shuffle, setShuffle] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+  const closeMobilePlayer = useCallback(() => setMobileExpanded(false), []);
+  const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
+  const [playerPlaylists, setPlayerPlaylists] = useState<PlaylistSummary[]>([]);
+  const [playlistQuery, setPlaylistQuery] = useState("");
+  const playlistMenuRef = useRef<HTMLElement | null>(null);
+  const playlistButtonRef = useRef<HTMLButtonElement | null>(null);
+  const playlistRequestRef = useRef(0);
+  const [playerStarred, setPlayerStarred] = useState(false);
+  // Shared with Discovery's taste profile: dislikes are durable and influence
+  // recommendations without deleting or hiding the listener's music files.
+  const [playerTaste, setPlayerTaste] = useState<Record<string, { value: -1 | 1; artist: string; tags: string[] }>>(() => {
+    try {
+      const value = JSON.parse(localStorage.getItem("waxloom.discovery.taste.v1") ?? "{}");
+      return value && typeof value === "object" ? value : {};
+    } catch { return {}; }
+  });
+  const [playerActionBusy, setPlayerActionBusy] = useState(false);
+  const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
+  const downloads = useDownloads();
+  const owned = useLibraryPresence();
 
   const currentSong = mode === "navidrome" && currentIndex >= 0 ? queue[currentIndex] ?? null : null;
   const currentPreview = mode === "preview" && previewIndex >= 0 ? previewQueue[previewIndex] ?? null : null;
+  const currentPreviewDownloadPhase = currentPreview
+    ? (downloads.find((item) => item.id === currentPreview.recording_mbid)?.phase ?? downloadPhase(currentPreview.recording_mbid))
+    : undefined;
+  const canDownloadCurrent = Boolean(
+    currentPreview?.candidate
+    && owned.get(currentPreview.recording_mbid) === "absent"
+    && !["indexed", "existing"].includes(currentPreviewDownloadPhase ?? ""),
+  );
+  useEffect(() => {
+    if (!currentPreview?.candidate) return;
+    verifyLibraryPresence([currentPreview.candidate]);
+  }, [currentPreview?.recording_mbid]);
+  const tasteKey = currentPreview?.recording_mbid
+    ?? (currentSong ? `library:${currentSong.id}` : null);
+  const currentTaste = tasteKey ? (playerTaste[tasteKey]?.value ?? 0) : 0;
+  const playerDisliked = currentTaste === -1;
+  const playerLiked = currentPreview ? currentTaste === 1 : playerStarred;
+  useEffect(() => {
+    const syncTaste = () => {
+      try {
+        const value = JSON.parse(localStorage.getItem("waxloom.discovery.taste.v1") ?? "{}");
+        setPlayerTaste(value && typeof value === "object" ? value : {});
+      } catch { setPlayerTaste({}); }
+    };
+    window.addEventListener("waxloom:discovery-taste", syncTaste);
+    window.addEventListener("storage", syncTaste);
+    return () => {
+      window.removeEventListener("waxloom:discovery-taste", syncTaste);
+      window.removeEventListener("storage", syncTaste);
+    };
+  }, []);
+  useEffect(() => {
+    setPlayerStarred(Boolean(currentSong?.starred));
+    playlistRequestRef.current += 1;
+    setPlaylistPickerOpen(false);
+    setPlaylistQuery("");
+    setPlayerActionMessage(null);
+  }, [currentSong?.id, currentPreview?.id]);
+
   const activeIndex = mode === "preview" ? previewIndex : currentIndex;
   const activeLength = mode === "preview" ? previewQueue.length : queue.length;
   const activeTitle = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
@@ -83,28 +154,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   const startLocalPlayback = useCallback((song: Song, event = "play-click") => {
     const clickedAt = Date.now();
-    traceLocalPlayer(event, song.id, clickedAt);
-
+    performance.mark("waxloom-local-play-click");
     const audio = audioRef.current;
     if (!audio) return;
 
     const source = api.streamUrl(song.id);
     if (localSongIdRef.current !== song.id || audio.getAttribute("src") !== source) {
       localSongIdRef.current = song.id;
+      preEndHandoffSourceRef.current = null;
       audio.src = source;
       audio.load();
     }
 
+    wantsPlaybackRef.current = true;
     setPlaying(true);
     void audio.play()
       .then(() => traceLocalPlayer("audio-playing", song.id, Date.now()))
-      .catch(() => setPlaying(false));
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (event === "next" && isIOSHomeScreenAudio() && document.hidden
+          && error instanceof DOMException && error.name === "NotAllowedError") {
+          // Keep intent: WebKit may reject a background handoff. Resume on foreground.
+          setPlaying(false);
+          return;
+        }
+        if (wantsPlaybackRef.current && localSongIdRef.current === song.id) {
+          wantsPlaybackRef.current = false;
+          setPlaying(false);
+        }
+      });
+    // Fire-and-forget diagnostics cannot occupy a connection ahead of audio.
+    window.setTimeout(() => { if (localSongIdRef.current === song.id) traceLocalPlayer(event, song.id, clickedAt); }, 1200);
   }, [traceLocalPlayer]);
 
   useEffect(() => {
     void api
       .playQueue()
       .then((saved) => {
+        // An explicit selection beats a slow saved-queue response on first load.
+        if (explicitQueueRef.current) return;
         const entries = saved.entry ?? [];
         if (entries.length === 0) return;
         setQueue(entries);
@@ -120,6 +208,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!audioRef.current) return;
     audioRef.current.volume = volume;
   }, [volume]);
+
+  useEffect(() => { setIOSPlaybackAudioSession(); }, []);
 
   useEffect(() => {
     if (mode !== "navidrome" || !currentSong) return;
@@ -197,6 +287,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     localSongIdRef.current = null;
     if (audio.getAttribute("src") !== currentPreview.preview_url) {
+      preEndHandoffSourceRef.current = null;
       audio.pause();
       setCurrentTime(0);
       audio.src = currentPreview.preview_url;
@@ -213,14 +304,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     if (playing) {
-      void audio.play().catch(() => setPlaying(false));
-    } else {
+      void audio.play().catch((error: unknown) => {
+        // AbortError is expected when a newer track supersedes a pending
+        // play() promise. Only real current-source failures stop playback.
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (isIOSHomeScreenAudio() && document.hidden
+          && error instanceof DOMException && error.name === "NotAllowedError") {
+          // Preserve intent for visibility recovery when WebKit disallows playback.
+          setPlaying(false);
+          return;
+        }
+        if (wantsPlaybackRef.current && audio.getAttribute("src") === currentPreview.preview_url) {
+          wantsPlaybackRef.current = false;
+          setPlaying(false);
+          setPreviewError("Audio source unavailable. Choose another track or press Play to retry.");
+        }
+      });
+    } else if (!audio.paused) {
       audio.pause();
     }
   }, [mode, currentPreview?.preview_url, playing]);
 
   useEffect(() => {
-    if (!restoreDone || mode !== "navidrome") return;
+    if (!restoreDone || mode !== "navidrome" || !currentSong || queue.length === 0) return;
     const id = window.setTimeout(() => {
       void api
         .savePlayQueue(
@@ -237,7 +343,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (mode !== "navidrome" || !currentSong) return;
     const id = window.setInterval(() => {
       const audio = audioRef.current;
-      if (!audio) return;
+      if (!audio || audio.paused || document.visibilityState === "hidden") return;
       void api
         .savePlayQueue(
           queue.map((song) => song.id),
@@ -245,30 +351,45 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           Math.max(0, Math.round(audio.currentTime * 1000)),
         )
         .catch(() => undefined);
-    }, 15000);
+    }, 60000);
     return () => window.clearInterval(id);
   }, [queue, currentSong?.id, mode]);
 
-  const playSongs = useCallback((songs: Song[], startIndex = 0) => {
+  const playSongs = useCallback((songs: Song[], startIndex = 0, options?: { ordered?: boolean }) => {
     if (songs.length === 0) return;
     const safeIndex = Math.max(0, Math.min(startIndex, songs.length - 1));
     const song = songs[safeIndex];
     if (!song) return;
 
-    startLocalPlayback(song);
+    // Home's chronological New tracks list needs a deterministic Next,
+    // even after the user previously enabled Shuffle or Repeat one.
+    if (options?.ordered) {
+      setShuffle(false);
+      setRepeat("off");
+    }
+    explicitQueueRef.current = true;
     setMode("navidrome");
-    setQueue(songs);
+    setQueue([...songs]);
     setCurrentIndex(safeIndex);
+    setCurrentTime(0);
     setPreviewError(null);
+    startLocalPlayback(song);
   }, [startLocalPlayback]);
 
-  const playPreviewTracks = useCallback((tracks: PreviewTrack[], startIndex = 0) => {
+  const playPreviewTracks = useCallback((
+    tracks: PreviewTrack[], startIndex = 0,
+    onManualImport?: (candidate: DiscoveryCandidate) => void,
+  ) => {
     if (tracks.length === 0) return;
-
+    previewManualImportRef.current = onManualImport ?? null;
     const preparedTracks = tracks.map((track) => ({
       ...track,
-      preview_url: track.preview_url
-        ?? `/api/discovery/previews/${encodeURIComponent(track.recording_mbid)}`,
+      // If this verified M4A was fully buffered before click, hand it to the
+      // player immediately via an in-memory object URL. Otherwise stream the
+      // existing backend URL without awaiting any speculative download.
+      preview_url: track.recording_mbid === tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))]?.recording_mbid
+        ? (prewarmedUrlOrStream(track.recording_mbid) ?? api.previewStreamUrl(track.recording_mbid, track.artist, track.title))
+        : api.previewStreamUrl(track.recording_mbid, track.artist, track.title),
     }));
     const safeIndex = Math.max(0, Math.min(startIndex, preparedTracks.length - 1));
     const target = preparedTracks[safeIndex];
@@ -278,35 +399,19 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
 
     if (samePreview) {
-      const shouldPause = playing || Boolean(audio && !audio.paused && !audio.ended);
-      if (shouldPause) {
-        audio?.pause();
-        setPlaying(false);
-      } else {
-        setPlaying(true);
-        if (audio && target.preview_url) {
-          void audio.play().catch(() => setPlaying(false));
-        }
-      }
+      const shouldPause = wantsPlaybackRef.current;
+      wantsPlaybackRef.current = !shouldPause;
+      setPlaying(!shouldPause);
+      if (shouldPause) audio?.pause();
       return;
     }
 
     previewStartAtZeroRef.current = true;
-    if (audio && target.preview_url) {
-      localSongIdRef.current = null;
-      audio.pause();
-      if (audio.getAttribute("src") !== target.preview_url) {
-        audio.src = target.preview_url;
-        audio.load();
-      }
-      try {
-        audio.currentTime = 0;
-      } catch {
-        // loadedmetadata performs the hard reset for the new cached preview.
-      }
-      void audio.play().catch(() => setPlaying(false));
-    }
-
+    wantsPlaybackRef.current = true;
+    performance.mark("waxloom-discovery-play-click");
+    // Exactly one source switch, performed by the preview effect AFTER
+    // React commits mode/index. Calling audio.play() here as well caused
+    // duplicate play/pause events and stale AbortError state updates.
     setCurrentTime(0);
     setDuration(target.duration ?? 0);
     setMode("preview");
@@ -319,6 +424,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const playNow = useCallback((song: Song) => playSongs([song], 0), [playSongs]);
 
   const addToQueue = useCallback((song: Song) => {
+    explicitQueueRef.current = true;
     setQueue((current) => {
       if (current.length === 0) {
         setCurrentIndex(0);
@@ -351,6 +457,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
 
     if (nextIndex === null) {
+      wantsPlaybackRef.current = false;
       setPlaying(false);
       audioRef.current?.pause();
       return;
@@ -358,6 +465,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     if (mode === "preview") {
       const audio = audioRef.current;
+      wantsPlaybackRef.current = true;
       previewStartAtZeroRef.current = true;
       audio?.pause();
       if (audio) {
@@ -380,6 +488,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setCurrentIndex(nextIndex);
   }, [activeLength, activeIndex, repeat, shuffle, mode, queue, previewQueue, startLocalPlayback]);
 
+  useEffect(() => {
+    if (!isIOSHomeScreenAudio()) return;
+    const recoverOnForeground = () => {
+      if (document.hidden || !wantsPlaybackRef.current) return;
+      const audio = audioRef.current;
+      if (!audio) return;
+      if (audio.ended && !audio.loop) {
+        // On iOS the ended callback or the next play() may have been suspended.
+        next();
+        return;
+      }
+      if (audio.paused) {
+        void audio.play().then(() => setPlaying(true)).catch(() => {
+          // Keep the existing paused UI until a real playback succeeds.
+          setPlaying(false);
+        });
+      }
+    };
+    document.addEventListener("visibilitychange", recoverOnForeground);
+    window.addEventListener("pageshow", recoverOnForeground);
+    return () => {
+      document.removeEventListener("visibilitychange", recoverOnForeground);
+      window.removeEventListener("pageshow", recoverOnForeground);
+    };
+  }, [next]);
+
   const previous = useCallback(() => {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 4) {
@@ -391,6 +525,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
     const previousIndex = activeIndex - 1;
     if (mode === "preview") {
+      wantsPlaybackRef.current = true;
       previewStartAtZeroRef.current = true;
       audio?.pause();
       if (audio) {
@@ -426,6 +561,30 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!audio) return;
     setCurrentTime(audio.currentTime);
     const effectiveDuration = audio.duration || activeDuration || 0;
+    const source = audio.getAttribute("src") ?? audio.currentSrc;
+    if (source && preEndHandoffSourceRef.current !== source
+      && shouldHandoffBeforeEnd({
+        enabled: isIOSHomeScreenAudio(),
+        hidden: document.hidden,
+        wantsPlayback: wantsPlaybackRef.current,
+        hasNext: repeat !== "one" && (
+          (shuffle && activeLength > 1)
+          || activeIndex < activeLength - 1
+          || (repeat === "all" && activeLength > 1)
+        ),
+        paused: audio.paused,
+        seeking: audio.seeking,
+        ended: audio.ended,
+        currentTime: audio.currentTime,
+        duration: effectiveDuration,
+      })) {
+      // Transition before 'ended' shuts down the iOS background audio session.
+      // A source latch prevents duplicate handoffs from adjacent timeupdate events.
+      preEndHandoffSourceRef.current = source;
+      submitScrobble();
+      next();
+      return;
+    }
     if (effectiveDuration > 0) {
       setDuration(effectiveDuration);
       if (mode === "navidrome") {
@@ -450,7 +609,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (playing) {
+    if (wantsPlaybackRef.current) {
+      wantsPlaybackRef.current = false;
       audio.pause();
       setPlaying(false);
       return;
@@ -461,8 +621,219 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    if (mode === "preview" && currentPreview && previewError) {
+      // A new URL bypasses the browser's failed media element/cache state.
+      setPreviewQueue((items) => items.map((item) => item.id === currentPreview.id
+        ? { ...item, preview_url: `${api.previewStreamUrl(item.recording_mbid, item.artist, item.title)}&retry=${Date.now()}` }
+        : item));
+      setPreviewError(null);
+      wantsPlaybackRef.current = true;
+      setPlaying(true);
+      return;
+    }
+    wantsPlaybackRef.current = true;
     setPlaying(true);
-    void audio.play().catch(() => setPlaying(false));
+    // Preview source effect owns the actual play() call; do not race it.
+    if (mode !== "preview") {
+      void audio.play().catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (wantsPlaybackRef.current) {
+          wantsPlaybackRef.current = false;
+          setPlaying(false);
+        }
+      });
+    }
+  }
+
+  async function toggleCurrentFavorite() {
+    if (!currentSong || playerActionBusy) return;
+    const target = !playerStarred;
+    setPlayerActionBusy(true);
+    try {
+      await api.setStarred(currentSong.id, target);
+      setPlayerStarred(target);
+      setQueue((existing) => existing.map((song) => song.id === currentSong.id
+        ? { ...song, starred: target ? new Date().toISOString() : undefined } : song));
+      setPlayerActionMessage(target ? "Added to favorites" : "Removed from favorites");
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not update favorites");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  async function setCurrentTaste(value: -1 | 0 | 1) {
+    if (playerActionBusy || !tasteKey) return;
+    const artist = currentPreview?.artist ?? currentSong?.artist ?? "Unknown artist";
+    const title = currentPreview?.title ?? currentSong?.title ?? "Unknown title";
+    const previous = playerTaste[tasteKey];
+    const tags = currentPreview?.candidate?.tags ?? previous?.tags ?? [];
+    const next = { ...playerTaste };
+    if (value === 0) delete next[tasteKey];
+    else next[tasteKey] = { value, artist, tags };
+    const publish = (updated: typeof next) => {
+      setPlayerTaste(updated);
+      try { localStorage.setItem("waxloom.discovery.taste.v1", JSON.stringify(updated)); } catch { /* private mode */ }
+      window.dispatchEvent(new Event("waxloom:discovery-taste"));
+    };
+    publish(next);
+    setPlayerActionBusy(true);
+    try {
+      await api.discoveryTrackFeedback(tasteKey, artist, title, value, tags);
+      setPlayerActionMessage(value === -1 ? "Show less like this in Discovery"
+        : value === 1 ? "Liked - more similar discoveries"
+        : "Taste feedback cleared");
+    } catch (error) {
+      const rollback = { ...next };
+      if (previous) rollback[tasteKey] = previous;
+      else delete rollback[tasteKey];
+      publish(rollback);
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not save taste feedback");
+    } finally { setPlayerActionBusy(false); }
+  }
+
+  async function handleLikePlaying() {
+    if (currentPreview) {
+      await setCurrentTaste(playerLiked ? 0 : 1);
+    } else {
+      await toggleCurrentFavorite();
+    }
+  }
+
+  async function toggleDislikePlaying() {
+    await setCurrentTaste(playerDisliked ? 0 : -1);
+  }
+
+  function downloadPlayingPreview() {
+    const candidate = currentPreview?.candidate;
+    if (!candidate) {
+      setPlayerActionMessage("Choose a Discovery track to download.");
+      return;
+    }
+    const accepted = enqueueDiscoveryDownload(candidate, (selection) => {
+      if (previewManualImportRef.current) previewManualImportRef.current(selection);
+      else setPlayerActionMessage("This source needs manual selection in Discovery.");
+    });
+    if (accepted) setPlayerActionMessage("Download queued — see Downloads for progress.");
+  }
+
+  function downloadPlayingTrack() {
+    if (currentPreview) {
+      downloadPlayingPreview();
+      return;
+    }
+    if (!currentSong) return;
+    const safe = (value: string) => value.replace(/[^\p{L}\p{N} .()_-]/gu, "").trim().slice(0, 110);
+    const suffix = currentSong.suffix?.replace(/[^a-z0-9]/gi, "").slice(0, 8) || "mp3";
+    const link = document.createElement("a");
+    link.href = api.streamUrl(currentSong.id);
+    link.download = `${safe(currentSong.artist ?? "Unknown artist")} - ${safe(currentSong.title ?? "Track")}.${suffix}`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setPlayerActionMessage("Audio download started.");
+  }
+
+  async function openPlayerPlaylists() {
+    if (!currentSong && !currentPreview?.candidate) {
+      setPlayerActionMessage("Choose a track to add to a playlist.");
+      return;
+    }
+    if (playlistPickerOpen) {
+      playlistRequestRef.current += 1;
+      setPlaylistPickerOpen(false);
+      return;
+    }
+    const requestId = ++playlistRequestRef.current;
+    setPlaylistQuery("");
+    setPlaylistPickerOpen(true); // Never wait for the network to open the menu.
+    setPlayerActionMessage(null);
+    setPlayerActionBusy(true);
+    try {
+      const response = await api.playlists();
+      if (playlistRequestRef.current === requestId) {
+        setPlayerPlaylists(response.items);
+      }
+    } catch (error) {
+      if (playlistRequestRef.current === requestId) {
+        setPlaylistPickerOpen(false);
+        setPlayerActionMessage(error instanceof Error ? error.message : "Could not load playlists");
+      }
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!playlistPickerOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      const node = event.target as Node;
+      if (playlistMenuRef.current?.contains(node) || playlistButtonRef.current?.contains(node)) return;
+      playlistRequestRef.current += 1;
+      setPlaylistPickerOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      playlistRequestRef.current += 1;
+      setPlaylistPickerOpen(false);
+      playlistButtonRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [playlistPickerOpen]);
+
+  async function addCurrentToPlaylist(playlist: PlaylistSummary) {
+    if (playerActionBusy) return;
+    if (currentPreview?.candidate) {
+      const accepted = enqueueDiscoveryDownload(currentPreview.candidate, (selection) => {
+        if (previewManualImportRef.current) previewManualImportRef.current(selection);
+        else setPlayerActionMessage("Select a source manually in Discovery.");
+      }, playlist);
+      setPlaylistPickerOpen(false);
+      setPlayerActionMessage(accepted
+        ? `Download / add to ${playlist.name} queued. See Downloads for progress.`
+        : "This track is already being downloaded. Try again once it is indexed.");
+      return;
+    }
+    if (!currentSong) return;
+    setPlayerActionBusy(true);
+    try {
+      await api.updatePlaylist(playlist.id, { song_ids_to_add: [currentSong.id] });
+      setPlaylistPickerOpen(false);
+      setPlayerActionMessage(`Added to ${playlist.name}`);
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Could not update playlist");
+    } finally {
+      setPlayerActionBusy(false);
+    }
+  }
+
+  async function instantMixFromPlaying() {
+    if (!currentSong || playerActionBusy) return;
+    setPlayerActionBusy(true);
+    setPlayerActionMessage("Building an instant mix…");
+    try {
+      const response = await api.localSimilar(currentSong.id, 24);
+      const similar: Song[] = response.items
+        .filter((song) => song.id && song.id !== currentSong.id)
+        .map((song) => ({ ...song, id: song.id, title: song.title, artist: song.artist, album: song.album }));
+      if (!similar.length) {
+        setPlayerActionMessage("No similar local tracks available yet");
+        return;
+      }
+      playSongs([currentSong, ...similar], 0);
+      setPlayerActionMessage(response.source === "library_fallback"
+        ? `Library mix — ${similar.length} tracks (AudioMuse not indexed yet)`
+        : `Instant mix — ${similar.length} similar tracks`);
+    } catch (error) {
+      setPlayerActionMessage(error instanceof Error ? error.message : "Instant mix unavailable");
+    } finally {
+      setPlayerActionBusy(false);
+    }
   }
 
   const contextValue = useMemo<PlayerContextValue>(
@@ -480,14 +851,99 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     [queue, currentSong, currentPreview, activeIndex, playing, playSongs, playNow, addToQueue, playPreviewTracks],
   );
 
+  const jumpToIndex = (targetIndex: number) => {
+    if (targetIndex < 0) return;
+    if (mode === "navidrome") {
+      const song = queue[targetIndex];
+      if (!song) return;
+      startLocalPlayback(song, "queue");
+      setCurrentIndex(targetIndex);
+      return;
+    }
+    const preview = previewQueue[targetIndex];
+    if (!preview) return;
+    const audio = audioRef.current;
+    previewStartAtZeroRef.current = true;
+    wantsPlaybackRef.current = true;
+    audio?.pause();
+    if (audio) {
+      try { audio.currentTime = 0; } catch { /* Metadata not yet loaded. */ }
+    }
+    setCurrentTime(0);
+    setDuration(preview.duration ?? 0);
+    setPreviewIndex(targetIndex);
+    setPlaying(true);
+  };
+
   const activeQueue = mode === "preview" ? previewQueue : queue;
+
+  // Standard iOS lock-screen controls. Web Media Session cannot expose
+  // arbitrary Favorite/Playlist/Instant Mix buttons in Apple's lock-screen UI.
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || (!currentSong && !currentPreview)) return;
+    const session = navigator.mediaSession;
+    if (typeof MediaMetadata === "undefined") return;
+    session.metadata = new MediaMetadata({
+      title: activeTitle,
+      artist: activeArtist,
+      album: currentSong?.album ?? "",
+      artwork: currentSong?.coverArt ? [{ src: api.coverUrl(currentSong.coverArt, 600), sizes: "600x600" }] : [],
+    });
+    const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+      ["nexttrack", () => next()],
+      ["previoustrack", () => previous()],
+      ["play", () => {
+        if (mode === "navidrome" && currentSong) {
+          startLocalPlayback(currentSong, "media-session-play");
+        } else {
+          wantsPlaybackRef.current = true;
+          setPlaying(true);
+          const audio = audioRef.current;
+          if (audio && !audio.ended) void audio.play().catch(() => undefined);
+        }
+      }],
+      ["pause", () => {
+        wantsPlaybackRef.current = false;
+        audioRef.current?.pause();
+        setPlaying(false);
+      }],
+    ];
+    for (const [action, handler] of actions) {
+      try { session.setActionHandler(action, handler); } catch { /* Unsupported iOS action. */ }
+    }
+    return () => {
+      for (const [action] of actions) {
+        try { session.setActionHandler(action, null); } catch { /* Unsupported. */ }
+      }
+    };
+  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id, mode, next, previous, startLocalPlayback]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+  }, [playing]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState
+        || !Number.isFinite(duration) || duration <= 0) return;
+    try {
+      navigator.mediaSession.setPositionState({
+        duration,
+        playbackRate: 1,
+        position: Math.min(Math.max(currentTime, 0), duration),
+      });
+    } catch { /* Older Safari versions may not accept position updates. */ }
+  }, [currentTime, duration]);
+
+
 
   return (
     <PlayerContext.Provider value={contextValue}>
       {children}
       <audio
         ref={audioRef}
-        preload="none"
+        preload={mode === "preview" ? "auto" : "none"}
+        loop={repeat === "one"}
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
@@ -506,23 +962,61 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           }
         }}
         onTimeUpdate={onTimeUpdate}
-        onPlay={() => setPlaying(true)}
+        onPlay={() => {
+          if (wantsPlaybackRef.current) setPlaying(true);
+          else audioRef.current?.pause();
+        }}
+        onPlaying={() => {
+          if (mode === "preview") {
+            setPreviewError(null);
+            try {
+              performance.measure("waxloom-discovery-time-to-playing", "waxloom-discovery-play-click");
+            } catch { /* mark absent after audio resume */ }
+          } else if (mode === "navidrome") {
+            try {
+              performance.measure("waxloom-local-time-to-playing", "waxloom-local-play-click");
+              if (performance.getEntriesByName("waxloom-shuffle-click", "mark").length) {
+                performance.measure("waxloom-shuffle-time-to-playing", "waxloom-shuffle-click");
+                performance.clearMarks("waxloom-shuffle-click");
+              }
+            } catch { /* mark absent on saved-queue restore */ }
+          }
+        }}
+        onPause={() => {
+          if (!wantsPlaybackRef.current) setPlaying(false);
+        }}
         onEnded={() => {
+          // A previously advanced stream can emit a late ended event on iOS.
+          const source = audioRef.current?.getAttribute("src") ?? audioRef.current?.currentSrc;
+          if (source && preEndHandoffSourceRef.current === source) return;
           submitScrobble();
           next();
         }}
         onError={() => {
-          setPlaying(false);
-          if (mode === "preview") {
-            setPreviewError("The cached Discovery preview could not be played. Press next or try again.");
+          if (mode !== "preview" || !currentPreview) {
+            // Ordinary Navidrome streams are unaffected by Discovery failover.
+            wantsPlaybackRef.current = false;
+            setPlaying(false);
+            return;
           }
+          const src = audioRef.current?.currentSrc;
+          const expected = currentPreview.preview_url;
+          // Ignore a late error from a previous track after rapid Next taps.
+          if (src && expected && new URL(src, window.location.href).href
+            !== new URL(expected, window.location.href).href) return;
+
+          // Keep the selected title and queue: failing audio is not consent
+          // to skip to another recommendation.
+          wantsPlaybackRef.current = false;
+          setPlaying(false);
+          setPreviewError("Preview unavailable. Press Play to retry or choose another title.");
         }}
       />
 
       {(currentSong || currentPreview) && (
         <>
           {queueOpen && (
-            <aside className="queue-drawer" aria-label="Play queue">
+            <aside className={`queue-drawer ${mobileExpanded ? "waxloom-queue-sheet" : ""}`} aria-label="Play queue">
               <div className="queue-drawer-head">
                 <div>
                   <p className="eyebrow">{mode === "preview" ? "Discovery preview queue" : "Navidrome play queue"}</p>
@@ -541,30 +1035,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                       type="button"
                       key={`${item.id}-${index}`}
                       onClick={() => {
-                        if (mode === "preview") {
-                          if (index === previewIndex) {
-                            togglePlayback();
-                            return;
-                          }
-                          const audio = audioRef.current;
-                          previewStartAtZeroRef.current = true;
-                          audio?.pause();
-                          if (audio) {
-                            try {
-                              audio.currentTime = 0;
-                            } catch {
-                              // loadedmetadata performs the hard reset.
-                            }
-                          }
-                          setCurrentTime(0);
-                          setDuration((item as PreviewTrack).duration ?? 0);
-                          setPreviewIndex(index);
-                          setPlaying(true);
+                        if (index === activeIndex) {
+                          togglePlayback();
                           return;
                         }
-                        const song = item as Song;
-                        startLocalPlayback(song, "queue");
-                        setCurrentIndex(index);
+                        jumpToIndex(index);
                       }}
                     >
                       <span>{index + 1}</span>
@@ -577,7 +1052,59 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </aside>
           )}
 
-          <footer className={`player-dock ${mode === "preview" ? "player-dock-preview" : ""}`}>
+          {playlistPickerOpen && (
+            <aside ref={playlistMenuRef} className={`player-playlist-picker ${mobileExpanded ? "waxloom-playlist-sheet" : ""}`} aria-label="Choose a playlist">
+              <strong>{currentPreview ? `Download / add "${currentPreview.title}" to playlist` : `Add "${currentSong?.title}" to a playlist`}</strong>
+              <input type="search" value={playlistQuery} autoFocus
+                onChange={(event) => setPlaylistQuery(event.target.value)}
+                placeholder="Find a playlist…" aria-label="Find a playlist" />
+              <div className="player-playlist-options">
+                {playerPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistQuery.toLowerCase()))
+                  .slice(0, 12).map((playlist) => (
+                  <button key={playlist.id} type="button" disabled={playerActionBusy}
+                    onClick={() => void addCurrentToPlaylist(playlist)}>{playlist.name}</button>
+                ))}
+              </div>
+              {playerActionBusy && playerPlaylists.length === 0 && <span className="player-action-tip">Loading playlists…</span>}
+              {!playerActionBusy && playerPlaylists.length === 0 && <span className="player-action-tip">No playlists yet. Create one from the Playlists tab.</span>}
+              {playerPlaylists.filter((playlist) => playlist.name.toLowerCase().includes(playlistQuery.toLowerCase())).length > 12
+                && <small>Refine your search to see more playlists.</small>}
+            </aside>
+          )}
+          <footer className={`player-dock ${canDownloadCurrent ? "player-dock-preview" : ""}`}>
+            <div className="waxloom-mobile-mini">
+              <button className="waxloom-mobile-mini-info" type="button"
+                onClick={() => setMobileExpanded(true)}
+                aria-label={`Open full-screen player for ${activeTitle}`}>
+                <span className="waxloom-mobile-mini-cover">
+                  {currentSong?.coverArt
+                    ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" />
+                    : <PlayerIcon name="music" size={25} />}
+                </span>
+                <span className="waxloom-mobile-mini-copy">
+                  <MarqueeText value={activeTitle} className="waxloom-mobile-mini-title" />
+                  <span className="waxloom-mobile-mini-artist">{activeArtist}</span>
+                </span>
+                <span className="waxloom-mobile-mini-chevron"><PlayerIcon name="chevron-down" size={22} /></span>
+              </button>
+              {canDownloadCurrent && (
+                <button className="waxloom-mobile-mini-download" type="button" onClick={downloadPlayingPreview}
+                  disabled={["queued", "searching", "downloading", "indexed", "existing"].includes(currentPreviewDownloadPhase ?? "")}
+                  aria-label="Download playing Discovery track"
+                  title="Download playing Discovery track">
+                  {currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing" ? "✓"
+                    : ["queued", "searching", "downloading"].includes(currentPreviewDownloadPhase ?? "") ? "…" : "↓"}
+                </button>
+              )}
+              <button className="waxloom-mobile-mini-play" type="button" onClick={togglePlayback}
+                disabled={mode === "preview" && Boolean(previewResolving)}
+                aria-label={playing ? "Pause" : "Play"}>
+                <PlayerIcon name={playing ? "pause" : "play"} size={24} />
+              </button>
+              <button className="waxloom-mobile-mini-next" type="button" onClick={next} aria-label="Next track">
+                <PlayerIcon name="next" size={22} />
+              </button>
+            </div>
             <div className="player-track">
               <div className="player-cover">
                 {currentSong?.coverArt ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" /> : <span>{mode === "preview" ? "◎" : "♪"}</span>}
@@ -585,7 +1112,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               <div className="player-track-copy">
                 <strong>{activeTitle}</strong>
                 <span>{activeArtist}</span>
-                {mode === "preview" && <small>Discovery preview · not in your library</small>}
+                {mode === "preview" && <small>{owned.get(currentPreview?.recording_mbid ?? "") === "present" ? "Already in your library" : "Discovery preview"}</small>}
               </div>
             </div>
 
@@ -610,11 +1137,84 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </div>
 
             <div className="player-tools">
+              <button className={playerLiked ? "icon-button player-quick-action player-like-action is-favorite" : "icon-button player-quick-action player-like-action"}
+                type="button" onClick={() => void handleLikePlaying()} aria-pressed={playerLiked}
+                title={playerLiked ? "Unlike this song" : "Like this song — more similar music"}
+                aria-label="Favorite playing song" disabled={(!currentSong && !currentPreview) || playerActionBusy}><PlayerIcon name="thumbs-up" size={19} /></button>
+              <button className={playerDisliked ? "icon-button player-quick-action player-dislike-action is-less" : "icon-button player-quick-action player-dislike-action"}
+                type="button" onClick={() => void toggleDislikePlaying()} disabled={playerActionBusy}
+                aria-pressed={playerDisliked}
+                aria-label={playerDisliked ? "Clear dislike" : "Dislike playing song"}
+                title={playerDisliked ? "Clear dislike" : "Dislike — show less like this"}><PlayerIcon name="thumbs-down" size={19} /></button>
+              <button ref={playlistButtonRef} className="icon-button player-quick-action" type="button"
+                onClick={() => void openPlayerPlaylists()} disabled={(!currentSong && !currentPreview?.candidate) || playerActionBusy}
+                title={currentPreview ? "Download this preview and add it to a playlist" : "Add playing song to playlist"}
+                aria-label="Add playing song to playlist"><PlayerIcon name="list-plus" size={19} /></button>
+              <button className="icon-button player-quick-action" type="button"
+                onClick={() => void instantMixFromPlaying()} disabled={!currentSong || playerActionBusy}
+                title={currentSong ? "Instant mix from this song" : "Download Discovery preview to library first"}
+                aria-label="Instant mix from playing song"><PlayerIcon name="sparkles" size={19} /></button>
+              {canDownloadCurrent && (
+              <button className="icon-button player-quick-action player-download-action" type="button"
+                onClick={downloadPlayingTrack}
+                disabled={!currentSong && (!currentPreview?.candidate || ["queued", "searching", "downloading", "indexed", "existing"].includes(currentPreviewDownloadPhase ?? ""))}
+                title={currentPreview
+                  ? (currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing"
+                      ? "Already saved in library" : "Download this Discovery track to library")
+                  : "Download audio file to this computer"}
+                aria-label={currentPreview ? "Download playing Discovery track" : "Download playing song"}>
+                {currentPreview && (currentPreviewDownloadPhase === "indexed" || currentPreviewDownloadPhase === "existing") ? "✓"
+                  : currentPreview && ["queued", "searching", "downloading"].includes(currentPreviewDownloadPhase ?? "") ? "…"
+                  : <PlayerIcon name="download" size={19} />}
+              </button>
+              )}
               <button className="icon-button" type="button" onClick={() => setQueueOpen((value) => !value)} aria-label="Queue">☷ {activeQueue.length}</button>
               <span>🔊</span>
               <input className="volume-slider" type="range" min={0} max={1} step={0.01} value={volume} onChange={(event) => setVolume(Number(event.target.value))} aria-label="Volume" />
+              {playerActionMessage && <small className="player-action-tip" role="status">{playerActionMessage}</small>}
             </div>
           </footer>
+          <MobilePlayerPanel
+            open={mobileExpanded}
+            onClose={closeMobilePlayer}
+            title={activeTitle}
+            artist={activeArtist}
+            album={currentSong?.album}
+            cover={currentSong?.coverArt ? api.coverUrl(currentSong.coverArt, 600) : undefined}
+            isPreview={mode === "preview"}
+            playing={playing}
+            resolving={Boolean(previewResolving)}
+            currentTime={currentTime}
+            duration={duration}
+            queue={activeQueue.map((song) => ({
+              id: song.id, title: song.title ?? "Unknown title",
+              artist: song.artist ?? "Unknown artist", duration: song.duration,
+            }))}
+            index={activeIndex}
+            shuffle={shuffle}
+            repeat={repeat}
+            isFavorite={playerLiked}
+            isDisliked={playerDisliked}
+            busy={playerActionBusy}
+            feedback={playerActionMessage}
+            playbackError={previewError}
+            suspended={playlistPickerOpen || queueOpen}
+            onPlayPause={togglePlayback}
+            onPrevious={previous}
+            onNext={next}
+            onSeek={seek}
+            onShuffle={() => setShuffle((value) => !value)}
+            onRepeat={cycleRepeat}
+            onFavorite={() => void handleLikePlaying()}
+            onDislike={() => void toggleDislikePlaying()}
+            onPlaylist={() => void openPlayerPlaylists()}
+            onMix={() => void instantMixFromPlaying()}
+            downloadPhase={currentPreviewDownloadPhase}
+            showDownload={canDownloadCurrent}
+            onDownload={downloadPlayingTrack}
+            onQueue={() => setQueueOpen(true)}
+            onQueueItem={jumpToIndex}
+          />
         </>
       )}
     </PlayerContext.Provider>

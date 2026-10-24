@@ -2,6 +2,9 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import "./browser-cache-v8";
+import "./versionUpdate";
+import "./home-compact.css";
+
 import "./preview-request-budget-v10";
 import App from "./App";
 import { PlayerProvider } from "./Player";
@@ -21,6 +24,12 @@ import "./discovery-shelf-stability-v6.css";
 import "./player-clearance-v7.css";
 import "./sidebar-fixed-v8.css";
 import "./discovery-bad-source-v9.css";
+import "./discovery-fit.css";
+import "./mobile-shell.css";
+import "./mobile-home.css";
+import "./mobile-vinyl-system.css";
+import "./vinyl-unified.css";
+import "./vinyl-focus.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

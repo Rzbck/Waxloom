@@ -1,3 +1,4 @@
+import { prewarmDiscoveryAudio } from "./previewWarmCache";
 import type {
   Album,
   Artist,
@@ -178,25 +179,47 @@ async function prewarmYoutubePreviews(
   await Promise.all(workers);
 }
 
-function warmLibraryNavigation(): void {
-  // Warm only cheap library indexes. Never preload album tracks from local
-  // storage: album details are fetched on demand and then cached.
-  void loadAlbumsCached("newest", 120, 0).catch(() => undefined);
-  void loadArtistsCached().catch(() => undefined);
+
+// A slow Navidrome queue write must never let multiple snapshots compete
+// with streaming. Only the most recent pending snapshot is retained.
+type QueueSnapshot = { ids: string[]; current: string | null; position: number };
+let queuedSnapshot: QueueSnapshot | null = null;
+let activeQueueSave: Promise<void> | null = null;
+function coalescedQueueSave(ids: string[], current: string | null, position: number): Promise<{ ok: boolean }> {
+  queuedSnapshot = { ids: [...ids], current, position };
+  if (!activeQueueSave) {
+    activeQueueSave = (async () => {
+      let error: unknown = null;
+      while (queuedSnapshot) {
+        const snapshot = queuedSnapshot;
+        queuedSnapshot = null;
+        try {
+          await request<{ ok: boolean }>("/api/player/queue", {
+            method: "PUT",
+            body: JSON.stringify(snapshot),
+          });
+          error = null;
+        } catch (caught) {
+          error = caught;
+        }
+      }
+      if (error) throw error;
+    })().finally(() => { activeQueueSave = null; });
+  }
+  return activeQueueSave.then(() => ({ ok: true }));
 }
 
 export const api = {
-  health: async () => {
-    const value = await request<Health>("/api/health");
-    warmLibraryNavigation();
-    return value;
-  },
+  // Health checks must not silently start two heavy library-index queries
+  // alongside Home's essential shuffle and album calls.
+  health: () => request<Health>("/api/health"),
   navidromeHealth: () => request<IntegrationHealth>("/api/integrations/navidrome/health"),
   audiomuseHealth: () => request<IntegrationHealth>("/api/integrations/audiomuse/health"),
 
   albums: (type = "newest", size = 80, offset = 0) => loadAlbumsCached(type, size, offset),
   artists: () => loadArtistsCached(),
   randomSongs: (size = 50) => request<ListResponse<Song>>(`/api/library/random?size=${size}`),
+  recentSongs: (size = 24) => request<ListResponse<Song>>(`/api/library/recent-tracks?size=${size}`, { cache: "no-store" }),
   album: (id: string) => loadAlbumDetailCached(id),
   artist: (id: string) => request<Artist>(`/api/artists/${encodeURIComponent(id)}`),
   song: (id: string) => request<Song>(`/api/songs/${encodeURIComponent(id)}`),
@@ -233,12 +256,10 @@ export const api = {
   deletePlaylist: (id: string) => request<{ ok: boolean }>(`/api/playlists/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   playQueue: () => request<PlayQueueResponse>("/api/player/queue"),
-  savePlayQueue: (ids: string[], current: string | null, position = 0) => request<{ ok: boolean }>("/api/player/queue", {
-    method: "PUT",
-    body: JSON.stringify({ ids, current, position }),
-  }),
+  savePlayQueue: (ids: string[], current: string | null, position = 0) =>
+    coalescedQueueSave(ids, current, position),
 
-  localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack>>(
+  localSimilar: (songId: string, count = 40) => request<ListResponse<AudioMuseSimilarTrack> & { source?: "audiomuse" | "library_fallback" }>(
     `/api/discovery/local-similar/${encodeURIComponent(songId)}?count=${count}`,
   ),
   discover: (seedSongIds: string[], undergroundWeight = 0.75, resultCount = 50) => request<DiscoveryResponse>("/api/discovery/external", {
@@ -249,7 +270,8 @@ export const api = {
       result_count: resultCount,
     }),
   }),
-  discoveryFeed: () => request<DiscoveryFeedResponse>("/api/discovery/feed"),
+  prefetchDiscoveryAudio: prewarmDiscoveryAudio,
+  discoveryFeed: (page = 0) => request<DiscoveryFeedResponse>("/api/discovery/feed?page=" + Math.max(0, Math.floor(page))),
   discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
   refreshDiscoveryFeed: () => request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
   discoveryFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => request<{ ok: boolean; likes: number; dislikes: number; total: number }>("/api/discovery/feedback", {
@@ -261,6 +283,14 @@ export const api = {
       tags: candidate.tags ?? [],
       value,
     }),
+  }),
+
+  discoveryTrackFeedback: (
+    recordingMbid: string, artist: string, title: string,
+    value: -1 | 0 | 1, tags: string[] = [],
+  ) => request<{ ok: boolean; likes: number; dislikes: number; total: number }>("/api/discovery/feedback", {
+    method: "POST",
+    body: JSON.stringify({ recording_mbid: recordingMbid, artist, title, tags, value }),
   }),
 
   youtubeRuntime: () => request<YouTubeRuntime>("/api/imports/youtube/runtime"),
@@ -287,6 +317,11 @@ export const api = {
   }),
   scanStatus: () => request<Record<string, unknown>>("/api/imports/scan-status"),
 
+  // The client retains track identity across Home Screen app suspensions, but
+  // Discovery recommendations rotate every 20 minutes. Send identity metadata
+  // so the API can rebuild a *missing* preview without accepting arbitrary URLs.
+  previewStreamUrl: (id: string, artist: string, title: string) =>
+    `/api/discovery/previews/${encodeURIComponent(id)}?${new URLSearchParams({ artist, title })}`,
   streamUrl: (songId: string) => `/api/media/stream/${encodeURIComponent(songId)}`,
   coverUrl: (coverId?: string, size = 300) => mediaCoverUrl(coverId, size),
 };

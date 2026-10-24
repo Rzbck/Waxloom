@@ -1,0 +1,7 @@
+.home-quickbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:0 0 6px; }
+.home-quickbar .primary-action, .home-quickbar .secondary-action { min-height:34px; padding:7px 13px; font-size:.78rem; }
+.home-quickbar-status { margin-left:auto; display:flex; align-items:center; gap:7px; font-size:.7rem; color:#99929e; }
+.home-quickbar-status .dot { flex:none; }
+#waxloom-update-banner { position:fixed; bottom:110px; left:50%; transform:translateX(-50%); z-index:9999; display:flex; align-items:center; gap:12px; padding:9px 11px; background:#201b28; border:1px solid #78698b; border-radius:9px; color:#e9e1f1; box-shadow:0 8px 22px #0009; font-size:12px; white-space:nowrap; }
+#waxloom-update-banner button { background:#75618e; color:#fff; border:0; border-radius:6px; padding:6px 10px; cursor:pointer; }
+@media(max-width:820px){ .home-quickbar { gap:6px; } .home-quickbar .primary-action,.home-quickbar .secondary-action { flex:1; } .home-quickbar-status { display:none; } #waxloom-update-banner { bottom:155px; } }
