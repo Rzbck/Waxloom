@@ -30,6 +30,7 @@ import "./mobile-home.css";
 import "./mobile-vinyl-system.css";
 import "./vinyl-unified.css";
 import "./vinyl-focus.css";
+import "./music-metadata.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -1,7 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "./api";
-import { albumDisplayTitle } from "./albumDisplay";
+import { albumDisplayInfo, knownMusicValue } from "./albumDisplay";
 import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
 import { MobileNavigation } from "./MobileNavigation";
@@ -35,10 +35,6 @@ function formatDuration(totalSeconds?: number): string {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${minutes}:${String(seconds).padStart(2, "0")}`;
-}
-
-function itemName(album: Album): string {
-  return albumDisplayTitle(album, album.song?.[0]);
 }
 
 function statusLabel(status?: string): string {
@@ -377,6 +373,8 @@ export default function App() {
     return navItems.find((item) => item.id === view)?.label ?? "Waxloom";
   }, [view, searchQuery]);
 
+  const selectedAlbumInfo = selectedAlbum ? albumDisplayInfo(selectedAlbum, selectedAlbum.song?.[0]) : null;
+
   function renderAlbumGrid(items: Album[]) {
     if (!items.length) return <p className="muted">No albums in this collection.</p>;
     return (
@@ -525,7 +523,16 @@ export default function App() {
                 </div>
                 <section className="detail-hero">
                   <div className="detail-cover">{selectedAlbum.coverArt ? <img src={api.coverUrl(selectedAlbum.coverArt, 600)} alt="" /> : <span>◫</span>}</div>
-                  <div><p className="eyebrow">Album</p><h2>{itemName(selectedAlbum)}</h2><p className="detail-meta">{selectedAlbum.artist ?? "Unknown artist"} · {selectedAlbum.year ?? "—"} · {selectedAlbum.genre ?? "Unknown genre"}</p><p className="muted">{selectedAlbum.song?.length ?? selectedAlbum.songCount ?? 0} tracks · {formatDuration(selectedAlbum.duration)}</p><div className="button-row"><button className="primary-action" type="button" onClick={() => player.playSongs(selectedAlbum.song ?? [], 0)}>▶ Play album</button><button className="secondary-action" type="button" onClick={() => (selectedAlbum.song ?? []).forEach(player.addToQueue)}>+ Add to queue</button></div></div>
+                  <div><p className="eyebrow">{selectedAlbumInfo?.primaryKind ?? "Album"}</p>
+                    <h2>{selectedAlbumInfo?.primary}</h2>
+                    <div className="waxloom-detail-identity">
+                      <p><span>Artist</span><strong>{selectedAlbumInfo?.artist}</strong></p>
+                      <p><span>Album</span><strong>{selectedAlbumInfo?.album ?? "Not tagged"}</strong></p>
+                      {selectedAlbumInfo?.track && <p><span>Track</span><strong>{selectedAlbumInfo.track}</strong></p>}
+                    </div>
+                    <p className="muted">{selectedAlbum.song?.length ?? selectedAlbum.songCount ?? 0} tracks · {formatDuration(selectedAlbum.duration)}
+                      {selectedAlbum.year ? ` · ${selectedAlbum.year}` : ""}
+                      {knownMusicValue(selectedAlbum.genre) ? ` · ${selectedAlbum.genre}` : ""}</p><div className="button-row"><button className="primary-action" type="button" onClick={() => player.playSongs(selectedAlbum.song ?? [], 0)}>▶ Play album</button><button className="secondary-action" type="button" onClick={() => (selectedAlbum.song ?? []).forEach(player.addToQueue)}>+ Add to queue</button></div></div>
                 </section>
                 <SongTable songs={selectedAlbum.song ?? []} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
               </>
@@ -552,7 +559,7 @@ export default function App() {
                 <div className="detail-toolbar"><button className="secondary-action" type="button" onClick={() => setSelectedArtist(null)}>← Artists</button><button className={starOverrides[selectedArtist.id] ?? Boolean(selectedArtist.starred) ? "secondary-action active-star" : "secondary-action"} type="button" onClick={() => void toggleStar(selectedArtist)}>★ Favorite</button></div>
                 <section className="detail-hero artist-detail-hero">
                   <div className="artist-avatar artist-avatar-large">{selectedArtist.coverArt ? <img src={api.coverUrl(selectedArtist.coverArt, 500)} alt="" /> : <span>{selectedArtist.name.slice(0, 1).toUpperCase()}</span>}</div>
-                  <div><p className="eyebrow">Artist</p><h2>{selectedArtist.name}</h2><p className="muted">{selectedArtist.album?.length ?? selectedArtist.albumCount ?? 0} albums</p></div>
+                  <div><p className="eyebrow">Artist</p><h2>{knownMusicValue(selectedArtist.name) ?? "Artist not tagged"}</h2><p className="muted">{selectedArtist.album?.length ?? selectedArtist.albumCount ?? 0} albums</p></div>
                 </section>
                 {renderAlbumGrid(selectedArtist.album ?? [])}
               </>

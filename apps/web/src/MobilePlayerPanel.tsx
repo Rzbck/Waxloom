@@ -187,7 +187,7 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
         </button>
         <div className="waxloom-mobile-player-head-title">
           <strong>NOW PLAYING</strong>
-          <span>{isPreview ? "Discovery preview" : album || "Your music"}</span>
+          <span>{isPreview ? "Discovery preview" : `Album · ${album || "Not tagged"}`}</span>
         </div>
         <span className="waxloom-mobile-player-head-spacer" aria-hidden="true" />
       </header>
@@ -199,8 +199,9 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
       </div>
 
       <div className="waxloom-mobile-player-metadata">
+        <span className="waxloom-mobile-metadata-kind">TRACK</span>
         <MarqueeText value={title} className="waxloom-mobile-song-title" />
-        <MarqueeText value={artist} className="waxloom-mobile-song-artist" />
+        <MarqueeText value={`Artist · ${artist}`} className="waxloom-mobile-song-artist" />
       </div>
 
       <div className="waxloom-mobile-player-progress">

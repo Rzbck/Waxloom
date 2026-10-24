@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { api } from "./api";
+import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
 import { usePlayer } from "./Player";
 import type { Album, Song } from "./types";
 import { VinylAlbums } from "./VinylRack";
@@ -68,15 +69,16 @@ export function MobileHome({
               <button key={song.id} className={player.currentSong?.id === song.id
                   ? "waxloom-home-track-card is-current" : "waxloom-home-track-card"} type="button"
                 onClick={() => onPlayRecent(index)}
-                title={`Play ${song.title ?? "track"}`}>
+                title={`Track: ${songDisplayTitle(song)}; Artist: ${songDisplayArtist(song)}; Album: ${songDisplayAlbum(song) ?? "Not tagged"}`}>
                 <span className="waxloom-home-track-cover">
                   {(song.coverArt || song.albumId) ? <img loading="lazy" src={api.coverUrl(song.coverArt || song.albumId, 250)} alt=""
                     onError={(event) => { event.currentTarget.hidden = true; }} /> : null}
                   <span className="waxloom-home-track-note" aria-hidden="true">♫</span>
                   <span className="waxloom-home-track-play" aria-hidden="true">▶</span>
                 </span>
-                <strong>{song.title ?? "Unknown track"}</strong>
-                <small>{song.artist ?? "Unknown artist"}</small>
+                <strong>{songDisplayTitle(song)}</strong>
+                <small>Artist · {songDisplayArtist(song)}</small>
+                <small className="waxloom-home-track-album">Album · {songDisplayAlbum(song) ?? "Not tagged"}</small>
               </button>
             ))}
           </div>

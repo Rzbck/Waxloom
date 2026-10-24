@@ -2,11 +2,11 @@ import { useCallback, useEffect, useId, useRef, useState, type MouseEvent as Rea
 import { api } from "./api";
 import { MarqueeText } from "./MobilePlayerPanel";
 import { usePlayer } from "./Player";
-import { albumDisplaySubtitle, albumDisplayTitle, findPlayingAlbumIndex, recentTracksByAlbum } from "./albumDisplay";
+import { albumDisplayInfo, findPlayingAlbumIndex, recentTracksByAlbum } from "./albumDisplay";
 import type { Album, Song } from "./types";
 
 export function albumTitle(album: Album): string {
-  return album.name ?? album.album ?? album.title ?? "Unknown album";
+  return albumDisplayInfo(album, album.song?.[0]).primary;
 }
 
 /**
@@ -22,7 +22,7 @@ export function VinylRack({
   label: string;
   variant?: "album" | "discovery" | "track" | "artist" | "playlist";
   contentKey?: string;
-  records?: { title: string; artist?: string }[];
+  records?: { title: string; artist?: string; detail?: string }[];
   onSelectionChange?: (index: number) => void;
   /** Discovery only: playback follows the selected recording, including queue Next/Previous. */
   followIndex?: number;
@@ -339,6 +339,7 @@ export function VinylRack({
         <div className="waxloom-vinyl-selected" title={current?.title ?? ""} aria-live="off">
           <strong><MarqueeText key={current?.title ?? id} value={current?.title ?? "Swipe through records"} /></strong>
           <small>{current?.artist ?? ""}</small>
+          {current?.detail && <small className="waxloom-vinyl-selected-detail">{current.detail}</small>}
         </div>
         <div className="waxloom-vinyl-arrows">
           <button type="button" onClick={() => shift(-1)} disabled={selectedIndex === 0} aria-label="Previous record">&larr;</button>
@@ -380,37 +381,43 @@ export function VinylAlbums({
           <VinylRack count={batch.length} contentKey={batch[0]?.id}
             followIndex={findPlayingAlbumIndex(batch, player.currentSong)}
             label={label ?? "Browse albums in the vinyl crate"}
-            records={batch.map((album) => ({
-              title: albumDisplayTitle(album, hinted.get(album.id)),
-              artist: albumDisplaySubtitle(album, hinted.get(album.id)),
-            }))}>
-            {batch.map((album, index) => (
-              <article className={player.currentSong?.albumId === album.id
-                  ? "waxloom-vinyl-sleeve is-current" : "waxloom-vinyl-sleeve"}
-                  aria-current={player.currentSong?.albumId === album.id ? "true" : undefined}
-                  key={album.id}
-                aria-label={`${albumDisplayTitle(album, hinted.get(album.id))} — ${album.artist ?? "Unknown artist"}`}>
+            records={batch.map((album) => {
+              const meta = albumDisplayInfo(album, hinted.get(album.id));
+              return { title: meta.primary, artist: `Artist · ${meta.artist}`,
+                detail: `${meta.detailLabel} · ${meta.detail}` };
+            })}>
+            {batch.map((album, index) => {
+              const meta = albumDisplayInfo(album, hinted.get(album.id));
+              const current = player.currentSong?.albumId === album.id;
+              const description = `${meta.primaryKind}: ${meta.primary}; Artist: ${meta.artist}; ${meta.detailLabel}: ${meta.detail}`;
+              return (
+              <article className={current ? "waxloom-vinyl-sleeve is-current" : "waxloom-vinyl-sleeve"}
+                aria-current={current ? "true" : undefined} key={album.id}
+                aria-label={description}>
                 <button className="waxloom-vinyl-face" type="button"
-                  onClick={() => onOpenAlbum(album)}
-                  title={`Open ${albumDisplayTitle(album, hinted.get(album.id))}`}>
+                  onClick={() => onOpenAlbum(album)} title={description}>
                   <span className="waxloom-vinyl-fallback" aria-hidden="true">
-                    {albumDisplayTitle(album, hinted.get(album.id)).slice(0, 1).toUpperCase()}
+                    {meta.primary.slice(0, 1).toUpperCase()}
                   </span>
                   {album.coverArt && <img src={api.coverUrl(album.coverArt, 350)}
                     loading={index < 2 ? "eager" : "lazy"} alt=""
                     onError={(event) => { event.currentTarget.hidden = true; }} />}
                   <span className="waxloom-vinyl-shine" aria-hidden="true" />
+                  <span className="waxloom-vinyl-kind" aria-hidden="true">{meta.primaryKind}</span>
                 </button>
                 <button className="waxloom-vinyl-play" type="button"
-                  title={`Play ${albumDisplayTitle(album, hinted.get(album.id))}`}
-                  aria-label={`Play album ${albumDisplayTitle(album, hinted.get(album.id))}`}
+                  title={`Play ${meta.primary}`} aria-label={`Play ${meta.primaryKind.toLowerCase()} ${meta.primary}`}
                   onClick={() => onPlayAlbum(album)}>▶</button>
                 <div className="waxloom-vinyl-label">
-                  <strong title={albumDisplayTitle(album, hinted.get(album.id))}>{albumDisplayTitle(album, hinted.get(album.id))}</strong>
-                  <small title={albumDisplaySubtitle(album, hinted.get(album.id))}>{albumDisplaySubtitle(album, hinted.get(album.id))}</small>
+                  <strong title={meta.primary}>{meta.primary}</strong>
+                  <small title={`Artist: ${meta.artist}`}>Artist · {meta.artist}</small>
+                  <small className="waxloom-vinyl-detail" title={`${meta.detailLabel}: ${meta.detail}`}>
+                    {meta.detailLabel} · {meta.detail}
+                  </small>
                 </div>
               </article>
-            ))}
+              );
+            })}
           </VinylRack>
         </section>
       ))}

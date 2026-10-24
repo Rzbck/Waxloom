@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
 import { PlayerIcon } from "./MobilePlayerPanel";
 import { usePlayer } from "./Player";
 import type { Song } from "./types";
@@ -57,16 +58,18 @@ export function VinylSongs({
         followIndex={followingIndex}
         variant="track"
         label="Swipe through records. Tap a cover to play. Additional actions are in the full player or Options."
-        records={selected.map((song) => ({ title: song.title ?? "Unknown track", artist: song.artist }))}
+        records={selected.map((song) => ({ title: songDisplayTitle(song),
+          artist: `Artist · ${songDisplayArtist(song)}`,
+          detail: `Album · ${songDisplayAlbum(song) ?? "Not tagged"}` }))}
         onSelectionChange={(index) => { setSelectedIndex(index); setOptionsOpen(false); }}
       >
         {selected.map((song, index) => {
           const playing = player.currentSong?.id === song.id;
           return (
             <article className={playing ? "waxloom-vinyl-sleeve waxloom-track-sleeve is-current" : "waxloom-vinyl-sleeve waxloom-track-sleeve"}
-              key={`${song.id}-${index}`} aria-label={`${song.title ?? "Track"} by ${song.artist ?? "Unknown artist"}`}>
+              key={`${song.id}-${index}`} aria-label={`Track: ${songDisplayTitle(song)}; Artist: ${songDisplayArtist(song)}; Album: ${songDisplayAlbum(song) ?? "Not tagged"}`}>
               <button className="waxloom-track-face" type="button" onClick={() => start(index)}
-                aria-label={`Play ${song.title ?? "track"}`} title={song.title ?? "Track"}>
+                aria-label={`Play track ${songDisplayTitle(song)}`} title={songDisplayTitle(song)}>
                 <span className="waxloom-track-fallback" aria-hidden="true"><PlayerIcon name="music" size={44} /></span>
                 {(song.coverArt || song.albumId) && (
                   <img src={api.coverUrl(song.coverArt || song.albumId, 300)} loading={index < 4 ? "eager" : "lazy"} alt=""
@@ -77,8 +80,11 @@ export function VinylSongs({
                 </span>
               </button>
               <div className="waxloom-track-copy">
-                <strong title={song.title ?? "Unknown title"}>{song.title ?? "Unknown title"}</strong>
-                <small title={song.artist ?? "Unknown artist"}>{song.artist ?? "Unknown artist"}</small>
+                <strong title={`Track: ${songDisplayTitle(song)}`}>{songDisplayTitle(song)}</strong>
+                <small title={`Artist: ${songDisplayArtist(song)}`}>Artist · {songDisplayArtist(song)}</small>
+                <small className="waxloom-track-album" title={`Album: ${songDisplayAlbum(song) ?? "Not tagged"}`}>
+                  Album · {songDisplayAlbum(song) ?? "Not tagged"}
+                </small>
               </div>
             </article>
           );
