@@ -1,3 +1,11 @@
+## 2026-10-24 — Fast album opening, session summary catalog and procedural vinyl art
+
+- Owner wants maximum perceived loading speed inspired by their FitBoyRepack lightweight catalog/lazy detail pattern. Read `docs/INSTANT_ARTWORK_PERFORMANCE_20261024.md`.
+- Baseline 20 real covers: 11 were identical 69,228-byte Navidrome stock placeholders at native 1024px even when asking 160px; some cold requests were slow. New `CoverArtwork.tsx` renders deterministic vinyl-styled CSS immediately, recognizes the stock 1024px placeholder with three sampled colors but preserves legitimate hi-res images. Thumbnails reduced from 320→160px; 4 first high priority, rest lazy/async.
+- Album detail now opens from summary immediately with deferred song list, epoch guarded (rapid navigation safe), and small intentional hover prefetch using existing promise cache. 8-minute sessionStorage catalog summaries enable instant warm revisit/reload. No server, DB, service worker or paid API changes.
+- Synthetic browser at 1400ms API delay showed 9.4ms album summary display, then real track content arrived separately; warm session snapshot also appears while album list API response is deliberately delayed. Dedicated source branch `perf/instant-covers-20261024` follows deployed `b54e8c2`.
+- Full browser/UI/CI production validation and rollback state logged in the report after tests.
+
 ## 2026-10-24 — Albums/Artists/Favorites responsive vertical grids
 
 - User screenshots: repeated batch carousels `More records`, truncated artist and album captions, literal `&nearr;`, Favorites cluttered by artists/albums when only tracks are wanted. Base source exact live Web `7dcd836`; dedicated worktree/branch `feat/library-vertical-grids-20261024`.

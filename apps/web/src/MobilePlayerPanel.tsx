@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { CoverArtwork } from "./CoverArtwork";
 
 type PlayerIconName =
   | "play" | "pause" | "previous" | "next" | "heart" | "list-plus"
@@ -86,6 +87,8 @@ export type MobilePlayerPanelProps = {
   artist: string;
   album?: string;
   cover?: string;
+  coverId?: string;
+  coverSeed?: string;
   isPreview: boolean;
   playing: boolean;
   resolving: boolean;
@@ -125,7 +128,7 @@ function timeLabel(seconds: number): string {
 
 export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
   const {
-    open, suspended, onClose, title, artist, album, cover, isPreview, playing, resolving,
+    open, suspended, onClose, title, artist, album, cover, coverId, coverSeed, isPreview, playing, resolving,
     currentTime, duration, queue, index, shuffle, repeat, isFavorite, isDisliked, busy,
     feedback, playbackError, onPlayPause, onPrevious, onNext, onSeek,
     onShuffle, onRepeat, onFavorite, onDislike, onPlaylist, onMix, downloadPhase, showDownload, onDownload, onQueue, onQueueItem,
@@ -194,7 +197,8 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
 
       <div className="waxloom-mobile-player-art-wrap">
         <div className="waxloom-mobile-player-art">
-          {cover ? <img src={cover} alt="" /> : <PlayerIcon name="music" size={72} />}
+          {isPreview ? (cover ? <img src={cover} alt="" /> : <PlayerIcon name="music" size={72} />)
+            : <CoverArtwork coverId={coverId} seed={coverSeed || title} size={320} priority />}
         </div>
       </div>
 

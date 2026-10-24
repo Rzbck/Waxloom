@@ -34,6 +34,7 @@ import "./music-metadata.css";
 import "./home-radio.css";
 import "./vinyl-center-motion.css";
 import "./library-grids.css";
+import "./instant-artwork.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

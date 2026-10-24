@@ -1,11 +1,44 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "./api";
+import { CoverArtwork } from "./CoverArtwork";
 import { albumDisplayInfo, knownMusicValue, recentTracksByAlbum, songDisplayArtist, songDisplayTitle } from "./albumDisplay";
 import { PlayerIcon } from "./MobilePlayerPanel";
 import { usePlayer } from "./Player";
 import type { Album, Artist, Song } from "./types";
 
 const BATCH_SIZE = 48;
+
+/** A branded artwork grid in the very first browser frame, even on a cold
+ * Navidrome request. This is a visual loading state, NOT fabricated albums. */
+export function LibraryGridSkeleton({ label = "Loading music", count = 12 }: {
+  label?: string; count?: number;
+}) {
+  return (
+    <div className="waxloom-library-grid" role="status" aria-label={label}>
+      {Array.from({ length: count }, (_, i) => (
+        <div className="waxloom-grid-card waxloom-grid-placeholder" key={i} aria-hidden="true">
+          <div className="waxloom-grid-artwork"><CoverArtwork seed={`waiting:${i}`} /></div>
+          <div className="waxloom-grid-caption">
+            <i /><i />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+let hoveredAlbumTimer: number | null = null;
+function scheduleAlbumDetail(id: string) {
+  if (hoveredAlbumTimer !== null) window.clearTimeout(hoveredAlbumTimer);
+  hoveredAlbumTimer = window.setTimeout(() => {
+    hoveredAlbumTimer = null;
+    void api.album(id).catch(() => undefined);
+  }, 110);
+}
+function cancelAlbumPrefetch() {
+  if (hoveredAlbumTimer !== null) window.clearTimeout(hoveredAlbumTimer);
+  hoveredAlbumTimer = null;
+}
 
 /**
  * Infinite vertical reveal. Only a few dozen DOM nodes exist initially,
@@ -81,7 +114,8 @@ export function AlbumCoverGrid({
 }) {
   const player = usePlayer();
   const hinted = recentTracksByAlbum(trackHints);
-  if (!albums.length && !loadingMore && !hasMore) return <p className="muted">No albums in this collection.</p>;
+  if (!albums.length && loadingMore) return <LibraryGridSkeleton label="Loading albums" />;
+  if (!albums.length && !hasMore) return <p className="muted">No albums in this collection.</p>;
   return (
     <ProgressiveGrid items={albums} identity={identity} ariaLabel="Albums grid"
       getKey={(album) => album.id} onEndReached={onEndReached} hasMore={hasMore} loadingMore={loadingMore}
@@ -93,11 +127,13 @@ export function AlbumCoverGrid({
             <div className="waxloom-grid-artwork">
               <span className="waxloom-grid-record" aria-hidden="true" />
               <button className="waxloom-grid-cover" type="button" title={`Open ${info.primary} by ${info.artist}`}
-                aria-label={`Open ${info.primary} by ${info.artist}`} onClick={() => onOpenAlbum(album)}>
-                <span className="waxloom-grid-fallback" aria-hidden="true">{info.primary.slice(0, 1).toUpperCase()}</span>
-                {album.coverArt && <img src={api.coverUrl(album.coverArt, 320)}
-                  loading={index < 8 ? "eager" : "lazy"} decoding="async" alt=""
-                  onError={(event) => { event.currentTarget.hidden = true; }} />}
+                aria-label={`Open ${info.primary} by ${info.artist}`} onClick={() => onOpenAlbum(album)}
+                onPointerEnter={(event) => { if (event.pointerType === "mouse") scheduleAlbumDetail(album.id); }}
+                onPointerLeave={cancelAlbumPrefetch}
+                onFocus={() => scheduleAlbumDetail(album.id)}
+                onBlur={cancelAlbumPrefetch}>
+                <CoverArtwork coverId={album.coverArt} seed={album.id}
+                  size={160} priority={index < 4} />
               </button>
               <button className="waxloom-grid-play" type="button" aria-label={`Play ${info.primary}`}
                 title={`Play ${info.primary}`} onClick={() => onPlayAlbum(album)}>
@@ -136,10 +172,8 @@ export function ArtistCoverGrid({
               <button className="waxloom-grid-cover" type="button"
                 title={`Open artist ${name}`} aria-label={`Open artist ${name}`}
                 onClick={() => onOpen(artist)}>
-                <span className="waxloom-grid-fallback" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
-                {artist.coverArt && <img src={api.coverUrl(artist.coverArt, 320)}
-                  loading={index < 8 ? "eager" : "lazy"} decoding="async" alt=""
-                  onError={(event) => { event.currentTarget.hidden = true; }} />}
+                <CoverArtwork coverId={artist.coverArt} seed={artist.id}
+                  size={160} priority={index < 4} />
               </button>
             </div>
             <div className="waxloom-grid-caption">
@@ -180,10 +214,8 @@ export function FavoriteTrackGrid({
                 title={`Play ${name} by ${artist}`}
                 aria-label={`Play ${name} by ${artist}`}
                 onClick={() => player.playSongs(songs, index, { ordered: true })}>
-                <span className="waxloom-grid-fallback" aria-hidden="true"><PlayerIcon name="music" size={42} /></span>
-                {(song.coverArt || song.albumId) && <img src={api.coverUrl(song.coverArt || song.albumId, 320)}
-                  loading={index < 8 ? "eager" : "lazy"} decoding="async" alt=""
-                  onError={(event) => { event.currentTarget.hidden = true; }} />}
+                <CoverArtwork coverId={song.coverArt || song.albumId}
+                  seed={song.albumId || song.id} size={160} priority={index < 4} />
               </button>
               <span className="waxloom-grid-track-indicator" aria-hidden="true">
                 <PlayerIcon name={active && player.playing ? "pause" : "play"} size={16} />

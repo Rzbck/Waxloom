@@ -13,6 +13,7 @@ import {
 
 import { api } from "./api";
 import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
+import { CoverArtwork } from "./CoverArtwork";
 import { compactPlayedHistory, nextFromQueue, radioGenre, selectRadioTracks } from "./smartAutoplay";
 import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
@@ -1184,8 +1185,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
                 onClick={() => setMobileExpanded(true)}
                 aria-label={`Open full-screen player for ${activeTitle}`}>
                 <span className="waxloom-mobile-mini-cover">
-                  {currentSong?.coverArt
-                    ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" />
+                  {mode === "navidrome" && currentSong
+                    ? <CoverArtwork coverId={currentSong.coverArt || currentSong.albumId}
+                        seed={currentSong.albumId || currentSong.id} size={160} priority />
                     : <PlayerIcon name="music" size={25} />}
                 </span>
                 <span className="waxloom-mobile-mini-copy">
@@ -1214,7 +1216,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </div>
             <div className="player-track">
               <div className="player-cover">
-                {currentSong?.coverArt ? <img src={api.coverUrl(currentSong.coverArt, 120)} alt="" /> : <span>{mode === "preview" ? "◎" : "♪"}</span>}
+                {mode === "navidrome" && currentSong ? <CoverArtwork coverId={currentSong.coverArt || currentSong.albumId} seed={currentSong.albumId || currentSong.id} size={160} priority /> : <span>{mode === "preview" ? "◎" : "♪"}</span>}
               </div>
               <div className="player-track-copy">
                 <strong>{activeTitle}</strong>
@@ -1295,6 +1297,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             artist={activeArtist}
             album={currentSong ? (songDisplayAlbum(currentSong) ?? undefined) : undefined}
             cover={currentSong?.coverArt ? api.coverUrl(currentSong.coverArt, 600) : undefined}
+            coverId={currentSong?.coverArt || currentSong?.albumId}
+            coverSeed={currentSong?.albumId || currentSong?.id || activeTitle}
             isPreview={mode === "preview"}
             playing={playing}
             resolving={Boolean(previewResolving)}

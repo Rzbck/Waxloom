@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent } from "react";
 import { api } from "./api";
+import { CoverArtwork } from "./CoverArtwork";
 import { MarqueeText } from "./MobilePlayerPanel";
 import { usePlayer } from "./Player";
 import { albumDisplayInfo, findPlayingAlbumIndex, recentTracksByAlbum } from "./albumDisplay";
@@ -382,12 +383,8 @@ export function VinylAlbums({
                 aria-label={description}>
                 <button className="waxloom-vinyl-face" type="button"
                   onClick={() => onOpenAlbum(album)} title={description}>
-                  <span className="waxloom-vinyl-fallback" aria-hidden="true">
-                    {meta.primary.slice(0, 1).toUpperCase()}
-                  </span>
-                  {album.coverArt && <img src={api.coverUrl(album.coverArt, 350)}
-                    loading={index < 2 ? "eager" : "lazy"} alt=""
-                    onError={(event) => { event.currentTarget.hidden = true; }} />}
+                  <CoverArtwork coverId={album.coverArt} seed={album.id}
+                    size={160} priority={index < 3} />
                   <span className="waxloom-vinyl-shine" aria-hidden="true" />
                   <span className="waxloom-vinyl-kind" aria-hidden="true">{meta.primaryKind}</span>
                 </button>

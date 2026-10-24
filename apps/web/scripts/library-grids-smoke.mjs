@@ -23,7 +23,7 @@ const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const checks = [];
 const failures = [];
 const errors = [];
-const count = { albums: [], artists: 0, favorites: 0, streams: 0, writes: 0 };
+const count = { albums: [], artists: 0, favorites: 0, streams: 0, writes: 0, covers: [] };
 const check = (condition, message) => { checks.push(message); if (!condition) failures.push(message); };
 const json = (requestId, payload, status = 200) => rpc("Fetch.fulfillRequest", {
   requestId, responseCode: status, responseHeaders: [{ name: "Content-Type", value: "application/json" }],
@@ -35,6 +35,7 @@ const albums = Array.from({ length: 171 }, (_, i) => ({
   artist: i === 0 ? "The Artist With a Particularly Long Name" : "Album Artist " + i,
   songCount: i % 7 === 0 ? 1 : 8,
   duration: 1640,
+  coverArt: i === 0 ? "qa-stock-art" : i === 1 ? "qa-real-art" : undefined,
 }));
 const artists = Array.from({ length: 1476 }, (_, i) => ({
   id: "qa-grid-artist-" + i,
@@ -69,7 +70,9 @@ ws.onmessage = async ({ data }) => {
       const offset = Number(parsed.searchParams.get("offset") || 0);
       const size = Number(parsed.searchParams.get("size") || 80);
       const mode = parsed.searchParams.get("type");
+      const seenInitial = count.albums.some((item) => item.offset === 0 && item.mode === mode);
       count.albums.push({ offset, size, mode });
+      if (seenInitial && offset === 0) await wait(1400); // Cold network after reload, warm session snapshot.
       await json(requestId, { items: albums.slice(offset, offset + size), count: Math.min(size, albums.length - offset) });
     } else if (path === "/api/library/artists") {
       count.artists++;
@@ -84,6 +87,7 @@ ws.onmessage = async ({ data }) => {
       }
     } else if (path.startsWith("/api/albums/")) {
       const album = albums.find((item) => item.id === decodeURIComponent(path.slice("/api/albums/".length)));
+      if (album?.id === "qa-grid-album-0") await wait(1400);
       await json(requestId, { ...(album || albums[0]), song: [{ id: "qa-grid-played", title: "QA detail song", artist: "Synthetic Artist", duration: 61 }] });
     } else if (path.startsWith("/api/artists/")) {
       const artist = artists.find((item) => item.id === decodeURIComponent(path.slice("/api/artists/".length)));
@@ -92,6 +96,16 @@ ws.onmessage = async ({ data }) => {
       await json(requestId, { items: favoriteSongs.slice(0, 2), count: 2 });
     } else if (path === "/api/library/random") {
       await json(requestId, { items: favoriteSongs.slice(0, 40), count: 40 });
+    } else if (path.startsWith("/api/media/cover/")) {
+      const id=decodeURIComponent(path.slice("/api/media/cover/".length));
+      count.covers.push({id,size:parsed.searchParams.get("size")});
+      const svg = id === "qa-stock-art"
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" fill="#000000"/><rect x="510" y="254" width="5" height="5" fill="#0058d3"/><rect x="510" y="510" width="5" height="5" fill="#22211d"/></svg>'
+        : '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024"><rect width="1024" height="1024" fill="#e84383"/></svg>';
+      await wait(400);
+      await rpc("Fetch.fulfillRequest",{requestId,responseCode:200,
+        responseHeaders:[{name:"Content-Type",value:"image/svg+xml"}],
+        body:Buffer.from(svg).toString("base64")});
     } else if (path.startsWith("/api/media/stream/")) {
       count.streams++;
       await rpc("Fetch.fulfillRequest", { requestId, responseCode: 200,
@@ -112,7 +126,11 @@ ws.onmessage = async ({ data }) => {
     } else {
       await json(requestId, { items: [], count: 0, songs: [], artists: [], albums: [] });
     }
-  } catch (error) { errors.push("Fetch mock " + String(error)); }
+  } catch (error) {
+    // Reload / rapid navigation legitimately cancels slow artwork requests.
+    // CDP reports those aborts as Invalid InterceptionId: not app errors.
+    if (!String(error).includes("Invalid InterceptionId")) errors.push("Fetch mock " + String(error));
+  }
 };
 const nav = async (name) => {
   await evaluate('([...document.querySelectorAll(".sidebar .nav-item")].find(x=>x.textContent.trim()===' + JSON.stringify(name) + ')||null)?.click()');
@@ -140,6 +158,14 @@ try {
   check(!firstAlbums.hasMoreButtons, "No manual More records or More artists sections");
   check(count.albums[0]?.offset === 0 && count.albums[0]?.size === 80,
     "Initial albums must fetch first 80 only, not the entire library");
+  const generated = await evaluate('(()=>{const covers=[...document.querySelectorAll(".waxloom-library-grid .waxloom-generated-cover")];return {count:covers.length,first:covers[0]?.getAttribute("data-artwork"),color:getComputedStyle(covers[0]).backgroundImage,unique:new Set(covers.slice(0,12).map(x=>x.style.getPropertyValue("--cover-hue"))).size}})()');
+  check(generated.count===firstAlbums.cards && generated.unique>=8 && generated.color.includes("gradient"),
+    "All cards must have distinct, deterministic generated artwork before any media response");
+  check(count.covers.every(x=>x.size==="160"),"Album/artist grid must request 160px thumbnails, never 320px assets");
+  await wait(720);
+  const detected=await evaluate('({stock:document.querySelector(".waxloom-grid-cell:nth-child(1) .waxloom-generated-cover")?.getAttribute("data-artwork"),real:document.querySelector(".waxloom-grid-cell:nth-child(2) .waxloom-generated-cover")?.getAttribute("data-artwork")})');
+  check(detected.stock==="generated","Navidrome stock logo should be recognized and replaced with art");
+  check(detected.real==="photo","Legitimate 1024px real cover must not be discarded");
 
   // Load beyond the old 120-album hard limit by approaching the sentinel.
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -155,11 +181,16 @@ try {
   check(pagedAlbums.page <= pagedAlbums.viewport + 1,
     "Album vertical scroll must not overflow horizontally");
 
-  // Opening an album should still show its existing detail and Play.
-  await evaluate('document.querySelector(".waxloom-library-grid .waxloom-grid-cover")?.click()');
-  await wait(180);
-  const albumDetail = await evaluate('({title:document.querySelector(".detail-hero h2")?.textContent,play:!!document.querySelector(".detail-hero .primary-action")})');
-  check(Boolean(albumDetail.title && albumDetail.play), "Album card should still open the playable detail");
+  // FitBoy-like lightweight summary immediately, asynchronous detail behind it.
+  // Artificially delay album detail by 1400ms; presentation MUST still be fast.
+  const albumOpenMs=await evaluate('(async()=>{const t=performance.now();document.querySelector(".waxloom-library-grid .waxloom-grid-cover")?.click();return await new Promise(resolve=>{const check=()=>{if(document.querySelector(".detail-hero h2")){observer.disconnect();resolve(performance.now()-t)}};const observer=new MutationObserver(check);observer.observe(document.body,{subtree:true,childList:true});check();setTimeout(()=>{observer.disconnect();resolve(-1)},900)})})()');
+  const preview=await evaluate('({title:document.querySelector(".detail-hero h2")?.textContent,poster:document.querySelector(".detail-cover .waxloom-generated-cover")?.getAttribute("data-artwork"),waiting:!!document.querySelector(".waxloom-detail-cover-pending"),disabled:document.querySelector(".detail-hero .primary-action")?.disabled})');
+  check(albumOpenMs>=0 && albumOpenMs<240 && preview.title?.includes("Extremely Long Album") && preview.waiting && preview.disabled,
+    "Album preview must show immediately with synthetic art while a 1400ms detail request remains outstanding");
+  await wait(1650);
+  const albumDetail=await evaluate('({title:document.querySelector(".detail-hero h2")?.textContent,play:!!document.querySelector(".detail-hero .primary-action"),enabled:!document.querySelector(".detail-hero .primary-action")?.disabled,tracks:document.querySelectorAll(".waxloom-track-sleeve").length})');
+  check(Boolean(albumDetail.title && albumDetail.play && albumDetail.enabled && albumDetail.tracks),
+    "Deferred album detail should resolve into playable tracks without shifting the header");
 
   await nav("Artists");
   await wait(440);
@@ -215,10 +246,23 @@ try {
       "Mobile/tablet " + width + "px grid must stay vertically scrollable with no overflow");
   }
 
+  // Reload destroys in-memory React/API caches, but a short-lived lightweight
+  // session catalog survives. Its first 80 records should appear *before* a
+  // synthetic second 1400 ms album-list network request completes.
+  await rpc("Emulation.setDeviceMetricsOverride",{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+  await rpc("Page.reload",{ignoreCache:true});
+  await wait(500);
+  await nav("Albums");
+  const warm=await gridState();
+  check(warm.cards>=48 && warm.first?.includes("Extremely Long Album Name"),
+    "Warm session snapshot must restore album grid before slow list refresh");
+  await wait(1450);
+  const warmFresh=await gridState();
+  check(warmFresh.cards>=48,"Revalidated cached album snapshot should remain usable");
   const result = { passed: failures.length === 0 && errors.length === 0,
     failures, errors, assertions: checks.length, requests: count,
-    firstAlbums, pagedAlbums, albumDetail, firstArtists, moreArtists, hover,
-    favorites, favoriteHeadings, trackPlayed, mobileStates };
+    firstAlbums, generated, detected, albumOpenMs, preview, pagedAlbums, albumDetail, firstArtists, moreArtists, hover,
+    favorites, favoriteHeadings, trackPlayed, mobileStates, warm, warmFresh };
   console.log(JSON.stringify(result, null, 2));
   if (failures.length || errors.length) process.exitCode = 1;
 } finally { ws.close(); }

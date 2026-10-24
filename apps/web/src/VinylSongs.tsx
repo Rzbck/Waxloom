@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./api";
+import { CoverArtwork } from "./CoverArtwork";
 import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
 import { PlayerIcon } from "./MobilePlayerPanel";
 import { usePlayer } from "./Player";
@@ -70,11 +71,8 @@ export function VinylSongs({
               key={`${song.id}-${index}`} aria-label={`Track: ${songDisplayTitle(song)}; Artist: ${songDisplayArtist(song)}; Album: ${songDisplayAlbum(song) ?? "Not tagged"}`}>
               <button className="waxloom-track-face" type="button" onClick={() => start(index)}
                 aria-label={`Play track ${songDisplayTitle(song)}`} title={songDisplayTitle(song)}>
-                <span className="waxloom-track-fallback" aria-hidden="true"><PlayerIcon name="music" size={44} /></span>
-                {(song.coverArt || song.albumId) && (
-                  <img src={api.coverUrl(song.coverArt || song.albumId, 300)} loading={index < 4 ? "eager" : "lazy"} alt=""
-                    onError={(event) => { event.currentTarget.hidden = true; }} />
-                )}
+                <CoverArtwork coverId={song.coverArt || song.albumId}
+                  seed={song.albumId || song.id} size={160} priority={index < 4} />
                 <span className="waxloom-track-play-indicator" aria-hidden="true">
                   <PlayerIcon name={playing && player.playing ? "pause" : "play"} size={19} />
                 </span>

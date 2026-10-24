@@ -6,7 +6,9 @@ import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
 import { MobileNavigation } from "./MobileNavigation";
 import { MobileHome } from "./MobileHome";
-import { AlbumCoverGrid, FavoriteTrackGrid } from "./LibraryGrids";
+import { AlbumCoverGrid, FavoriteTrackGrid, LibraryGridSkeleton } from "./LibraryGrids";
+import { CoverArtwork } from "./CoverArtwork";
+import { catalogSnapshot } from "./catalogSnapshot";
 import { VinylSongs } from "./VinylSongs";
 import { VinylArtists, VinylPlaylists } from "./VinylEntities";
 import { DownloadTray } from "./downloadQueue";
@@ -87,6 +89,7 @@ export default function App() {
   const albumsModeRef = useRef("newest");
   const albumsLoadingRef = useRef(false);
   const [artists, setArtists] = useState<Artist[]>([]);
+  const [artistsLoading, setArtistsLoading] = useState(false);
   const [playlists, setPlaylists] = useState<PlaylistSummary[]>([]);
   const [favorites, setFavorites] = useState<StarredResults | null>(null);
   const [searchResults, setSearchResults] = useState<SearchResults | null>(null);
@@ -94,6 +97,9 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const [selectedAlbum, setSelectedAlbum] = useState<Album | null>(null);
+  const [albumDetailPending, setAlbumDetailPending] = useState(false);
+  const [albumDetailError, setAlbumDetailError] = useState<string | null>(null);
+  const albumOpenEpochRef = useRef(0);
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
   const [selectedPlaylist, setSelectedPlaylist] = useState<PlaylistDetail | null>(null);
   const [playlistSongTarget, setPlaylistSongTarget] = useState<Song | null>(null);
@@ -212,14 +218,16 @@ export default function App() {
     albumsOffsetRef.current = 0;
     albumsLoadingRef.current = true;
     setAlbumMode(mode);
-    setAlbums([]);
-    setAlbumsHaveMore(false);
+    const snapshot = catalogSnapshot.albums(mode);
+    setAlbums(snapshot ?? []);
+    setAlbumsHaveMore((snapshot?.length ?? 0) === 80);
     setAlbumPageLoading(true);
     setError(null);
     try {
       const result = await api.albums(mode, 80, 0);
       if (epoch !== albumsEpochRef.current) return;
       setAlbums(result.items);
+      catalogSnapshot.saveAlbums(mode, result.items);
       albumsOffsetRef.current = result.items.length;
       setAlbumsHaveMore(result.items.length === 80);
     } catch (caught) {
@@ -263,7 +271,18 @@ export default function App() {
   }
 
   async function loadArtists() {
-    await run(api.artists, (payload) => setArtists(payload.items));
+    const snapshot = catalogSnapshot.artists();
+    if (snapshot) setArtists(snapshot);
+    setArtistsLoading(true);
+    try {
+      const payload = await api.artists();
+      setArtists(payload.items);
+      catalogSnapshot.saveArtists(payload.items);
+    } catch (caught) {
+      if (!snapshot) setError(caught instanceof Error ? caught.message : "Could not load artists.");
+    } finally {
+      setArtistsLoading(false);
+    }
   }
 
   async function loadPlaylists(showLoading = true) {
@@ -282,9 +301,27 @@ export default function App() {
     await run(api.starred, setFavorites);
   }
 
-  async function openAlbum(summary: Album) {
+  function openAlbum(summary: Album) {
+    const epoch = ++albumOpenEpochRef.current;
+    // Show the REAL summary + instantly generated artwork in this frame.
+    // This is the FitBoyRepack split-catalog pattern: lightweight list first,
+    // detailed song list loaded independently. Never block navigation on API.
     setView("albums");
-    await run(() => api.album(summary.id), setSelectedAlbum);
+    setSelectedAlbum(summary);
+    setAlbumDetailPending(true);
+    setAlbumDetailError(null);
+    void api.album(summary.id)
+      .then((detail) => {
+        if (epoch !== albumOpenEpochRef.current) return;
+        setSelectedAlbum(detail);
+      })
+      .catch((caught) => {
+        if (epoch !== albumOpenEpochRef.current) return;
+        setAlbumDetailError(caught instanceof Error ? caught.message : "Could not load album tracks.");
+      })
+      .finally(() => {
+        if (epoch === albumOpenEpochRef.current) setAlbumDetailPending(false);
+      });
   }
 
   async function playAlbum(summary: Album) {
@@ -390,6 +427,9 @@ export default function App() {
   }
 
   function navigate(next: View) {
+    albumOpenEpochRef.current += 1;
+    setAlbumDetailPending(false);
+    setAlbumDetailError(null);
     setView(next);
     setError(null);
     setNotice(null);
@@ -567,11 +607,12 @@ export default function App() {
             {selectedAlbum ? (
               <>
                 <div className="detail-toolbar">
-                  <button className="secondary-action" type="button" onClick={() => setSelectedAlbum(null)}>← Albums</button>
+                  <button className="secondary-action" type="button" onClick={() => { albumOpenEpochRef.current += 1; setSelectedAlbum(null); setAlbumDetailPending(false); setAlbumDetailError(null); }}>← Albums</button>
                   <button className={starOverrides[selectedAlbum.id] ?? Boolean(selectedAlbum.starred) ? "secondary-action active-star" : "secondary-action"} type="button" onClick={() => void toggleStar(selectedAlbum)}>★ Favorite</button>
                 </div>
                 <section className="detail-hero">
-                  <div className="detail-cover">{selectedAlbum.coverArt ? <img src={api.coverUrl(selectedAlbum.coverArt, 600)} alt="" /> : <span>◫</span>}</div>
+                  <div className="detail-cover"><CoverArtwork coverId={selectedAlbum.coverArt}
+                    seed={selectedAlbum.id} size={320} priority /></div>
                   <div><p className="eyebrow">{selectedAlbumInfo?.primaryKind ?? "Album"}</p>
                     <h2>{selectedAlbumInfo?.primary}</h2>
                     <div className="waxloom-detail-identity">
@@ -581,9 +622,9 @@ export default function App() {
                     </div>
                     <p className="muted">{selectedAlbum.song?.length ?? selectedAlbum.songCount ?? 0} tracks · {formatDuration(selectedAlbum.duration)}
                       {selectedAlbum.year ? ` · ${selectedAlbum.year}` : ""}
-                      {knownMusicValue(selectedAlbum.genre) ? ` · ${selectedAlbum.genre}` : ""}</p><div className="button-row"><button className="primary-action" type="button" onClick={() => player.playSongs(selectedAlbum.song ?? [], 0, { ordered: true })}>▶ Play album</button><button className="secondary-action" type="button" onClick={() => (selectedAlbum.song ?? []).forEach(player.addToQueue)}>+ Add to queue</button></div></div>
+                      {knownMusicValue(selectedAlbum.genre) ? ` · ${selectedAlbum.genre}` : ""}</p><div className="button-row"><button className="primary-action" type="button" disabled={albumDetailPending || !selectedAlbum.song?.length} onClick={() => player.playSongs(selectedAlbum.song ?? [], 0, { ordered: true })}>▶ Play album</button><button className="secondary-action" type="button" disabled={albumDetailPending || !selectedAlbum.song?.length} onClick={() => (selectedAlbum.song ?? []).forEach(player.addToQueue)}>+ Add to queue</button></div></div>
                 </section>
-                <SongTable songs={selectedAlbum.song ?? []} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
+                {albumDetailPending ? <div className="waxloom-detail-cover-pending" aria-label="Loading album tracks" role="status"><span /><span /><span /></div> : albumDetailError ? <div className="state-card state-card-error" role="alert">{albumDetailError}<button type="button" className="mini-action" onClick={() => openAlbum(selectedAlbum)}>Retry</button></div> : <SongTable songs={selectedAlbum.song ?? []} starOverrides={starOverrides} onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />}
               </>
             ) : (
               <>
@@ -607,13 +648,13 @@ export default function App() {
               <>
                 <div className="detail-toolbar"><button className="secondary-action" type="button" onClick={() => setSelectedArtist(null)}>← Artists</button><button className={starOverrides[selectedArtist.id] ?? Boolean(selectedArtist.starred) ? "secondary-action active-star" : "secondary-action"} type="button" onClick={() => void toggleStar(selectedArtist)}>★ Favorite</button></div>
                 <section className="detail-hero artist-detail-hero">
-                  <div className="artist-avatar artist-avatar-large">{selectedArtist.coverArt ? <img src={api.coverUrl(selectedArtist.coverArt, 500)} alt="" /> : <span>{selectedArtist.name.slice(0, 1).toUpperCase()}</span>}</div>
+                  <div className="artist-avatar artist-avatar-large"><CoverArtwork coverId={selectedArtist.coverArt} seed={selectedArtist.id} size={320} priority /></div>
                   <div><p className="eyebrow">Artist</p><h2>{knownMusicValue(selectedArtist.name) ?? "Artist not tagged"}</h2><p className="muted">{selectedArtist.album?.length ?? selectedArtist.albumCount ?? 0} albums</p></div>
                 </section>
                 {renderAlbumGrid(selectedArtist.album ?? [])}
               </>
             ) : (
-              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome library</p><h2>Artists</h2><p className="muted">{artists.length} artists</p></div><button className="secondary-action" type="button" onClick={() => void loadArtists()}>Refresh</button></div><VinylArtists artists={artists} onOpen={(artist) => void openArtist(artist)} /></>
+              <><div className="section-toolbar"><div><p className="eyebrow">Navidrome library</p><h2>Artists</h2><p className="muted">{artists.length} artists</p></div><button className="secondary-action" type="button" onClick={() => void loadArtists()}>Refresh</button></div>{artistsLoading && !artists.length ? <LibraryGridSkeleton label="Loading artists" /> : <VinylArtists artists={artists} onOpen={(artist) => void openArtist(artist)} />}</>
             )}
           </div>
         )}
