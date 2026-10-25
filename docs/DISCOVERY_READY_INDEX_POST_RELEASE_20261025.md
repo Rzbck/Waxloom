@@ -15,6 +15,17 @@ The owner reported Discovery not appearing promptly after refresh, delayed first
 - Preserve the original `recording_mbid`, taste, imports, paging, 20-minute rotation and `unplayable_hidden` semantics. Probe every unique ID only once per feed call rather than twice. Direct standalone tooling without service startup retains the synchronous verifier so existing synthetic tests can exercise original semantics.
 - Tests: all prior **59** API tests, plus **4** dedicated async race/readiness tests, including a simulated 90-item slow disk scan with a responsive event loop and fast repetitive feed reads. No changes to Web JS/CSS or physical music files.
 
+## Measured second root cause and real-storage validation
+
+Read-only cProfile showed an additional bottleneck: DiscoveryFeedbackStore._reload_if_changed() opened discovery-feedback.json 2,120 times during ONE feed GET. Roughly 4s of a 4.7s request were spent reopening the same JSON for scoring, source-rejection, imports and taste feedback.
+
+The final fix throttles read-only reloads to one per 250ms burst. Both set() and record_import() FORCE a fresh disk read before persisting; this avoids losing another writer's Like/Dislike/import event. In-process writes are immediately visible. Three synthetic tests check 1,000 repeated candidate scoring iterations, external updates after TTL, neutral removal and concurrent writer preservation.
+
+Real Docker storage test: production preview state was mounted read-only with network disabled. No live data or services were modified by this test.
+- Live baseline: 6,120ms, 5,998ms and 6,022ms per feed, with 157 direct preview file lookups each time.
+- Initial index-only hotfix: cold index built in 1,520ms off the event loop but GET still took 4,186ms, because feedback was loaded 2,120 times.
+- Final combined fix: cold index verification 1,533ms off-loop; page0 GET 165.59ms and 166.97ms, page1 161.93ms, page2 164.49ms. 60 playable items on each page. Server-side ~36x faster than baseline; not a measured iPhone time-to-audible improvement.
+- 66 API tests passed (59 original + 4 readiness/eviction + 3 feedback freshness tests). Web JS/CSS unchanged.
 ## Acceptance
 
 - GitHub Windows and security CI must pass; build exact-SHA API image. Run read-only separate-container benchmarking against production-style mounted preview metadata and verify new readiness `feed(playable_only=True)` header latency and unchanged ready count/IDs. The Web image and currently running API must remain untouched until this gate passes.
