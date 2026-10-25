@@ -32,19 +32,15 @@ Waxloom UI -> Waxloom -> ListenBrainz
 
 The user interacts with **Waxloom only**. Integrations are plumbing.
 
-## Planned first vertical slice
+## Available product areas
 
-1. Connect to an existing Navidrome instance.
-2. Browse library and playlists inside Waxloom.
-3. Pick a playlist and generate external discovery candidates.
-4. Filter out tracks already present locally.
-5. Rank discoveries with similarity + underground weighting.
-6. Search external sources for a selected discovery.
-7. Let the user choose the exact source result.
-8. Import an authorized track into the music folder.
-9. Ask Navidrome to rescan and add the track to the selected playlist.
-10. Let AudioMuse-AI analyze the new track in the background.
+- Navidrome/OpenSubsonic library, playlists, queue and continuous music playback.
+- Home, Albums, Artists and Favorites browsing, with Back/Forward navigation and cached search context.
+- Discovery music recommendations with preview, taste controls and neutral suggestion dismissal.
+- Authorized, user-initiated YouTube source selection and imports into the existing music library.
+- Responsive desktop/mobile web UI, Media Session controls and experimental iPhone Home Screen support.
 
+Phone Safari/PWA and lock-screen behavior still require physical-device acceptance; see the current release notes rather than assuming all browser tests cover iOS.
 ## Repository layout
 
 ```text
@@ -55,19 +51,11 @@ docs/         Architecture, handoff, and workflow notes
 scripts/      Development and security helpers
 ```
 
-## Development status
+## Current source and release status
 
-The initial scaffold includes:
+`main` contains the consolidated Web/API source as of 2026-10-25. Production identity is tracked **separately** from Git commits: the currently deployed Web source is `82eddfc`, while the API source is `6b1fe45`. A newer maintenance commit in GitHub does not automatically deploy anything.
 
-- FastAPI backend;
-- React + TypeScript + Vite frontend;
-- server-side environment configuration;
-- Navidrome/OpenSubsonic client;
-- Navidrome health, playlist listing, and playlist-detail API endpoints;
-- first Waxloom application shell.
-
-Runtime behavior remains candidate-specific until it has been validated on the exact tested SHA.
-
+Read [current repository and release status](docs/REPOSITORY_CONSOLIDATION_20261025.md) and [HANDOFF.md](HANDOFF.md) before making changes. Historical development branches and prior pull requests were intentionally kept separate from production releases.
 ## Windows quick start
 
 Requirements:

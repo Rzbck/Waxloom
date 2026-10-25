@@ -1,3 +1,8 @@
+## 2026-10-25 — GitHub consolidation, no runtime rollout
+
+- Canonical `main` fast-forward source is live Web `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` with live API ancestor `6b1fe4505b15aa6ec21441d57709769c4930e010`. Any later maintenance commit only changes repository documentation. Production images unchanged.
+- Three annotated remote tags preserve old `main`, live API and live Web. Obsolete PRs/remote branches may be closed/deleted only after verifying their head is an ancestor of canonical `main`. Divergent Apple Watch and `fix/global-fluidity-shuffle` branches and dirty worktrees remain protected.
+- Public-repository security gate and existing head CI are green; physical iOS navigation is NOT USER VALIDATED. `docs/REPOSITORY_CONSOLIDATION_20261025.md` is the current overview. Next changes use a dedicated branch/worktree based on current `main`, not old September baseline.
 ## 2026-10-25 — Unified browser navigation and iPhone-safe history
 
 - History used to be absent (`App.tsx` only stored a React `view`); native browser Back could lose context and reset to Home. New `musicNavigation.ts` provides pushState/popstate with safe hash routes, browser and in-app Back/Forward, scroll position, cached detail/search restoration. Imports channel/playlist navigation integrated and Discovery/Import keep state while hidden.

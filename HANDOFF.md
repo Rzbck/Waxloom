@@ -1,17 +1,16 @@
 # HANDOFF — Waxloom
 
-## CURRENT CONSOLIDATION / RELEASE IDENTITY (2026-10-24)
+## CURRENT REPOSITORY / RUNTIME IDENTITY (2026-10-25)
 
-**Read this first; September bootstrap recovery sections below are historical.** Follow `AI_PROJECT_RULES.md`, `docs/GITHUB_WORKFLOW.md` and `docs/LOCAL_MULTI_WORKTREE_POLICY.md` as before.
+GitHub `main` has been consolidated from the deployed Web source `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` (52 descendant commits over the September baseline). The repository's maintenance-only consolidation commit may be newer than the live Web image; do not equate a documentation commit with a deployed build.
 
-- Published `main`: `35bb87d` — **not** the production Web revision.
-- Production Web: `3dbc4f3` (iOS background mitigation, **not validated on a physical locked iPhone**).
-- Production API: `3acca2c`. Verified ancestry: `main` -> API -> production Web.
-- Active chantier: `chore/production-consolidation-20261024`, a dedicated worktree based on production Web. **No main merge and no production rollout** from this branch without separate approval.
-- Read `docs/BRANCH_RECONCILIATION_20261024.md` and `docs/DEVELOPMENT_RELEASE.md` for branch disposition, locked builds, quality gates and rollback.
-- Production host keeps a **private** `CURRENT_RUNTIME.json` beside Compose and a read-only `CHECK_RUNTIME.ps1`. Run the check first. Never patch live software through the historical SelfHosted source snapshot.
-- Preserve the dirty `discovery-library-pipeline`, `recent-tracks` worktrees and main's untracked `apps/api/uv.lock`. Divergent Apple Watch branches require separate native review.
-
+- **Running Web:** `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` (`waxloom-web:navigation-v5-82eddfc`).
+- **Running API:** `6b1fe4505b15aa6ec21441d57709769c4930e010` (`waxloom-api:import-pixel-v3-6b1fe45`), an ancestor of the Web source.
+- **Immutable source checkpoints:** `waxloom-preconsolidation-main-20261025`, `waxloom-api-live-20261025`, `waxloom-web-live-20261025`.
+- **No production rollout during GitHub consolidation.** Read the private runtime manifest using `CHECK_RUNTIME.ps1` on the production host before any future deployment. Never use the historical SelfHosted source snapshot as the active source.
+- **Important:** The browser navigation, importer and mobile Chromium synthetic tests pass, but physical iPhone Safari/PWA acceptance remains pending. Do not label this `USER VALIDATED`.
+- **Protected local state:** dirty `discovery-library-pipeline` and `recent-tracks` worktrees are untouched. Divergent Apple Watch branches and the independent `fix/global-fluidity-shuffle` documentation commit need separate review; they were not silently merged.
+- Read `docs/REPOSITORY_CONSOLIDATION_20261025.md`, `docs/DEVELOPMENT_RELEASE.md`, `AI_PROJECT_RULES.md` and `docs/LOCAL_MULTI_WORKTREE_POLICY.md` for the safe branch/worktree workflow.
 ## HISTORICAL GUIDANCE (retained for context)
 
 This file is the single entry point for resuming work on Waxloom.
