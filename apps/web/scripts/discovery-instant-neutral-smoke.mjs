@@ -270,10 +270,20 @@ try {
   check(Boolean(liked), "Preview like not reflected immediately in dock");
   await wait(450);
   check(feedbackCalls.some(c => c.recording_mbid === "qa-1-1" && c.value === 1), "Like not sent with recording id");
+  // A visible Discovery page has its own legitimate 5s/12s GET poll. A timed
+  // poll can coincide with this 350ms focus window: one GET is not evidence
+  // of a focus-triggered reload. Reject a burst, a manual rotation request,
+  // or an actual change to the currently playing stable vinyl shelf.
   const requestsBeforeFocus = feedCalls;
+  const refreshesBeforeFocus = refreshCalls;
+  const shelfBeforeFocus = await evalJS('[...document.querySelectorAll(".discovery-cover-copy strong")].map(e=>e.textContent)');
   await evalJS('window.dispatchEvent(new Event("focus"))');
   await wait(350);
-  check(feedCalls === requestsBeforeFocus, "Discovery reloaded when browser regained focus");
+  check(feedCalls - requestsBeforeFocus <= 1, "Focus caused a burst of Discovery feed requests");
+  check(refreshCalls === refreshesBeforeFocus, "Focus triggered an unsolicited Discovery rotation");
+  const shelfAfterFocus = await evalJS('[...document.querySelectorAll(".discovery-cover-copy strong")].map(e=>e.textContent)');
+  check(JSON.stringify(shelfAfterFocus) === JSON.stringify(shelfBeforeFocus),
+    "Discovery shelf reordered when browser regained focus");
 
   // A changing remote pool does not mutate the displayed tracks until user refreshes.
   round = 2;

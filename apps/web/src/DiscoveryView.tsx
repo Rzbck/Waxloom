@@ -4,6 +4,8 @@ import { VinylRack } from "./VinylRack";
 
 import { api } from "./api";
 import { usePlayer } from "./Player";
+import { readTaste, writeTaste, subscribeTaste, type TasteState } from "./discoveryTaste";
+import { activeCandidates, diversify, fillShelf, folded, SHELF_TARGET_SIZE } from "./discoveryRanking";
 import type {
   DiscoveryCandidate,
   DiscoveryFeedResponse,
@@ -13,18 +15,8 @@ import type {
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
 import "./discovery.css";
 
-type TasteEntry = {
-  value: -1 | 1;
-  artist: string;
-  tags: string[];
-};
-
-type TasteState = Record<string, TasteEntry>;
-
-
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
 const BROWSER_CACHE_AGE_MS = 2 * 60 * 1000;
-const TASTE_KEY = "waxloom.discovery.taste.v1";
 // Local presentation-only suppression; NEVER sent to taste feedback.
 const DISMISSED_KEY = "waxloom.discovery.dismissed.v1";
 const DISMISS_TTL_MS = 24 * 60 * 60 * 1000;
@@ -43,7 +35,6 @@ function storeDismissed(value: Record<string, number>) {
 
 const SOURCE_REJECT_TAG = "__waxloom_source:not_music__";
 const SHELF_PAGE_SIZE = 12;
-const SHELF_TARGET_SIZE = 20;
 // A ready server snapshot can expose only a couple of M4A previews while the
 // larger candidate pool is still warming. Do not lock that partial shelf.
 const MIN_READY_DISCOVERIES = 12;
@@ -63,100 +54,6 @@ function feedVersion(value: DiscoveryFeedResponse | null): string {
 
 function scorePercent(value: number): string {
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
-}
-
-function folded(value: string): string {
-  return value.trim().toLocaleLowerCase();
-}
-
-function readTaste(): TasteState {
-  try {
-    const raw = window.localStorage.getItem(TASTE_KEY);
-    if (!raw) return {};
-    const value = JSON.parse(raw) as TasteState;
-    return value && typeof value === "object" ? value : {};
-  } catch {
-    return {};
-  }
-}
-
-function writeTaste(value: TasteState): void {
-  try {
-    window.localStorage.setItem(TASTE_KEY, JSON.stringify(value));
-  } catch {
-    // Taste storage is a local convenience layer.
-  }
-  window.dispatchEvent(new Event("waxloom:discovery-taste"));
-}
-
-function tasteAdjustment(candidate: DiscoveryCandidate, taste: TasteState): number {
-  const exact = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
-  if (exact < 0) return -10;
-
-  let adjustment = exact > 0 ? 0.24 : 0;
-  const artist = folded(candidate.artist);
-  let artistSignal = 0;
-  const tagSignals = new Map<string, number>();
-
-  for (const entry of Object.values(taste)) {
-    if (folded(entry.artist) === artist) artistSignal += entry.value;
-    for (const tag of entry.tags) {
-      const key = folded(tag);
-      tagSignals.set(key, (tagSignals.get(key) ?? 0) + entry.value);
-    }
-  }
-
-  adjustment += Math.max(-0.3, Math.min(0.18, artistSignal * 0.06));
-  let tags = 0;
-  for (const tag of candidate.tags ?? []) tags += tagSignals.get(folded(tag)) ?? 0;
-  adjustment += Math.max(-0.2, Math.min(0.12, tags * 0.025));
-  return adjustment;
-}
-
-function activeCandidates(items: DiscoveryCandidate[], taste: TasteState): DiscoveryCandidate[] {
-  return [...items]
-    .filter((candidate) => (taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0) >= 0)
-    .sort((a, b) => (b.rank + tasteAdjustment(b, taste)) - (a.rank + tasteAdjustment(a, taste)));
-}
-
-function diversify(items: DiscoveryCandidate[], maxPerArtist = 2): DiscoveryCandidate[] {
-  const counts = new Map<string, number>();
-  const output: DiscoveryCandidate[] = [];
-  for (const candidate of items) {
-    const artist = folded(candidate.artist) || candidate.recording_mbid;
-    const current = counts.get(artist) ?? 0;
-    if (current >= maxPerArtist) continue;
-    counts.set(artist, current + 1);
-    output.push(candidate);
-  }
-  return output;
-}
-
-function fillShelf(
-  primary: DiscoveryCandidate[],
-  fallback: DiscoveryCandidate[],
-  used: Set<string>,
-  target = SHELF_TARGET_SIZE,
-): DiscoveryCandidate[] {
-  const output: DiscoveryCandidate[] = [];
-  const append = (candidate: DiscoveryCandidate) => {
-    if (used.has(candidate.recording_mbid) || output.some((item) => item.recording_mbid === candidate.recording_mbid)) return;
-    output.push(candidate);
-  };
-
-  for (const candidate of diversify(primary, 2)) {
-    append(candidate);
-    if (output.length >= target) break;
-  }
-  if (output.length < target) {
-    for (const candidate of diversify(fallback, 2)) {
-      append(candidate);
-      if (output.length >= target) break;
-    }
-  }
-
-  output.forEach((candidate) => used.add(candidate.recording_mbid));
-  return output;
 }
 
 function readBrowserFeed(): DiscoveryFeedResponse | null {
@@ -453,15 +350,7 @@ export function DiscoveryView({ onImportCandidate, active = true }: { onImportCa
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [Boolean(bundle), refreshing, hydrationPending, active]);
 
-  useEffect(() => {
-    const onTaste = () => setTaste(readTaste());
-    window.addEventListener("waxloom:discovery-taste", onTaste);
-    window.addEventListener("storage", onTaste);
-    return () => {
-      window.removeEventListener("waxloom:discovery-taste", onTaste);
-      window.removeEventListener("storage", onTaste);
-    };
-  }, []);
+  useEffect(() => subscribeTaste(() => setTaste(readTaste())), []);
 
   // Once displayed, changing taste never shuffles or removes covers mid-listen.
   // Fresh ranking is applied when a newly requested Discovery feed is accepted.

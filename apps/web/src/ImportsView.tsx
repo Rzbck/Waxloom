@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "./api";
+import { cachePreview } from "./importsPreview";
 import { authorizeYouTubeImport, enqueueSelectedYouTube, useDownloads } from "./downloadQueue";
 import { YouTubeTrackArt, YouTubeCollectionArt } from "./YouTubeArt";
 import { CoverArtwork } from "./CoverArtwork";
-import { usePlayer } from "./Player";
+import { usePlayer, usePlayerProgress } from "./Player";
 import type { ImportLocation } from "./musicNavigation";
 import type {
   DiscoveryCandidate, ImportResult, PlaylistSummary, YouTubeBrowseCollection,
@@ -26,27 +27,23 @@ function usableChannelPlaylists(items: YouTubeBrowseCollection[]) {
     item.count !== 0 && /^https:\/\/www\.youtube\.com\/playlist\?list=[a-zA-Z0-9_-]{8,90}$/.test(item.url),
   );
 }
-const previewCache = new Map<string, { at: number; url: string; duration?: number }>();
-const previewInFlight = new Map<string, Promise<{ preview_url: string; duration?: number }>>();
-const PREVIEW_VALID_MS = 65_000;
-
 function displayTime(seconds?: number | null) {
   if (!seconds || !Number.isFinite(seconds)) return "—";
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
 }
-function cachePreview(track: YouTubeBrowseTrack) {
-  const value = previewCache.get(track.id);
-  if (value && Date.now() - value.at < PREVIEW_VALID_MS) return Promise.resolve({
-    preview_url: value.url, duration: value.duration,
-  });
-  if (previewInFlight.has(track.id)) return previewInFlight.get(track.id)!;
-  const promise = api.youtubePreview(track.url).then((result) => {
-    previewCache.set(track.id, { at: Date.now(), url: result.preview_url, duration: result.duration });
-    return result;
-  }).finally(() => { previewInFlight.delete(track.id); });
-  previewInFlight.set(track.id, promise);
-  return promise;
+// The active slider alone consumes audio-clock updates, not the whole list.
+function ImportPreviewSeek({ previewDuration }: { previewDuration: number }) {
+  const { currentTime, duration, seekTo } = usePlayerProgress();
+  const total = Math.max(0, duration, previewDuration);
+  return <div className="waxloom-import-seek">
+    <span>{displayTime(currentTime)}</span>
+    <input type="range" min={0} max={Math.max(1, total)}
+      value={Math.min(currentTime, Math.max(1, total))} step={1}
+      aria-label="Seek in preview" onChange={(event) => seekTo(Number(event.target.value))} />
+    <span>{displayTime(total)}</span>
+  </div>;
 }
+
 function guessAlbumMode(value: string) { return /(?:[?&]list=|\/playlist\?)/i.test(value); }
 
 export function ImportsView({
@@ -167,7 +164,6 @@ export function ImportsView({
   }, [importRouteKey, active]);
   const currentId = player.currentPreview?.recording_mbid?.startsWith("yt:")
     ? player.currentPreview.recording_mbid.slice(3) : null;
-  const currentDuration = Math.max(player.duration || 0, player.currentPreview?.duration || 0);
   const localDownloads = downloads.filter((job) => job.id.startsWith("yt:"));
   const selectedItems = useMemo(() => Object.values(selection), [selection]);
   const visibleTracks = tracks.filter((item) => !unavailableIds.includes(item.id));
@@ -666,13 +662,7 @@ export function ImportsView({
                 <div className="waxloom-import-track-content">
                   <strong title={track.title}>{track.title}</strong>
                   <span>{track.channel || track.suggested_artist} · {displayTime(track.duration)}</span>
-                  {active && <div className="waxloom-import-seek">
-                    <span>{displayTime(player.currentTime)}</span>
-                    <input type="range" min={0} max={Math.max(1, currentDuration)}
-                      value={Math.min(player.currentTime, Math.max(1, currentDuration))} step={1}
-                      aria-label="Seek in preview" onChange={(event) => player.seekTo(Number(event.target.value))} />
-                    <span>{displayTime(currentDuration)}</span>
-                  </div>}
+                  {active && <ImportPreviewSeek previewDuration={player.currentPreview?.duration ?? 0} />}
                   {editId === track.id && <div className="waxloom-import-tag-editor">
                     <label>Artist <input aria-label="Artist tag" value={edits?.artist ?? track.suggested_artist}
                       onChange={(event) => setTagOverrides((current) => ({

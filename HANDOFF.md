@@ -1,5 +1,12 @@
 # HANDOFF — Waxloom
 
+## CURRENT A7 COMBINED CANDIDATE — NOT PRODUCTION
+
+**The finite 7-axis refactor has one final integration candidate** on `integration/audit-a7-20261025`, based on canonical main `7e5873f`. The source histories of A1–A6 were merged, retaining all four tranche QA gates and the combined A4 player seek + A6 Imports preview cache split. `docs/REFACTOR_AUDIT_TRACKER_20261025.md` defines the only valid DONE/STOP criteria; `docs/A7_INTEGRATION_RELEASE_ACCEPTANCE_20261025.md` provides sources, combined tests, baseline transfer-size metrics, device acceptance and the release/rollback plan. **Do not start new refactor axes.** No `main` merge, running Docker change or physical Safari acceptance is implied. The next action after finishing QA/CI is explicit owner review of the final draft PR and authorized promotion only.
+
+## FINITE A1–A7 AUDIT: A6 CANDIDATE, ONLY A7 REMAINS ACTIVE
+
+The single source for **exactly seven** acceptance axes, statuses and STOP criteria is [`docs/REFACTOR_AUDIT_TRACKER_20261025.md`](docs/REFACTOR_AUDIT_TRACKER_20261025.md). A6 extracts the shared Discovery taste store, pure ranking rules, Imports preview URL owner and 13 Pydantic request DTOs on `refactor/module-boundaries-a6-20261025` (details: `docs/MODULE_BOUNDARIES_A6_20261025.md`). Prior A1/A2/A3/A4/A5 candidate branches remain independent. Candidate is **not merged or deployed**; user physical Safari/PWA acceptance is still outstanding. The **only next axis is A7 combined release/QA/metrics**, not another refactor project. Never expand to A8 or merge/deploy without explicit authorization and rollback plan.
 ## CURRENT REPOSITORY / RUNTIME IDENTITY (2026-10-25)
 
 GitHub `main` has been consolidated from the deployed Web source `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` (52 descendant commits over the September baseline). The repository's maintenance-only consolidation commit may be newer than the live Web image; do not equate a documentation commit with a deployed build.
