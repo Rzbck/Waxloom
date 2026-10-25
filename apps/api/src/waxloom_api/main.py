@@ -97,6 +97,8 @@ _preview_cache = DiscoveryPreviewCache(
     youtube=youtube_provider(),
     feed_factory=lambda: discovery_feed_engine.feed(warm_pool=True),
     state_dir=waxloom_state_dir(),
+    on_ready=discovery_feed_engine.mark_preview_ready,
+    on_evict=discovery_feed_engine.invalidate_preview_ready,
 )
 
 

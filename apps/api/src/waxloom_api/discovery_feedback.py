@@ -23,6 +23,8 @@ class DiscoveryFeedbackStore:
         self._source_rejections: dict[str, dict[str, Any]] = {}
         self._imports: dict[str, dict[str, Any]] = {}
         self._loaded_digest: str | None = None
+        # Avoid repeated bind-mount reads within ranked feed GETs.
+        self._next_read_at = 0.0
         self._load(force=True)
 
     def _load(self, *, force: bool = False) -> None:
@@ -68,7 +70,13 @@ class DiscoveryFeedbackStore:
             }
         self._loaded_digest = digest
 
-    def _reload_if_changed(self) -> None:
+    def _reload_if_changed(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now < self._next_read_at:
+            return
+        # A 250ms snapshot serves thousands of ranking calls.
+        # Mutations always reload, avoiding lost external writes.
+        self._next_read_at = now + 0.25
         self._load(force=False)
 
     def _persist(self) -> None:
@@ -98,7 +106,7 @@ class DiscoveryFeedbackStore:
         tags: list[str],
         value: int,
     ) -> dict[str, Any]:
-        self._reload_if_changed()
+        self._reload_if_changed(force=True)
         recording_mbid = recording_mbid.strip()
         if not recording_mbid:
             raise ValueError("recording_mbid is required")
@@ -147,7 +155,7 @@ class DiscoveryFeedbackStore:
     ) -> dict[str, Any]:
         """Record a weak positive signal without pretending it was an explicit Like."""
 
-        self._reload_if_changed()
+        self._reload_if_changed(force=True)
         recording_mbid = recording_mbid.strip()
         if not recording_mbid:
             return self.summary()
