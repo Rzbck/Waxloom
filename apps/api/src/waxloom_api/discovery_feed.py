@@ -71,6 +71,13 @@ class DiscoveryFeedEngine:
         self._refresh_lock = asyncio.Lock()
         self._wake = asyncio.Event()
         self._runner: asyncio.Task[None] | None = None
+        # Verified-ready index: synchronous Windows bind-mount reads must not
+        # run in the feed HTTP request / uvicorn event loop.
+        self._ready_ids: frozenset[str] | None = None
+        self._ready_runner: asyncio.Task[None] | None = None
+        self._ready_wake = asyncio.Event()
+        self._freshly_ready: set[str] = set()
+        self._invalidated_ready: set[str] = set()
 
     @staticmethod
     def _iso(epoch: float | None) -> str | None:
@@ -98,7 +105,32 @@ class DiscoveryFeedEngine:
             return re.sub(r"[^\w]+", " ", tags[0]).strip() or "other"
         return "other"
 
+    def mark_preview_ready(self, recording_mbid: str) -> None:
+        # Callback runs only after the preview cache validated its final M4A.
+        if recording_mbid:
+            self._invalidated_ready.discard(recording_mbid)
+            self._freshly_ready.add(recording_mbid)
+            if self._ready_ids is not None:
+                self._ready_ids = self._ready_ids | {recording_mbid}
+
+    def invalidate_preview_ready(self, recording_mbid: str) -> None:
+        # A pending disk scan must never resurrect an explicitly evicted M4A.
+        self._invalidated_ready.add(recording_mbid)
+        self._freshly_ready.discard(recording_mbid)
+        if self._ready_ids is not None:
+            self._ready_ids = self._ready_ids - {recording_mbid}
+        self._ready_wake.set()
+
     def _preview_ready(self, item: dict[str, Any]) -> bool:
+        key = str(item.get("recording_mbid") or "").strip()
+        if not key:
+            return False
+        if self._ready_ids is not None:
+            return key in self._ready_ids
+        # Standalone test/tooling without startup retains direct validation.
+        return self._probe_preview_ready(item)
+
+    def _probe_preview_ready(self, item: dict[str, Any]) -> bool:
         """Only expose candidates whose cached M4A is already playable."""
 
         recording_mbid = str(item.get("recording_mbid") or "").strip()
@@ -168,23 +200,57 @@ class DiscoveryFeedEngine:
         temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         temporary.replace(self._snapshot_path)
 
+    def _scan_ready_files(self, items: list[dict[str, Any]]) -> frozenset[str]:
+        # This call is deliberately synchronous but ALWAYS runs in a worker.
+        return frozenset(
+            str(item.get("recording_mbid") or "").strip()
+            for item in items if self._probe_preview_ready(item)
+        )
+
+    async def _refresh_ready_index(self) -> None:
+        snapshot = self._snapshot
+        items = ((snapshot or {}).get("external") or {}).get("items") or []
+        candidates = [item for item in items if isinstance(item, dict)]
+        # A read may take seconds on Windows Docker bind mounts.
+        verified = await asyncio.to_thread(self._scan_ready_files, candidates)
+        if self._snapshot is snapshot:
+            self._ready_ids = (verified | self._freshly_ready) - self._invalidated_ready
+            self._freshly_ready.clear()
+
+    async def _ready_refresh_loop(self) -> None:
+        while True:
+            try:
+                await asyncio.wait_for(self._ready_wake.wait(), timeout=5.0)
+            except TimeoutError:
+                pass
+            self._ready_wake.clear()
+            await self._refresh_ready_index()
+
     async def start(self) -> None:
         if self._runner and not self._runner.done():
             return
         self._load_persisted()
         if self._snapshot is None:
             self._status = "warming"
+        # Startup performs one scan off-loop before declaring API ready.
+        # Thereafter, HTTP GETs never touch 100+ filesystem entries.
+        await self._refresh_ready_index()
+        self._ready_runner = asyncio.create_task(
+            self._ready_refresh_loop(), name="waxloom-discovery-ready-index"
+        )
         self._runner = asyncio.create_task(self._run(), name="waxloom-discovery-feed")
 
     async def stop(self) -> None:
-        if not self._runner:
-            return
-        self._runner.cancel()
-        try:
-            await self._runner
-        except asyncio.CancelledError:
-            pass
+        for task in (self._ready_runner, self._runner):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._ready_runner = None
         self._runner = None
+        self._ready_ids = None
 
     def request_refresh(self) -> None:
         self._wake.set()
@@ -309,6 +375,7 @@ class DiscoveryFeedEngine:
                     diagnostics["youtube_dig_eras"] = dict(era_counts)
 
                 self._snapshot = snapshot
+                self._ready_wake.set()
                 self._snapshot_epoch = time.time()
                 self._completed_epoch = self._snapshot_epoch
                 self._status = "ready"
@@ -559,18 +626,25 @@ class DiscoveryFeedEngine:
             # chosen 20-minute rotation), so New music and dislikes can
             # immediately replace a cover with already-playable audio.
             seen: set[str] = set()
+            checked_ready: dict[str, bool] = {}
             playable: list[dict[str, Any]] = []
             candidates = [*visible, *sorted(source_items, key=self._candidate_score, reverse=True)]
             for item in candidates:
                 key = str(item.get("recording_mbid") or "")
                 artist = str(item.get("artist") or "")
                 title = str(item.get("title") or "")
-                if not key or key in seen or self._feedback.exact(key) < 0:
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                # Every unique candidate is checked once, including taste-
+                # filtered ones, so unplayable_hidden keeps its previous meaning.
+                ready = self._preview_ready(item)
+                checked_ready[key] = ready
+                if self._feedback.exact(key) < 0:
                     continue
                 if self._feedback.was_imported(key, artist=artist, title=title):
                     continue
-                seen.add(key)
-                if self._preview_ready(item):
+                if ready:
                     playable.append(self._feedback.annotate(item))
             if playable and page:
                 # An alternative page is instant and never requires a fresh
@@ -587,7 +661,8 @@ class DiscoveryFeedEngine:
         external["pool_count"] = len(source_items)
         external["unplayable_hidden"] = (
             max(0, before_playable_filter - sum(
-                1 for item in self._rotated_items(source_items)[0] if self._preview_ready(item)
+                1 for item in self._rotated_items(source_items)[0]
+                if checked_ready.get(str(item.get("recording_mbid") or ""), False)
             ))
             if playable_only else 0
         )

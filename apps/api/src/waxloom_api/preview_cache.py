@@ -109,9 +109,13 @@ class DiscoveryPreviewCache:
         state_dir: Path,
         concurrency: int = 2,
         max_bytes: int = _DEFAULT_MAX_BYTES,
+        on_ready: Callable[[str], None] | None = None,
+        on_evict: Callable[[str], None] | None = None,
     ) -> None:
         self.youtube = youtube
         self.feed_factory = feed_factory
+        self._on_ready = on_ready
+        self._on_evict = on_evict
         self.root = state_dir / "discovery-preview-cache"
         self.max_bytes = max(512 * 1024 * 1024, max_bytes)
         self.concurrency = max(1, min(3, concurrency))
@@ -409,6 +413,8 @@ class DiscoveryPreviewCache:
 
     async def evict(self, recording_mbid: str) -> None:
         self._blocked.add(recording_mbid)
+        if self._on_evict:
+            self._on_evict(recording_mbid)
         self._ready_memo.pop(recording_mbid, None)
         self._active.pop(recording_mbid, None)
         self._recent.pop(recording_mbid, None)
@@ -526,7 +532,9 @@ class DiscoveryPreviewCache:
         async with self._semaphore:
             self._warming_now += 1
             try:
-                await self.ensure_candidate(candidate)
+                entry = await self.ensure_candidate(candidate)
+                if entry is not None and self._on_ready:
+                    self._on_ready(entry.recording_mbid)
             finally:
                 self._warming_now = max(0, self._warming_now - 1)
 
