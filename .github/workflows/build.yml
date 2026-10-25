@@ -65,6 +65,7 @@ jobs:
           npm.cmd run qa:ios-background
           npm.cmd run qa:home-album
           npm.cmd run qa:smart-autoplay
+          npm.cmd run qa:css-cascade
 
       - name: Synthetic Chrome regressions (isolated, no real music)
         shell: pwsh

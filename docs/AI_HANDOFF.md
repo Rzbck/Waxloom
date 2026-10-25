@@ -1,3 +1,8 @@
+## 2026-10-25 - CSS cascade first consolidation (candidate)
+
+- **IMPLEMENTED / NOT USER VALIDATED** on `refactor/css-consolidation-20261025` from published `main` `7e5873f`: 6 contiguous legacy patch stylesheets grouped into 2 new owner files (`ui-control-polish.css` and `layout-stability.css`) in the exact original import order, plus 1 unused `discovery-playlist.css` deleted. The Vite-generated CSS matches original SHA-256 and size (188642 bytes) exactly; no visual or performance changes claimed. The original 680 `!important` remain for later measured refactor.
+- New `qa:css-cascade` protects against orphan/duplicate CSS and any increased `!important` count, wired to Windows CI. Full design/refactor rationale: `docs/CSS_CASCADE_CONSOLIDATION_20261025.md`. Do **not** mix this branch with the separate Player, API parity or gzip branches without a separately tested integration candidate.
+- Runtime Web/API, user music files, containers and main untouched. Physical iPhone/Brave remains **NOT USER VALIDATED**.
 ## 2026-10-25 — GitHub consolidation, no runtime rollout
 
 - Canonical `main` fast-forward source is live Web `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` with live API ancestor `6b1fe4505b15aa6ec21441d57709769c4930e010`. Any later maintenance commit only changes repository documentation. Production images unchanged.

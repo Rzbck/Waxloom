@@ -1,0 +1,59 @@
+/* Desktop/Discovery/player clearance layout contracts, kept in historical precedence order. */
+
+/* Keep Discovery shelves spatially stable when More tracks lands on a short final page.
+   The content changes; the sections below do not jump. */
+
+@media (min-width: 1321px) {
+  .discovery-track-shelf .discovery-track-grid {
+    min-height: 170px;
+    align-content: start;
+  }
+}
+
+@media (min-width: 981px) and (max-width: 1320px) {
+  .discovery-track-shelf .discovery-track-grid {
+    min-height: 229px;
+    align-content: start;
+  }
+}
+
+@media (min-width: 821px) and (max-width: 980px) {
+  .discovery-track-shelf .discovery-track-grid {
+    min-height: 347px;
+    align-content: start;
+  }
+}
+
+@media (max-width: 820px) {
+  .discovery-track-shelf .discovery-track-grid {
+    min-height: 0;
+  }
+}
+
+/* Scroll clearance for Waxloom's fixed player.
+   The app shell already reserves the entire dock height:
+   96px on desktop and the mini-player + navigation on mobile.
+   A second full-sized .content clearance created 150px+ blank regions
+   after the last track. Leave only a touch of visual breathing room. */
+body:has(.player-dock) .content {
+  padding-bottom: 28px !important;
+}
+
+/* Desktop sidebar must belong to the viewport, not to the document scroll.
+   A sticky grid item eventually gets constrained by its parent and can move
+   upward near the bottom of long Discovery/library pages. */
+
+@media (min-width: 821px) {
+  .sidebar {
+    position: fixed !important;
+    inset: 0 auto 0 0 !important;
+    width: 224px !important;
+    height: 100dvh !important;
+    z-index: 90;
+  }
+
+  .content {
+    grid-column: 2 !important;
+    min-width: 0;
+  }
+}
