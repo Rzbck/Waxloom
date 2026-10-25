@@ -1,3 +1,8 @@
+## 2026-10-25 - P0 transfer-size optimization (candidate only)
+
+- Independent branch `perf/web-asset-compression-20261025`, based on consolidated `main` `7e5873f`. Add `deploy/nginx-compression.conf` to the *Web image* at `conf.d/10-waxloom-gzip.conf`, leaving the separate, private bind-mounted `default.conf` and `/api/` routing untouched. Gzip applies to CSS/JavaScript transfers; audio MIME types are excluded. `Vary: Accept-Encoding` is enabled for cache correctness.
+- Baseline live assets: JS 364,965 bytes and CSS 188,642 bytes with no `Content-Encoding` on `127.0.0.1:8091`. New behavior must be proven on an **isolated container built from exact published commit** with the production Nginx config mounted read-only; compare decompressed files to the currently served asset hashes. Production remains unchanged until a guarded Web-only release with rollback.
+- Next architecture tranches (independent): split hot progress updates out of the global React player context; eliminate cascading CSS overrides; unify stale-data lifetimes only after UI behavioral baselines are captured. Do not remove existing iOS handoff, Discovery prewarming, or download queue guards.
 ## 2026-10-25 — GitHub consolidation, no runtime rollout
 
 - Canonical `main` fast-forward source is live Web `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` with live API ancestor `6b1fe4505b15aa6ec21441d57709769c4930e010`. Any later maintenance commit only changes repository documentation. Production images unchanged.
