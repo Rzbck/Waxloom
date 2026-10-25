@@ -1,4 +1,5 @@
 import { prewarmDiscoveryAudio } from "./previewWarmCache";
+import { createRequestCache, createSingleFlight } from "./requestMemo";
 import type {
   Album,
   Artist,
@@ -56,17 +57,14 @@ const COVER_MEDIA_ORIGIN =
     ? `${window.location.protocol}//${window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname}:8787`
     : "";
 
-type CachedPromise<T> = {
-  at: number;
-  promise: Promise<T>;
-};
-
-const albumCache = new Map<string, CachedPromise<ListResponse<Album>>>();
-const albumDetailCache = new Map<string, CachedPromise<Album>>();
-let artistsCache: CachedPromise<ListResponse<Artist>> | null = null;
-const youtubeSearchCache = new Map<string, CachedPromise<ListResponse<YouTubeCandidate>>>();
-const youtubeBrowseCache = new Map<string, CachedPromise<YouTubeBrowseResponse>>();
-
+// Owners: bounded API memo for library/search metadata; route navigation may
+// still retain its own view-local copy without causing a second HTTP request.
+const albumCache = createRequestCache<string, ListResponse<Album>>(LIBRARY_CACHE_MS, 32);
+const albumDetailCache = createRequestCache<string, Album>(ALBUM_DETAIL_CACHE_MS, 128);
+const artistsCache = createRequestCache<string, ListResponse<Artist>>(LIBRARY_CACHE_MS, 1);
+const youtubeSearchCache = createRequestCache<string, ListResponse<YouTubeCandidate>>(PREVIEW_CACHE_MS, 128);
+const youtubeBrowseCache = createRequestCache<string, YouTubeBrowseResponse>(5 * 60_000, 50);
+const discoveryFeedFlight = createSingleFlight<number, DiscoveryFeedResponse>();
 function mediaCoverUrl(coverId?: string, size = 300): string {
   return coverId
     ? `${COVER_MEDIA_ORIGIN}/api/media/cover/${encodeURIComponent(coverId)}?size=${size}`
@@ -82,66 +80,35 @@ function sleep(milliseconds: number): Promise<void> {
 }
 
 function loadAlbumDetailCached(id: string): Promise<Album> {
-  const existing = albumDetailCache.get(id);
-  if (existing && Date.now() - existing.at < ALBUM_DETAIL_CACHE_MS) return existing.promise;
-
   const encoded = encodeURIComponent(id);
-  const promise = request<Album>(`/api/albums/${encoded}`)
+  return albumDetailCache.get(id, () => request<Album>(`/api/albums/${encoded}`)
     .catch(async () => {
-      // Album details are loaded only on demand. One short retry absorbs a
-      // transient Navidrome failure without background request storms.
+      // Preserve the one short Navidrome retry; all concurrent callers share
+      // the complete retry chain rather than multiplying provider requests.
       await sleep(140);
       return request<Album>(`/api/albums/${encoded}`);
-    })
-    .catch((error) => {
-      albumDetailCache.delete(id);
-      throw error;
-    });
-
-  albumDetailCache.set(id, { at: Date.now(), promise });
-  return promise;
+    }));
 }
 
 function loadAlbumsCached(type = "newest", size = 80, offset = 0): Promise<ListResponse<Album>> {
   const key = albumCacheKey(type, size, offset);
-  const existing = albumCache.get(key);
-  if (existing && Date.now() - existing.at < LIBRARY_CACHE_MS) return existing.promise;
-
-  const promise = request<ListResponse<Album>>(
+  return albumCache.get(key, () => request<ListResponse<Album>>(
     `/api/library/albums?type=${encodeURIComponent(type)}&size=${size}&offset=${offset}`,
-  ).catch((error) => {
-    albumCache.delete(key);
-    throw error;
-  });
-  albumCache.set(key, { at: Date.now(), promise });
-  return promise;
+  ));
 }
 
 function loadArtistsCached(): Promise<ListResponse<Artist>> {
-  if (artistsCache && Date.now() - artistsCache.at < LIBRARY_CACHE_MS) return artistsCache.promise;
-
-  const promise = request<ListResponse<Artist>>("/api/library/artists").catch((error) => {
-    artistsCache = null;
-    throw error;
-  });
-  artistsCache = { at: Date.now(), promise };
-  return promise;
+  return artistsCache.get("library", () => request<ListResponse<Artist>>("/api/library/artists"));
 }
 
 function youtubeBrowseCached(query: string, limit: number): Promise<YouTubeBrowseResponse> {
   const clean = query.trim();
   const safeLimit = Math.max(1, Math.min(30, limit));
   const key = `${clean.toLowerCase()}: ${safeLimit}`;
-  const previous = youtubeBrowseCache.get(key);
-  if (previous && Date.now() - previous.at < 5 * 60_000) return previous.promise;
-  const promise = request<YouTubeBrowseResponse>("/api/imports/youtube/browse", {
+  return youtubeBrowseCache.get(key, () => request<YouTubeBrowseResponse>("/api/imports/youtube/browse", {
     method: "POST", body: JSON.stringify({ query: clean, limit: safeLimit }),
-  }).catch((error) => { youtubeBrowseCache.delete(key); throw error; });
-  if (youtubeBrowseCache.size >= 50) youtubeBrowseCache.delete(youtubeBrowseCache.keys().next().value!);
-  youtubeBrowseCache.set(key, { at: Date.now(), promise });
-  return promise;
+  }));
 }
-
 function youtubeKey(artist: string, title: string, isrc: string | undefined, limit: number): string {
   return `${artist.trim().toLocaleLowerCase()}\n${title.trim().toLocaleLowerCase()}\n${isrc ?? ""}\n${limit}`;
 }
@@ -154,20 +121,11 @@ function youtubeSearchCached(
 ): Promise<ListResponse<YouTubeCandidate>> {
   const safeLimit = Math.max(1, Math.min(8, limit));
   const key = youtubeKey(artist, title, isrc, safeLimit);
-  const existing = youtubeSearchCache.get(key);
-  if (existing && Date.now() - existing.at < PREVIEW_CACHE_MS) return existing.promise;
-
-  const promise = request<ListResponse<YouTubeCandidate>>("/api/imports/youtube/search", {
+  return youtubeSearchCache.get(key, () => request<ListResponse<YouTubeCandidate>>("/api/imports/youtube/search", {
     method: "POST",
     body: JSON.stringify({ artist, title, isrc, limit: safeLimit }),
-  }).catch((error) => {
-    youtubeSearchCache.delete(key);
-    throw error;
-  });
-  youtubeSearchCache.set(key, { at: Date.now(), promise });
-  return promise;
+  }));
 }
-
 async function prewarmYoutubePreviews(
   candidates: Array<Pick<DiscoveryCandidate, "artist" | "title">>,
   concurrency = 2,
@@ -291,9 +249,16 @@ export const api = {
     }),
   }),
   prefetchDiscoveryAudio: prewarmDiscoveryAudio,
-  discoveryFeed: (page = 0) => request<DiscoveryFeedResponse>("/api/discovery/feed?page=" + Math.max(0, Math.floor(page))),
+  discoveryFeed: (page = 0) => {
+    const index = Math.max(0, Math.floor(page));
+    return discoveryFeedFlight.get(index, () => request<DiscoveryFeedResponse>(`/api/discovery/feed?page=${index}`));
+  },
   discoveryFeedStatus: () => request<DiscoveryFeedStatus>("/api/discovery/feed/status"),
-  refreshDiscoveryFeed: () => request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" }),
+  refreshDiscoveryFeed: () => request<{ accepted: boolean } & DiscoveryFeedStatus>("/api/discovery/feed/refresh", { method: "POST" })
+    .then((result) => {
+      if (result.accepted) discoveryFeedFlight.invalidate();
+      return result;
+    }),
   discoveryFeedback: (candidate: DiscoveryCandidate, value: -1 | 0 | 1) => request<{ ok: boolean; likes: number; dislikes: number; total: number }>("/api/discovery/feedback", {
     method: "POST",
     body: JSON.stringify({
