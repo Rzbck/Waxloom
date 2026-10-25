@@ -1,3 +1,9 @@
+## 2026-10-25 — A5 request/cache dedupe candidate
+
+- Branch `perf/request-cache-a5-20261025` starts clean from `main` 7e5873f, isolated from CSS/Player/gzip/API parity branches. Implemented **no-persistent-cache single-flight GET** for Discovery feed, with refresh-generation invalidation. Unified existing read-only API metadata Promise caches under bounded LRU/TTL-on-resolution `requestMemo.ts`. Old artist, album and YouTube metadata TTLs preserved; no mutation caching, no audio/cover cache or production changes.
+- `qa:request-cache` covers 21 synthetic tests and is included in Windows CI: 6 concurrent Discovery GETs produce only 1 mock HTTP request (5 avoided), same page is always fetched again after resolution, error/TTL and LRU behavior checked. See `docs/REQUEST_CACHE_A5_20261025.md` and closed-scope `docs/REFACTOR_AUDIT_TRACKER_20261025.md`. Real phone click-to-audible and cover/feed P95 remain **PENDING A7**, not claimed improved.
+- All 6 current isolated browser suites and 2 modern Discovery suites pass. The older discovery-feed-fill smoke fails on the **existing production Web assets as well**, because its refresh/wheel expectations are obsolete; do not treat this as an A5 regression or silently weaken the test. A7 may update it to the current contract.
+- **Next A6**, then **A7** integrated acceptance. Candidate ≠ deployed/DONE.
 ## 2026-10-25 — GitHub consolidation, no runtime rollout
 
 - Canonical `main` fast-forward source is live Web `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` with live API ancestor `6b1fe4505b15aa6ec21441d57709769c4930e010`. Any later maintenance commit only changes repository documentation. Production images unchanged.

@@ -1,5 +1,8 @@
 # HANDOFF — Waxloom
 
+## FINITE REFACTOR AUDIT TRACKER — SEVEN AXES ONLY
+
+This campaign is bounded to **A1–A7** in [`docs/REFACTOR_AUDIT_TRACKER_20261025.md`](docs/REFACTOR_AUDIT_TRACKER_20261025.md), with candidate/DONE definitions, evidence, next steps and a STOP condition. A5 network/cache request ownership is now a candidate on branch `perf/request-cache-a5-20261025` (21 synthetic assertions; details `docs/REQUEST_CACHE_A5_20261025.md`), following A3 CSS candidate and prior A1/A2/A4 candidates. The **next active axis is A6**, then **A7** final combined integration/performance/physical-device acceptance. No eighth axis, no implicit main merge/deployment and no claims of user-device validation.
 ## CURRENT REPOSITORY / RUNTIME IDENTITY (2026-10-25)
 
 GitHub `main` has been consolidated from the deployed Web source `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` (52 descendant commits over the September baseline). The repository's maintenance-only consolidation commit may be newer than the live Web image; do not equate a documentation commit with a deployed build.
