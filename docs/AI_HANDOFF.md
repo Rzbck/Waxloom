@@ -1,3 +1,8 @@
+## 2026-10-25 — finite refactor A6: module boundaries candidate
+
+- Branch `refactor/module-boundaries-a6-20261025` based on canonical main `7e5873f`. Four explicit owner extractions: `discoveryTaste.ts` (single Player/Discovery taste event/localStorage owner), `discoveryRanking.ts` (pure ranking and shelf), `importsPreview.ts` (Imports URL promise/65s cache), `waxloom_api/request_schemas.py` (13 Pydantic request DTOs). `App.tsx` remains routing/state orchestration; `instrumented:app` production middleware unchanged; no wide speculative splits or CSS/audio changes.
+- Verified exact SHA-256 for original/candidate 13 Pydantic `model_json_schema()` maps: `292c289599290d105d7db2c3ec5b81be9a86d1dcd8c2ca6937d5aee1e56dc9d4`. New QA: 21 Node assertions and 15 API wire tests; 41 prior Python tests also pass. Documentation `docs/MODULE_BOUNDARIES_A6_20261025.md` and single scope tracker `docs/REFACTOR_AUDIT_TRACKER_20261025.md`.
+- **Only remaining active axis: A7** consolidated integration, performance and real-device acceptance of A1–A6. CANDIDATE does not mean merged/deployed/user validated.
 ## 2026-10-25 — GitHub consolidation, no runtime rollout
 
 - Canonical `main` fast-forward source is live Web `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` with live API ancestor `6b1fe4505b15aa6ec21441d57709769c4930e010`. Any later maintenance commit only changes repository documentation. Production images unchanged.

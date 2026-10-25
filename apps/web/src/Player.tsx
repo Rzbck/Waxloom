@@ -17,6 +17,7 @@ import { CoverArtwork } from "./CoverArtwork";
 import { compactPlayedHistory, nextFromQueue, radioGenre, selectRadioTracks } from "./smartAutoplay";
 import { authorizeYouTubeImport, downloadPhase, enqueueDiscoveryDownload, enqueueSelectedYouTube, useDownloads } from "./downloadQueue";
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
+import { readTaste, writeTaste, subscribeTaste, type TasteState } from "./discoveryTaste";
 import { MarqueeText, MobilePlayerPanel, PlayerIcon } from "./MobilePlayerPanel";
 import type { DiscoveryCandidate, PlaylistSummary, PreviewTrack, Song, YouTubeBrowseTrack } from "./types";
 
@@ -102,12 +103,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [playerStarred, setPlayerStarred] = useState(false);
   // Shared with Discovery's taste profile: dislikes are durable and influence
   // recommendations without deleting or hiding the listener's music files.
-  const [playerTaste, setPlayerTaste] = useState<Record<string, { value: -1 | 1; artist: string; tags: string[] }>>(() => {
-    try {
-      const value = JSON.parse(localStorage.getItem("waxloom.discovery.taste.v1") ?? "{}");
-      return value && typeof value === "object" ? value : {};
-    } catch { return {}; }
-  });
+  const [playerTaste, setPlayerTaste] = useState<TasteState>(() => readTaste());
   const [playerActionBusy, setPlayerActionBusy] = useState(false);
   const [playerActionMessage, setPlayerActionMessage] = useState<string | null>(null);
   const [restoreDone, setRestoreDone] = useState(false);
@@ -142,20 +138,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const currentTaste = tasteKey ? (playerTaste[tasteKey]?.value ?? 0) : 0;
   const playerDisliked = currentTaste === -1;
   const playerLiked = currentPreview ? currentTaste === 1 : playerStarred;
-  useEffect(() => {
-    const syncTaste = () => {
-      try {
-        const value = JSON.parse(localStorage.getItem("waxloom.discovery.taste.v1") ?? "{}");
-        setPlayerTaste(value && typeof value === "object" ? value : {});
-      } catch { setPlayerTaste({}); }
-    };
-    window.addEventListener("waxloom:discovery-taste", syncTaste);
-    window.addEventListener("storage", syncTaste);
-    return () => {
-      window.removeEventListener("waxloom:discovery-taste", syncTaste);
-      window.removeEventListener("storage", syncTaste);
-    };
-  }, []);
+  useEffect(() => subscribeTaste(() => setPlayerTaste(readTaste())), []);
   useEffect(() => {
     setPlayerStarred(Boolean(currentSong?.starred));
     playlistRequestRef.current += 1;
@@ -803,8 +786,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     else next[tasteKey] = { value, artist, tags };
     const publish = (updated: typeof next) => {
       setPlayerTaste(updated);
-      try { localStorage.setItem("waxloom.discovery.taste.v1", JSON.stringify(updated)); } catch { /* private mode */ }
-      window.dispatchEvent(new Event("waxloom:discovery-taste"));
+      writeTaste(updated);
     };
     publish(next);
     setPlayerActionBusy(true);

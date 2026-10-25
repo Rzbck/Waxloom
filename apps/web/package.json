@@ -24,7 +24,8 @@
     "qa:discovery-instant": "node scripts/discovery-instant-neutral-smoke.mjs",
     "qa:home-fluidity": "node scripts/home-shuffle-fluidity-smoke.mjs",
     "qa:home-album": "node --experimental-strip-types scripts/home-album-metadata-smoke.mjs",
-    "qa:ios-background": "node --experimental-strip-types scripts/ios-background-audio-smoke.mjs"
+    "qa:ios-background": "node --experimental-strip-types scripts/ios-background-audio-smoke.mjs",
+    "qa:module-boundaries": "node --experimental-strip-types scripts/module-boundaries-smoke.mjs"
   },
   "dependencies": {
     "react": "19.3.0",
