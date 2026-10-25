@@ -1,8 +1,0 @@
-/* Scroll clearance for Waxloom's fixed player.
-   The app shell already reserves the entire dock height:
-   96px on desktop and the mini-player + navigation on mobile.
-   A second full-sized .content clearance created 150px+ blank regions
-   after the last track. Leave only a touch of visual breathing room. */
-body:has(.player-dock) .content {
-  padding-bottom: 28px !important;
-}

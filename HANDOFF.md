@@ -1,5 +1,8 @@
 # HANDOFF — Waxloom
 
+## FINITE REFACTOR AUDIT TRACKER - NO EXTRA AXES
+
+The user explicitly requires **a bounded cleanup, not indefinite refactoring**. [`docs/REFACTOR_AUDIT_TRACKER_20261025.md`](docs/REFACTOR_AUDIT_TRACKER_20261025.md) is the mandatory single source of truth for the **seven** original audit axes, evidence, exact DONE criteria, next steps and STOP rule. Update it when finishing each tranche. Candidate branches are **not DONE** until integrated, tested and accepted. After A3 CSS candidate, proceed only with **A5 cache/request ownership**, **A6 measured module responsibilities**, then **A7 integrated validation/release** (including prior A1/A2/A4 candidate acceptance). Do not add an eighth axis, deploy implicitly or claim real-device acceptance from synthetic Chrome tests.
 ## CURRENT REPOSITORY / RUNTIME IDENTITY (2026-10-25)
 
 GitHub `main` has been consolidated from the deployed Web source `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` (52 descendant commits over the September baseline). The repository's maintenance-only consolidation commit may be newer than the live Web image; do not equate a documentation commit with a deployed build.
