@@ -120,7 +120,11 @@ try{
   // latency. Prefer the app's in-browser measurement, which still reliably
   // detects accidentally waiting for the synthetic 3700 ms network delay.
   const measuredShuffle = first.timing?.length ? first.timing.at(-1) : elapsed;
-  check(measuredShuffle<900,"Shuffle waited for slow network: in-browser="+measuredShuffle+"ms, CDP wall="+elapsed+"ms");
+  // The mocked NEXT network pool sleeps 3700ms. This gate detects waiting for
+  // that network call, not a 900ms hardware SLA on contended GitHub runners.
+  // A separate device profile must enforce real-world interaction latency.
+  check(counts.random===1,"Shuffle clicked without a ready pool (fresh random request)");
+  check(measuredShuffle<1800,"Shuffle waited for slow network: in-browser="+measuredShuffle+"ms, CDP wall="+elapsed+"ms");
   await wait(700);
   await evaluate('document.querySelector(".home-quickbar .primary-action")?.click()');
   await wait(120);
