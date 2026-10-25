@@ -1,3 +1,7 @@
+## 2026-10-25 - Host-independent synthetic Home shuffle gate correction
+
+- GitHub Windows runner build compiled but synthetic Home shuffle gate measured 1046ms vs the former 900ms upper bound; local isolated Chrome measured 84ms using the same mock. The test was measuring a busy hosted event loop, not actual hardware response. The mocked refill takes 3700ms; the behavioral gate now separately asserts no fresh random request at click and allows 1800ms to detect an accidental network wait. Do not present 1800ms as a product latency target; real-user measurements remain required.
+- Production unchanged; this is a browser QA test stability improvement bundled into the existing Player isolation PR. Do not merge until the new full Windows CI is green.
 ## 2026-10-25 - Player progress isolation (candidate, no deployment)
 
 - **IMPLEMENTED / NOT USER VALIDATED:** Branch `refactor/player-progress-context-20261025` from clean canonical `main` `7e5873f`. The **same HTMLAudioElement** still drives all playback, queues, pre-end iOS handoff, scrobbling and MediaSession. Do not introduce a second audio engine.
