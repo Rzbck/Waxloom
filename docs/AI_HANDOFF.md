@@ -1,3 +1,8 @@
+## 2026-10-25 - Bounded 7-axis refactor tracker and CSS shadow cleanup
+
+- Canonical finite scope: **exactly seven audit axes A1-A7** in `docs/REFACTOR_AUDIT_TRACKER_20261025.md`. Candidate branches are not marked DONE before integration/deployment/acceptance; after CSS, only A5 (cache/requêtes), A6 (modules), then A7 (integration/QA) remain active, with unfinished A1/A2/A4 acceptance inside A7. No eighth axis or endless cleanup.
+- CSS PR #39 follow-up: PostCSS inspection removed 12 earlier declarations with identical selectors/media/importance later winning, plus five empty blocks. Kept SVG mask fallbacks. `!important` 680→669; `qa:css-cascade` limit 669. Isolated Chromium CSSOM comparison **PASS** 8 viewport/motion states and 280 element snapshots, including focus/pseudo-elements and geometry. No production change; physical Safari remains unvalidated.
+- Details and baseline bundle hash in `docs/CSS_CASCADE_CONSOLIDATION_20261025.md`.
 ## 2026-10-25 - CSS cascade first consolidation (candidate)
 
 - **IMPLEMENTED / NOT USER VALIDATED** on `refactor/css-consolidation-20261025` from published `main` `7e5873f`: 6 contiguous legacy patch stylesheets grouped into 2 new owner files (`ui-control-polish.css` and `layout-stability.css`) in the exact original import order, plus 1 unused `discovery-playlist.css` deleted. The Vite-generated CSS matches original SHA-256 and size (188642 bytes) exactly; no visual or performance changes claimed. The original 680 `!important` remain for later measured refactor.

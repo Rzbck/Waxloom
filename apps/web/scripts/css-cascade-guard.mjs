@@ -31,12 +31,12 @@ for (const file of cssFiles) {
 for (const file of references.keys()) {
   assert.ok(cssFiles.includes(file), `${file}: imported stylesheet is missing`);
 }
-// Baseline count after consolidating identical CSS output; future CSS changes
+// Ratcheted count after verified same-selector override pruning; future CSS changes
 // should lower it, not silently add another layer of !important patches.
-assert.ok(important <= 680,
-  `${important} !important declarations exceed 2026-10-25 baseline of 680`);
+assert.ok(important <= 669,
+  `${important} !important declarations exceed 2026-10-25 tranche 2 baseline of 669`);
 const main = readFileSync(join(src, "main.tsx"), "utf8");
 assert.ok(main.indexOf('import "./ui-control-polish.css";') >= 0
   && main.indexOf('import "./layout-stability.css";') > main.indexOf('import "./ui-control-polish.css";'),
   "UI controls and layout stability must retain their cascade order");
-console.log(`PASS CSS cascade: ${cssFiles.length} referenced stylesheets, ${important} !important (<= 680 baseline)`);
+console.log(`PASS CSS cascade: ${cssFiles.length} referenced stylesheets, ${important} !important (<= 669 baseline)`);

@@ -4,10 +4,6 @@
    The track-first Discovery cards no longer use the legacy .taste-actions wrapper,
    so bind the Lucide thumbs directly to the final two action buttons. */
 
-.discovery-song-card > .taste-chip {
-  font-size: 0 !important;
-}
-
 .discovery-song-card > .taste-chip::before {
   content: "" !important;
   display: block !important;
@@ -85,7 +81,6 @@
 }
 
 .discovery-song-card > .compact-action-add {
-  font-size: 1rem !important;
   line-height: 1 !important;
 }
 
@@ -164,21 +159,6 @@
 .compact-action-play::before {
   -webkit-mask-image: var(--waxloom-play-svg) !important;
   mask-image: var(--waxloom-play-svg) !important;
-}
-
-.track-play::before {
-  width: 13px !important;
-  height: 13px !important;
-}
-
-.cover-play::before {
-  width: 17px !important;
-  height: 17px !important;
-}
-
-.play-button::before {
-  width: 24px !important;
-  height: 24px !important;
 }
 
 .play-button[aria-label="Pause"]::before,
@@ -359,11 +339,6 @@
   .taste-chip-less::before {
     width: 15px !important;
     height: 15px !important;
-  }
-
-  .play-button::before {
-    width: 22px !important;
-    height: 22px !important;
   }
 }
 

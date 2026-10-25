@@ -29,6 +29,18 @@ After consolidating the six files, Vite generated the **same CSS asset filename,
 
 `npm run qa:css-cascade` ensures each CSS source is imported once, imported styles exist, the two new ownership files retain their ordering, and `!important` declarations do not exceed the current **680** baseline. The check is wired into Windows GitHub CI. It is not a visual oracle: further actual edits require computed-style/screenshots and isolated browser regression tests.
 
+## Second bounded tranche — same-selector shadowed declarations
+
+The first tranche was a byte-identical **file regrouping**. This second tranche changes stylesheet source contents but only where an earlier declaration is inevitably overwritten by a **later rule with the same selector, same media/at-rule context, same importance and a valid value**. A PostCSS inspection identified 16 candidate pairs in targeted CSS owners. Four mask-image fallback pairs (`url(data:image/svg+xml)` followed by a CSS variable) were explicitly **preserved**; these provide a defensive fallback if custom-property resolution becomes invalid.
+
+- Removed **12** proven redundant declarations: 2 in `vinyl-focus.css` and 10 in `ui-control-polish.css`; **5 resulting empty CSS rule blocks** removed.
+- `!important` ratchet decreased from **680 to 669** (11 of the 12 declarations carried `!important`). Updated `qa:css-cascade` to reject future increases over 669.
+- CSS built output is now **188330 bytes**, versus the prior **188642 bytes**. This is a maintenance correctness cleanup; the roughly 312-byte asset reduction is **not a meaningful performance claim**.
+- Added a reusable isolated-CDP `apps/web/scripts/css-computed-parity-smoke.mjs` to compare two *previously built* CSS files in a disposable Chrome session. Baseline loaded from the exact earlier `a1cba62` Docker image, with SHA-256 `66DBD039A967360207D244522325675252C118458D732E9B4214B18E8F`.
+- Browser-computed parity **PASS** at **320, 390, 768 and 1440 px** in normal and `prefers-reduced-motion: reduce` modes, including programmatic button focus. Compared **280 element and pseudo-element snapshots** across **8 states**, including computed geometry, width/height, grid layout, masks, visibility, animation, color and other computed values. This is not a substitute for physical iPhone/Safari testing.
+- Existing broader Chrome smoke tests protect real synthetic navigation, Discovery, vinyl wheel, neutral feedback, Imports/seek and iOS background audio. Do not weaken existing tests to make this branch pass.
+
+This **closes the first measured CSS redundancy subtask** without attempting to remove all 669 remaining `!important`: many are active browser/iOS compatibility guards. Do not invent additional CSS refactors merely to reduce the count. The A3 axis remains a candidate until reviewed integration and device acceptance, then move to A5 per `docs/REFACTOR_AUDIT_TRACKER_20261025.md`.
 ## Future independent, behavior-preserving CSS work
 
 1. Audit `mobile-hotfix.css`, `discovery-bad-source-v9.css`, `vinyl-focus.css` and `discovery-fit.css` rule-by-rule for later overshadowed properties. Use a selector/media/specificity-aware audit, not regex removal of `!important` and not blanket `@layer` conversion.

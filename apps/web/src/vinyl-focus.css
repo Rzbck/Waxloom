@@ -98,8 +98,6 @@
   height: 50px !important;
 }
 .waxloom-vinyl-display .waxloom-vinyl-selected {
-  min-width: 0;
-  max-width: none !important;
   flex: 1 1 auto;
   overflow: hidden;
   height: 42px;
