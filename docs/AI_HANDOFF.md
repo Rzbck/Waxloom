@@ -1,3 +1,10 @@
+## 2026-10-25 - Player progress isolation (candidate, no deployment)
+
+- **IMPLEMENTED / NOT USER VALIDATED:** Branch `refactor/player-progress-context-20261025` from clean canonical `main` `7e5873f`. The **same HTMLAudioElement** still drives all playback, queues, pre-end iOS handoff, scrobbling and MediaSession. Do not introduce a second audio engine.
+- `apps/web/src/Player.tsx`: a narrow `PlayerProgressContext` holds clock (`currentTime`), duration and `seekTo`; the shared `PlayerContext` now contains only playback identity/commands. This prevents regular `timeupdate` events from invalidating the entire navigation, Discovery and music grids through the global context.
+- `apps/web/src/ImportsView.tsx`: only `ImportPreviewSeek` subscribes to the new clock context; results, thumbnails, search and download UI use the stable playback context. The same slider and event semantics are retained.
+- **AUTOMATED GATE PASS:** TypeScript/Vite build, iOS background, smart autoplay, browser Home/shuffle, navigation-history, Imports preview seek, mobile, isolated iOS background, library grids. New `qa:player-context` guards 21 source-contract assertions and is wired into Windows CI. The change does **not** claim a measured real-device FPS or time-to-audio improvement.
+- **No runtime changes:** production Web remains `82eddfc`, API `6b1fe45`, GitHub `main` `7e5873f`. Next steps: candidate SHA validation in real browser plus independent CSS consolidation and asset-loading cleanup. Do not merge this branch into `main` or deploy without explicit authorization and device QA.
 ## 2026-10-25 — GitHub consolidation, no runtime rollout
 
 - Canonical `main` fast-forward source is live Web `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` with live API ancestor `6b1fe4505b15aa6ec21441d57709769c4930e010`. Any later maintenance commit only changes repository documentation. Production images unchanged.

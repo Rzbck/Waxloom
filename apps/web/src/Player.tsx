@@ -29,9 +29,6 @@ type PlayerContextValue = {
   currentPreview: PreviewTrack | null;
   currentIndex: number;
   playing: boolean;
-  currentTime: number;
-  duration: number;
-  seekTo: (seconds: number) => void;
   togglePlayback: () => void;
   playSongs: (songs: Song[], startIndex?: number, options?: { ordered?: boolean; shuffled?: boolean }) => void;
   playNow: (song: Song) => void;
@@ -40,6 +37,21 @@ type PlayerContextValue = {
 };
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
+
+// The media clock changes many times per song; keep it away from navigation
+// and large grids subscribed to player controls and track identity.
+type PlayerProgressValue = {
+  currentTime: number;
+  duration: number;
+  seekTo: (seconds: number) => void;
+};
+const PlayerProgressContext = createContext<PlayerProgressValue | null>(null);
+
+export function usePlayerProgress(): PlayerProgressValue {
+  const context = useContext(PlayerProgressContext);
+  if (!context) throw new Error("usePlayerProgress must be used inside PlayerProvider");
+  return context;
+}
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -703,12 +715,12 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  function seek(value: number) {
+  const seek = useCallback((value: number) => {
     const audio = audioRef.current;
     if (!audio) return;
     audio.currentTime = value;
     setCurrentTime(value);
-  }
+  }, []);
 
   function cycleRepeat() {
     setRepeat((value) => (value === "off" ? "all" : value === "all" ? "one" : "off"));
@@ -995,15 +1007,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       currentPreview,
       currentIndex: activeIndex,
       playing,
-      currentTime, duration,
-      seekTo: seek,
       togglePlayback,
       playSongs,
       playNow,
       addToQueue,
       playPreviewTracks,
     }),
-    [queue, currentSong, currentPreview, activeIndex, playing, currentTime, duration, playSongs, playNow, addToQueue, playPreviewTracks],
+    [queue, currentSong, currentPreview, activeIndex, playing, playSongs, playNow, addToQueue, playPreviewTracks],
+  );
+  const progressValue = useMemo<PlayerProgressValue>(
+    () => ({ currentTime, duration, seekTo: seek }),
+    [currentTime, duration, seek],
   );
 
   const jumpToIndex = (targetIndex: number) => {
@@ -1094,7 +1108,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   return (
     <PlayerContext.Provider value={contextValue}>
-      {children}
+      <PlayerProgressContext.Provider value={progressValue}>
+        {children}
+      </PlayerProgressContext.Provider>
       <audio
         ref={audioRef}
         preload={mode === "preview" ? "auto" : "none"}
