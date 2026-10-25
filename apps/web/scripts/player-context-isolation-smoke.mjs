@@ -28,7 +28,7 @@ for (const expected of ["currentTime", "duration", "seekTo"]) {
 }
 check(player.includes("<PlayerContext.Provider value={contextValue}>")
   && player.includes("<PlayerProgressContext.Provider value={progressValue}>")
-  && player.includes("{children}\n      </PlayerProgressContext.Provider>"),
+  && /\{children\}\s*<\/PlayerProgressContext\.Provider>/.test(player),
   "App is inside the clock provider but only gets track/command notifications");
 const seekWidget = section(imports, "function ImportPreviewSeek(", "function cachePreview(");
 check(seekWidget.includes("usePlayerProgress()") && seekWidget.includes("Seek in preview"),
