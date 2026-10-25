@@ -1,3 +1,8 @@
+## 2026-10-25 — A7 final integrated candidate (no rollout)
+
+- Source branch `integration/audit-a7-20261025` combines A1 (`1a2d496`), A2 (`dffd7e5`), A3 (`d529c05`), A4 (`b604b6c`), A5 (`e89ac08`), A6 (`e2a52ee`) using **non-destructive merges retaining source ancestry**. `main` remains `7e5873f` and live Web/API are unchanged. Draft integration PR, not permission to promote.
+- Conflict resolution: all four `qa:css-cascade`, `qa:player-context`, `qa:request-cache`, `qa:module-boundaries` test gates retained in CI and npm scripts. A4 standalone Imports seek slider and A6 standalone preview URL cache are both preserved. A4 structural test updated for moved preview owner (old `function cachePreview` no longer exists in view); no functional code added to satisfy the test.
+- Full decision history and release acceptance/rollback runbook: `docs/A7_INTEGRATION_RELEASE_ACCEPTANCE_20261025.md`; finite stop tracker: `docs/REFACTOR_AUDIT_TRACKER_20261025.md`. Do not reopen A1–A6 or invent A8. Physical iPhone/PWA acceptance and deployed-header/audio timings remain **PENDING**, not implicitly PASS or waived.
 ## 2026-10-25 - Refactor P0 tranche 1: production API contract tests (candidate)
 
 - Candidate branch `test/runtime-entrypoint-parity-20261025` starts at canonical `main` `7e5873f`; this change is **tests and CI only**, not a production rollout or an API behavior change.

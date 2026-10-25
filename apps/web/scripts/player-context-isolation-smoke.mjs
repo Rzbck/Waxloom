@@ -30,7 +30,12 @@ check(player.includes("<PlayerContext.Provider value={contextValue}>")
   && player.includes("<PlayerProgressContext.Provider value={progressValue}>")
   && /\{children\}\s*<\/PlayerProgressContext\.Provider>/.test(player),
   "App is inside the clock provider but only gets track/command notifications");
-const seekWidget = section(imports, "function ImportPreviewSeek(", "function cachePreview(");
+// A6 moved preview URL caching out of ImportsView. The A4 slider must still
+// be isolated from the page, and the old cache may not be recreated here.
+const seekWidget = section(imports, "function ImportPreviewSeek(", "function guessAlbumMode(");
+check(imports.includes('import { cachePreview } from "./importsPreview";')
+  && !imports.includes("function cachePreview("),
+  "Imports owns the seek widget; importsPreview owns URL caching");
 check(seekWidget.includes("usePlayerProgress()") && seekWidget.includes("Seek in preview"),
   "Active preview seek owns the audio clock subscription");
 const importView = imports.slice(imports.indexOf("export function ImportsView("));
