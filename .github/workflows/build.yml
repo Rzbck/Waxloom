@@ -46,7 +46,7 @@ jobs:
           python -m venv .ci-venv
           .\.ci-venv\Scripts\python.exe -m pip install --disable-pip-version-check -e '.\apps\api[dev]'
           .\.ci-venv\Scripts\python.exe -m compileall -q .\apps\api\src
-          .\.ci-venv\Scripts\python.exe -c "from waxloom_api.main import app; assert app.title == 'Waxloom API'; print('Waxloom API import PASS')"
+          .\.ci-venv\Scripts\python.exe -c "from waxloom_api import main, instrumented; assert main.app.title == 'Waxloom API'; assert instrumented.app.app.app.app is main.app; print('Production ASGI entrypoint chain PASS')"
           .\.ci-venv\Scripts\python.exe .\scripts\CHECK_DISCOVERY_ENGINE.py
           .\.ci-venv\Scripts\python.exe -m pytest -q .\apps\api\tests
 

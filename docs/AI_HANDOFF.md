@@ -1,3 +1,9 @@
+## 2026-10-25 - Refactor P0 tranche 1: production API contract tests (candidate)
+
+- Candidate branch `test/runtime-entrypoint-parity-20261025` starts at canonical `main` `7e5873f`; this change is **tests and CI only**, not a production rollout or an API behavior change.
+- `.github/workflows/build.yml` now imports `waxloom_api.instrumented:app`, the actual Docker entrypoint, and asserts its three ASGI middleware layers wrap the FastAPI application. New `test_runtime_entrypoint.py` runs real wrapper requests against **synthetic** preview bytes (206, HEAD, suffix range, 416), plus ensures the cover gate does not block normal music streams.
+- Local Python 3.12.11: 3 new tests PASS and 44 total API tests PASS; Ruff and repository security gate PASS. FastAPI `@app.on_event` deprecation remains an independent future migration; no playback, provider data, Docker service or real library content was modified.
+- Keep this candidate unmerged until required review and full CI. Next focused tranche: measure and safely introduce asset compression and/or frontend bundle partitioning, independently from audio state refactors.
 ## 2026-10-25 — GitHub consolidation, no runtime rollout
 
 - Canonical `main` fast-forward source is live Web `82eddfc8fe114dfe855cbb0dd98b97ab5ea28718` with live API ancestor `6b1fe4505b15aa6ec21441d57709769c4930e010`. Any later maintenance commit only changes repository documentation. Production images unchanged.
