@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { api } from "./api";
+import { cachePreview } from "./importsPreview";
 import { authorizeYouTubeImport, enqueueSelectedYouTube, useDownloads } from "./downloadQueue";
 import { YouTubeTrackArt, YouTubeCollectionArt } from "./YouTubeArt";
 import { CoverArtwork } from "./CoverArtwork";
@@ -26,10 +27,6 @@ function usableChannelPlaylists(items: YouTubeBrowseCollection[]) {
     item.count !== 0 && /^https:\/\/www\.youtube\.com\/playlist\?list=[a-zA-Z0-9_-]{8,90}$/.test(item.url),
   );
 }
-const previewCache = new Map<string, { at: number; url: string; duration?: number }>();
-const previewInFlight = new Map<string, Promise<{ preview_url: string; duration?: number }>>();
-const PREVIEW_VALID_MS = 65_000;
-
 function displayTime(seconds?: number | null) {
   if (!seconds || !Number.isFinite(seconds)) return "—";
   return `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
@@ -46,19 +43,7 @@ function ImportPreviewSeek({ previewDuration }: { previewDuration: number }) {
     <span>{displayTime(total)}</span>
   </div>;
 }
-function cachePreview(track: YouTubeBrowseTrack) {
-  const value = previewCache.get(track.id);
-  if (value && Date.now() - value.at < PREVIEW_VALID_MS) return Promise.resolve({
-    preview_url: value.url, duration: value.duration,
-  });
-  if (previewInFlight.has(track.id)) return previewInFlight.get(track.id)!;
-  const promise = api.youtubePreview(track.url).then((result) => {
-    previewCache.set(track.id, { at: Date.now(), url: result.preview_url, duration: result.duration });
-    return result;
-  }).finally(() => { previewInFlight.delete(track.id); });
-  previewInFlight.set(track.id, promise);
-  return promise;
-}
+
 function guessAlbumMode(value: string) { return /(?:[?&]list=|\/playlist\?)/i.test(value); }
 
 export function ImportsView({

@@ -27,7 +27,8 @@
     "qa:ios-background": "node --experimental-strip-types scripts/ios-background-audio-smoke.mjs",
     "qa:css-cascade": "node scripts/css-cascade-guard.mjs",
     "qa:player-context": "node scripts/player-context-isolation-smoke.mjs",
-    "qa:request-cache": "node --experimental-strip-types scripts/request-cache-smoke.mjs"
+    "qa:request-cache": "node --experimental-strip-types scripts/request-cache-smoke.mjs",
+    "qa:module-boundaries": "node --experimental-strip-types scripts/module-boundaries-smoke.mjs"
   },
   "dependencies": {
     "react": "19.3.0",

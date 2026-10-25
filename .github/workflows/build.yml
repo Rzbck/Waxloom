@@ -68,6 +68,7 @@ jobs:
           npm.cmd run qa:css-cascade
           npm.cmd run qa:player-context
           npm.cmd run qa:request-cache
+          npm.cmd run qa:module-boundaries
 
       - name: Synthetic Chrome regressions (isolated, no real music)
         shell: pwsh
