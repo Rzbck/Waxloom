@@ -1,3 +1,9 @@
+## 2026-11-23 — Shuffle order shown in Now Playing
+
+- Root cause: `MobilePlayerPanel` displays the original queue tail while `nextFromQueue` was choosing a random item only at actual Next. Therefore "Up next" was not a trustworthy forecast in Shuffle mode.
+- Candidate `fix/shuffle-upnext-20261123` based on deployed Web `c471b0e`: pre-plan the remaining queue once on shuffle/start, consume it in the same order for Navidrome and Discovery previews, preserving the live song and history. The pure shuffle helper and tests are in `smartAutoplay.ts` / `smart-autoplay-smoke.mjs`.
+- See `docs/SHUFFLE_UPNEXT_20261123.md`. User validation and production release status must be recorded separately; no test port is permitted without consent.
+
 ## 2026-11-23 — Desktop Now Playing: isolated candidate, NOT USER VALIDATED
 
 - Branch `feat/desktop-now-playing-20261123` starts from current `main` `972f38a`. The existing immersive `MobilePlayerPanel` is accessible on desktop with a responsive two-column layout and bottom-player entry points; no second audio element, API, or queue owner. Preview art, overlay stacking, Escape and responsive resizing are covered.

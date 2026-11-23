@@ -14,7 +14,7 @@ import {
 import { api } from "./api";
 import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
 import { CoverArtwork } from "./CoverArtwork";
-import { compactPlayedHistory, nextFromQueue, radioGenre, selectRadioTracks } from "./smartAutoplay";
+import { compactPlayedHistory, nextFromQueue, planShuffleUpcoming, radioGenre, selectRadioTracks } from "./smartAutoplay";
 import { authorizeYouTubeImport, downloadPhase, enqueueDiscoveryDownload, enqueueSelectedYouTube, useDownloads } from "./downloadQueue";
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
 import { readTaste, writeTaste, subscribeTaste, type TasteState } from "./discoveryTaste";
@@ -449,9 +449,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       setShuffle(true);
       setRepeat("off");
     }
+    const shouldShuffle = options?.ordered ? false : options?.shuffled ? true : shuffle;
+    const orderedQueue = shouldShuffle ? planShuffleUpcoming(songs, safeIndex) : [...songs];
     explicitQueueRef.current = true;
     queueEpochRef.current += 1;
-    liveQueueRef.current = [...songs];
+    liveQueueRef.current = orderedQueue;
     liveIndexRef.current = safeIndex;
     nextInProgressRef.current = false;
     setRadioNotice(null);
@@ -461,7 +463,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setCurrentTime(0);
     setPreviewError(null);
     startLocalPlayback(song);
-  }, [startLocalPlayback]);
+  }, [startLocalPlayback, shuffle]);
 
   const playPreviewTracks = useCallback((
     tracks: PreviewTrack[], startIndex = 0,
@@ -507,11 +509,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     setCurrentTime(0);
     setDuration(target.duration ?? 0);
     setMode("preview");
-    setPreviewQueue(preparedTracks);
+    setPreviewQueue(shuffle ? planShuffleUpcoming(preparedTracks, safeIndex) : preparedTracks);
     setPreviewIndex(safeIndex);
     setPlaying(true);
     setPreviewError(null);
-  }, [mode, currentPreview?.id, playing]);
+  }, [mode, currentPreview?.id, playing, shuffle]);
+
+  const toggleShuffle = useCallback(() => {
+    const enabled = !shuffle;
+    if (enabled && mode === "preview") {
+      setPreviewQueue((items) => planShuffleUpcoming(items, previewIndex));
+    } else if (enabled && mode === "navidrome" && liveIndexRef.current >= 0) {
+      const planned = planShuffleUpcoming(liveQueueRef.current, liveIndexRef.current);
+      liveQueueRef.current = planned;
+      setQueue(planned);
+    }
+    // Switching OFF leaves the already visible order in place (no surprise
+    // reordering). Switching ON plans all remaining tracks once.
+    setShuffle(enabled);
+  }, [shuffle, mode, previewIndex]);
 
   const playNow = useCallback((song: Song) => playSongs([song], 0), [playSongs]);
 
@@ -570,12 +586,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (!current) return;
         // A hardware/UI Next always skips Repeat One, even from a single.
         const nextRepeat = cause === "manual" && liveQueueRef.current.length <= 1 ? "off" : repeat;
-        let target = nextFromQueue(liveQueueRef.current, index, shuffle, nextRepeat);
+        // Shuffle was planned when enabled/when this queue was selected.
+        // Never randomize again here: "Up next" must predict actual Next.
+        let target = nextFromQueue(liveQueueRef.current, index, false, nextRepeat);
         if (!target && (autoplay || cause === "manual")) {
           traceLocalPlayer("next-request", current.id);
           await refillAutoplay(current, epoch);
           if (epoch !== queueEpochRef.current) return; // Newer selection wins.
-          target = nextFromQueue(liveQueueRef.current, liveIndexRef.current, shuffle, "off");
+          target = nextFromQueue(liveQueueRef.current, liveIndexRef.current, false, "off");
         }
         if (!target) {
           if (cause !== "manual") { wantsPlaybackRef.current = false; setPlaying(false); }
@@ -1293,7 +1311,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
             <div className="player-center">
               <div className="player-buttons">
-                <button className={shuffle ? "icon-button icon-button-active" : "icon-button"} type="button" onClick={() => setShuffle((value) => !value)} aria-label="Shuffle">⤨</button>
+                <button className={shuffle ? "icon-button icon-button-active" : "icon-button"} type="button" onClick={toggleShuffle} aria-label="Shuffle">⤨</button>
                 <button className="icon-button" type="button" onClick={previous} aria-label="Previous">◀◀</button>
                 <button className="play-button" type="button" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"} disabled={mode === "preview" && Boolean(previewResolving)}>
                   {mode === "preview" && previewResolving ? "…" : playing ? "Ⅱ" : "▶"}
@@ -1390,7 +1408,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             onPrevious={previous}
             onNext={() => next("manual")}
             onSeek={seek}
-            onShuffle={() => setShuffle((value) => !value)}
+            onShuffle={toggleShuffle}
             onRepeat={cycleRepeat}
             onFavorite={() => void handleLikePlaying()}
             onDislike={() => void toggleDislikePlaying()}

@@ -51,6 +51,23 @@ export function compactPlayedHistory(
   return { queue: songs.slice(cut), index: safeKeep };
 }
 
+// Prepare an actual upcoming shuffle order once. The player and its "Up next"
+// display then consume the same queue, rather than picking an unseen random
+// song at the moment Next is pressed. History and current track remain fixed.
+export function planShuffleUpcoming<T>(
+  items: readonly T[], currentIndex: number, rng: () => number = Math.random,
+): T[] {
+  const result = [...items];
+  const first = Math.max(0, currentIndex + 1);
+  for (let left = first; left < result.length - 1; left += 1) {
+    const sample = rng();
+    const raw = Number.isFinite(sample) ? sample : 0;
+    const chosen = left + Math.floor(Math.min(0.9999999, Math.max(0, raw)) * (result.length - left));
+    [result[left], result[chosen]] = [result[chosen], result[left]];
+  }
+  return result;
+}
+
 // Shuffle reshuffles the *upcoming* part only, keeping the already heard
 // history and every user-enqueued song intact, instead of revisiting old tracks.
 export function nextFromQueue(

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { compactPlayedHistory, nextFromQueue, radioGenre, selectRadioTracks } from "../src/smartAutoplay.ts";
+import { compactPlayedHistory, nextFromQueue, planShuffleUpcoming, radioGenre, selectRadioTracks } from "../src/smartAutoplay.ts";
 let checks=0;
 function same(actual, expected){ assert.deepEqual(actual,expected);checks++; }
 const s=(i,genre="House")=>({id:"qa-song-"+i,title:"Song "+i,artist:i%4===0?"One Artist":"Other Artist",genre});
@@ -20,6 +20,36 @@ same(shuffled?.index,1);
 same(shuffled?.queue[1].id,"qa-song-3");
 same(shuffled?.queue[0].id,"qa-song-0");
 same(shuffled?.queue[3].id,"qa-song-1");
+// Plan the entire tail once: "Up next" and the actual transport advance
+// must consume identical positions, with no fresh random draw on Next.
+const planned=planShuffleUpcoming(seq,0,()=>0.99);
+same(planned.map((song)=>song.id),["qa-song-0","qa-song-3","qa-song-1","qa-song-2"]);
+same(seq.map((song)=>song.id),["qa-song-0","qa-song-1","qa-song-2","qa-song-3"]);
+same(planShuffleUpcoming(seq,2,()=>0.99).map((song)=>song.id),["qa-song-0","qa-song-1","qa-song-2","qa-song-3"]);
+same(planShuffleUpcoming(seq,0,()=>Number.NaN).map((song)=>song.id),["qa-song-0","qa-song-1","qa-song-2","qa-song-3"]);
+let followIndex=0;
+for(const expected of planned.slice(1)) {
+  const next=nextFromQueue(planned,followIndex,false,"off",()=>{throw Error("Re-randomized planned shuffle")});
+  assert(next);
+  same(next.queue[next.index].id,expected.id);
+  followIndex=next.index;
+}
+same(nextFromQueue(planned,followIndex,false,"off"),null);
+// The planner is generic and also supports Discovery preview objects.
+const previews=[{id:"preview-a"},{id:"preview-b"},{id:"preview-c"}];
+same(planShuffleUpcoming(previews,0,()=>0.99).map((p)=>p.id),["preview-a","preview-c","preview-b"]);
+for(let size=1;size<=75;size++){
+  const input=Array.from({length:size},(_,i)=>s(i));
+  const from=Math.floor(size/3);
+  const output=planShuffleUpcoming(input,from,()=>0.37);
+  same(output.length,input.length);
+  same(output.slice(0,from+1).map((song)=>song.id),input.slice(0,from+1).map((song)=>song.id));
+  same(output.slice(from+1).map((song)=>song.id).sort(),input.slice(from+1).map((song)=>song.id).sort());
+  for(let j=from+1;j<output.length;j++){
+    const next=nextFromQueue(output,j-1,false,"off");
+    same(next.queue[next.index].id,output[j].id);
+  }
+}
 const seed=s(0);
 const related=[s(0),s(1),s(2),s(3),s(3),s(4)];
 const fallback=[s(4),s(5),s(6),s(7),s(0)];
