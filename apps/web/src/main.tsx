@@ -35,6 +35,7 @@ import "./instant-artwork.css";
 import "./cover-editorial.css";
 import "./pixel-covers.css";
 import "./youtube-art.css";
+import "./desktop-now-playing.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -106,6 +106,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [queueOpen, setQueueOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const closeMobilePlayer = useCallback(() => setMobileExpanded(false), []);
+  // Escape dismisses the queue before the immersive player beneath it.
+  useEffect(() => {
+    if (!queueOpen) return;
+    const closeQueueOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setQueueOpen(false);
+    };
+    document.addEventListener("keydown", closeQueueOnEscape, true);
+    return () => document.removeEventListener("keydown", closeQueueOnEscape, true);
+  }, [queueOpen]);
   const [playlistPickerOpen, setPlaylistPickerOpen] = useState(false);
   const [playerPlaylists, setPlayerPlaylists] = useState<PlaylistSummary[]>([]);
   const [playlistQuery, setPlaylistQuery] = useState("");
@@ -1267,9 +1279,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               </button>
             </div>
             <div className="player-track">
-              <div className="player-cover">
+              <button className="player-cover player-cover-expand" type="button" onClick={() => setMobileExpanded(true)}
+                title="Open Now Playing" aria-label={`Open Now Playing for ${activeTitle}`}>
                 {mode === "navidrome" && currentSong ? <CoverArtwork coverId={currentSong.coverArt || currentSong.albumId} seed={currentSong.albumId || currentSong.id} size={160} priority /> : <span>{mode === "preview" ? "◎" : "♪"}</span>}
-              </div>
+              </button>
               <div className="player-track-copy">
                 <strong>{activeTitle}</strong>
                 <span>Artist · {activeArtist}</span>
@@ -1300,6 +1313,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </div>
 
             <div className="player-tools">
+              <button className="icon-button player-expand-action" type="button"
+                onClick={() => setMobileExpanded(true)} aria-label="Open Now Playing" title="Open Now Playing">
+                <PlayerIcon name="expand" size={19} />
+              </button>
               <button className={playerLiked ? "icon-button player-quick-action player-like-action is-favorite" : "icon-button player-quick-action player-like-action"}
                 type="button" onClick={() => void handleLikePlaying()} aria-pressed={playerLiked}
                 title={playerLiked ? "Unlike this song" : "Like this song — more similar music"}
@@ -1348,7 +1365,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             title={activeTitle}
             artist={activeArtist}
             album={currentSong ? (songDisplayAlbum(currentSong) ?? undefined) : undefined}
-            cover={currentSong?.coverArt ? api.coverUrl(currentSong.coverArt, 600) : undefined}
+            cover={mode === "preview" ? (currentPreview?.thumbnail ?? undefined) : (currentSong?.coverArt ? api.coverUrl(currentSong.coverArt, 600) : undefined)}
             coverId={currentSong?.coverArt || currentSong?.albumId}
             coverSeed={currentSong?.albumId || currentSong?.id || activeTitle}
             isPreview={mode === "preview"}

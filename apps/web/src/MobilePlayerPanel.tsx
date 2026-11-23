@@ -3,7 +3,7 @@ import { CoverArtwork } from "./CoverArtwork";
 
 type PlayerIconName =
   | "play" | "pause" | "previous" | "next" | "heart" | "list-plus"
-  | "sparkles" | "queue" | "shuffle" | "repeat" | "repeat-one" | "chevron-down" | "music" | "thumbs-down" | "thumbs-up" | "download";
+  | "sparkles" | "queue" | "shuffle" | "repeat" | "repeat-one" | "chevron-down" | "music" | "thumbs-down" | "thumbs-up" | "download" | "expand";
 
 export function PlayerIcon({ name, size = 22 }: { name: PlayerIconName; size?: number }) {
   const paths: Record<PlayerIconName, ReactNode> = {
@@ -15,6 +15,7 @@ export function PlayerIcon({ name, size = 22 }: { name: PlayerIconName; size?: n
     "thumbs-down": <><path d="M17 14V2M9 18l1-4H5.2a2 2 0 0 1-1.9-2.6l2.9-8A2 2 0 0 1 8.1 2H20v12h-5l-4.5 7a2 2 0 0 1-2.3 0 2 2 0 0 1-1-2.4L9 18Z" /></>,
     "thumbs-up": <path d="M7 10v12M15 6l-1 4h4.8a2 2 0 0 1 1.9 2.6l-2.9 8A2 2 0 0 1 15.9 22H4V10h5l4.5-7a2 2 0 0 1 2.3 0 2 2 0 0 1 1 2.4L15 6Z" />,
     download: <><path d="M12 3v12m-5-5 5 5 5-5M4 17v4h16v-4" /></>,
+    expand: <path d="M8 4H4v4m0-4 6 6m6-6h4v4m0-4-6 6M4 16v4h4m-4 0 6-6m10 2v4h-4m4 0-6-6" />,
     "list-plus": <><path d="M4 6h12M4 12h9M4 18h8M19 12v8m-4-4h8" /></>,
     sparkles: <><path d="m12 2 1.9 6.1L20 10l-6.1 1.9L12 18l-1.9-6.1L4 10l6.1-1.9L12 2ZM20 17l.8 2.2L23 20l-2.2.8L20 23l-.8-2.2L17 20l2.2-.8L20 17Z" /></>,
     queue: <><path d="M4 5h16M4 10h16M4 15h9M16 17v5l5-2.5-5-2.5Z" /></>,
@@ -164,12 +165,9 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
         first.focus();
       }
     };
-    const onResize = () => { if (window.innerWidth > 820) onClose(); };
     document.addEventListener("keydown", onKeyDown);
-    window.addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("resize", onResize);
       document.body.style.overflow = previousOverflow;
       previouslyFocused?.focus({ preventScroll: true });
     };

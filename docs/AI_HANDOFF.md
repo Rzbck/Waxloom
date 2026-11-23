@@ -1,3 +1,8 @@
+## 2026-11-23 — Desktop Now Playing: isolated candidate, NOT USER VALIDATED
+
+- Branch `feat/desktop-now-playing-20261123` starts from current `main` `972f38a`. The existing immersive `MobilePlayerPanel` is accessible on desktop with a responsive two-column layout and bottom-player entry points; no second audio element, API, or queue owner. Preview art, overlay stacking, Escape and responsive resizing are covered.
+- Automated build, synthetic Chrome mobile/desktop, CSS cascade, player-context, iOS helper, Home and navigation regressions: PASS. See `docs/DESKTOP_NOW_PLAYING_20261123.md`. Manual device acceptance and separate production rollout are pending; running Web `:8091` is unchanged.
+
 ## 2026-10-25 — A7 final integrated candidate (no rollout)
 
 - Source branch `integration/audit-a7-20261025` combines A1 (`1a2d496`), A2 (`dffd7e5`), A3 (`d529c05`), A4 (`b604b6c`), A5 (`e89ac08`), A6 (`e2a52ee`) using **non-destructive merges retaining source ancestry**. `main` remains `7e5873f` and live Web/API are unchanged. Draft integration PR, not permission to promote.

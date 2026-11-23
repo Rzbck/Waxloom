@@ -260,6 +260,48 @@ try {
       "Desktop Home quick controls are missing.");
   }
 
+  // Desktop opens the SAME dialog as mobile; no second player or audio element.
+  await evalJs("document.querySelector('.player-cover-expand')?.click()");
+  await wait(170);
+  const desktopNow = await evalJs("(() => { const p=document.querySelector('.waxloom-mobile-player'),a=p?.querySelector('.waxloom-mobile-player-art'),m=p?.querySelector('.waxloom-mobile-player-metadata'); if(!p||!a||!m)return null;const ar=a.getBoundingClientRect(),mr=m.getBoundingClientRect();return {visible:getComputedStyle(p).display!=='none',layout:getComputedStyle(p).display,artWidth:ar.width,artRight:ar.right,metadataLeft:mr.left,overflow:document.documentElement.scrollWidth>innerWidth,audioCount:document.querySelectorAll('audio').length};})()");
+  assert(desktopNow?.visible && desktopNow.layout === "grid", "Desktop Now Playing dialog did not open as a grid.");
+  assert(desktopNow?.artWidth >= 270 && desktopNow.artRight < desktopNow.metadataLeft, "Desktop art and metadata must form readable separate columns.");
+  assert(desktopNow && !desktopNow.overflow, "Desktop expanded player must not cause horizontal overflow.");
+  assert(desktopNow?.audioCount === 1, "Expanded player must reuse the one audio element.");
+  const { data: desktopShot } = await rpc("Page.captureScreenshot", { format: "jpeg", quality: 76, captureBeyondViewport: false });
+  writeFileSync(join(screenshotDir,"waxloom-now-playing-desktop-1440.jpg"),Buffer.from(desktopShot,"base64"));
+  if (process.env.WAXLOOM_QA_DESKTOP_SHOT) writeFileSync(process.env.WAXLOOM_QA_DESKTOP_SHOT,Buffer.from(desktopShot,"base64"));
+  await evalJs("document.querySelector('.waxloom-action-queue')?.click()");
+  await wait(80);
+  const desktopQueueAbove = await evalJs("(() => { const a=document.querySelector('.queue-drawer'),p=document.querySelector('.waxloom-mobile-player');return !!a&&Number(getComputedStyle(a).zIndex)>Number(getComputedStyle(p).zIndex);})()");
+  assert(desktopQueueAbove, "Desktop queue must overlay immersive Now Playing.");
+  await evalJs("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+  await wait(55);
+  assert(await evalJs("!document.querySelector('.queue-drawer') && !!document.querySelector('.waxloom-mobile-player')"), "Escape should close the queue before minimizing Now Playing.");
+  await evalJs("document.querySelector('.waxloom-action-playlist')?.click()");
+  await wait(120);
+  const desktopPickerAbove = await evalJs("(() => { const a=document.querySelector('.player-playlist-picker'),p=document.querySelector('.waxloom-mobile-player');return !!a&&Number(getComputedStyle(a).zIndex)>Number(getComputedStyle(p).zIndex);})()");
+  assert(desktopPickerAbove, "Desktop playlist picker must overlay Now Playing.");
+  await evalJs("document.querySelector('.waxloom-mobile-player-head')?.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))");
+  await wait(55);
+  assert(await evalJs("!document.querySelector('.player-playlist-picker')"), "Desktop picker must close on outside click.");
+  await evalJs("document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+  await wait(55);
+  assert(await evalJs("!document.querySelector('.waxloom-mobile-player')"), "Escape must minimize desktop Now Playing without navigation.");
+  await evalJs("document.querySelector('.player-expand-action')?.click()");
+  await wait(60);
+  assert(await evalJs("!!document.querySelector('.waxloom-mobile-player')"), "Desktop expand icon must reopen Now Playing.");
+  await rpc("Emulation.setDeviceMetricsOverride",{width:900,height:650,deviceScaleFactor:1,mobile:false});
+  await wait(170);
+  const resized = await evalJs(geometry);
+  assert(!!resized.full && !resized.overflow, "Open Now Playing must survive desktop window resizing without overflow.");
+  await rpc("Emulation.setDeviceMetricsOverride",{width:390,height:844,deviceScaleFactor:1,mobile:true});
+  await wait(160);
+  const crossover = await evalJs(geometry);
+  assert(!!crossover.full && !crossover.overflow, "Open Now Playing must reflow to mobile without disappearing.");
+  await evalJs("document.querySelector('.waxloom-mobile-player-close')?.click()");
+  await wait(45);
+
   assert(runtimeErrors.length === 0, `JavaScript exceptions: ${runtimeErrors.join("; ")}`);
   console.log(JSON.stringify({
     passed: failures.length === 0,
