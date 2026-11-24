@@ -93,6 +93,16 @@ try {
   await until("document.querySelector('audio').getAttribute('src')==="+JSON.stringify(second)+"&&"+playing,"Hidden media Next again");
   await ev("window.qaHandlers.nexttrack();window.qaHandlers.nexttrack();void 0");
   await until("document.querySelector('audio').getAttribute('src')!=="+JSON.stringify(second)+"&&"+playing,"Rapid Next");
+  await sleep(450);await until(playing,"Final grouped Next");
+  const beforeBurst=await ev("document.querySelector('audio').getAttribute('src')");
+  await ev("window.qaSrcWrites=0;window.qaSrcObserver=new MutationObserver(records=>window.qaSrcWrites+=records.length);window.qaSrcObserver.observe(document.querySelector('audio'),{attributes:true,attributeFilter:['src']});for(let i=0;i<8;i++)window.qaHandlers.nexttrack();for(let i=0;i<8;i++)window.qaHandlers.previoustrack();void 0");
+  await sleep(600);await until("document.querySelector('audio').getAttribute('src')==="+JSON.stringify(beforeBurst)+"&&"+playing,"Net zero track burst");
+  const writes=await ev("window.qaSrcObserver.disconnect();window.qaSrcWrites");assert.ok(writes<=2,"16 remote commands caused "+writes+" source writes");
+  console.log("16 mixed remote skips -> "+writes+" source writes");
+  await ev("window.qaHandlers.nexttrack();window.qaHandlers.nexttrack();window.qaHandlers.nexttrack();window.qaHandlers.pause();void 0");
+  const pausedSource=await ev("document.querySelector('audio').getAttribute('src')");
+  await sleep(600);assert.equal(await ev("document.querySelector('audio').getAttribute('src')"),pausedSource,"Pause invalidates trailing skip");
+  await ev("window.qaHandlers.play();void 0");await until(playing,"Resume after stress");
   const third=await ev("document.querySelector('audio').getAttribute('src')");
   assert.ok(await ev("window.qaAudio===document.querySelector('audio')"),"Persistent audio element");
   await ev("window.qaHandlers.pause();void 0");

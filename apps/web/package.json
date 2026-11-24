@@ -24,6 +24,7 @@
     "qa:discovery-instant": "node scripts/discovery-instant-neutral-smoke.mjs",
     "qa:home-fluidity": "node scripts/home-shuffle-fluidity-smoke.mjs",
     "qa:home-album": "node --experimental-strip-types scripts/home-album-metadata-smoke.mjs",
+    "qa:media-burst": "node --experimental-strip-types scripts/media-track-burst-smoke.mjs",
     "qa:audio-transport": "node --experimental-strip-types scripts/audio-transport-smoke.mjs",
     "qa:media-artwork": "node scripts/media-artwork-smoke.mjs",
     "qa:audio-browser": "node scripts/audio-browser-smoke.mjs",
