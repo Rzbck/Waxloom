@@ -25,6 +25,8 @@ export class AudioTransport {
   private requestPending = false;
   private pendingSeek: number | null = null;
   private lastClockTrace = 0;
+  private seekInProgress = false;
+  private confirmed = false;
   private lastTrace = new Map<string, number>();
   private options: Options;
   constructor(options: Options) { this.options = options; }
@@ -64,6 +66,8 @@ export class AudioTransport {
     this.lastTrace.clear();
     this.lastClockTrace = this.now();
     this.pendingSeek = initialPosition ?? null;
+    this.seekInProgress = false;
+    this.confirmed = false;
     this.lastPosition = changed ? 0 : audio.currentTime;
     this.lastProgressAt = this.now();
     this.requestPending = false;
@@ -106,6 +110,7 @@ export class AudioTransport {
     if (!this.intent || !this.matches(audio)) return;
     const token = ++this.generation;
     this.requestPending = true;
+    this.confirmed = false;
     this.lastProgressAt = this.now();
     this.change("loading");
     const current = () => token === this.generation && this.intent && this.matches(audio);
@@ -129,6 +134,7 @@ export class AudioTransport {
   confirm(audio: HTMLAudioElement) {
     if (!this.currentResource(audio) || !this.intent || audio.paused || audio.ended || audio.readyState < 2) return;
     this.requestPending = false;
+    this.confirmed = true;
     this.lastProgressAt = this.now();
     this.lastPosition = audio.currentTime;
     if (this.phase !== "playing") this.trace("audio-playing", audio, true);
@@ -143,11 +149,18 @@ export class AudioTransport {
       }
     }
     if (event === "playing") { this.confirm(audio); return; }
+    if (event === "seeking" || event === "seeked") {
+      this.seekInProgress = event === "seeking";
+      this.lastPosition = audio.currentTime;
+      this.trace(event, audio, true);
+      // A seek is not playback. A pending start still needs real confirmation.
+      if (event === "seeked" && !this.confirmed) this.recover(audio, false, true);
+      return;
+    }
     if (event === "timeupdate") {
       if (Math.abs(audio.currentTime - this.lastPosition) >= .05) {
-        this.lastProgressAt = this.now();
+        if (this.confirmed && !audio.seeking && !this.seekInProgress && audio.readyState >= 2 && !audio.paused) this.lastProgressAt = this.now();
         this.lastPosition = audio.currentTime;
-        if (this.intent && !audio.paused && !audio.seeking && audio.readyState >= 2 && !audio.ended) this.confirm(audio);
       }
       if (this.intent && this.options.ios() && this.options.hidden() && this.now() - this.lastClockTrace >= 30000) {
         this.lastClockTrace = this.now(); this.trace("clock", audio, true);
@@ -155,7 +168,11 @@ export class AudioTransport {
       return;
     }
     this.trace(event, audio);
-    if (event === "ended" && audio.ended) { this.change("paused"); return; }
+    if (event === "ended" && audio.ended) {
+      this.confirmed = false;
+      // Do not explicitly publish a paused session between two background tracks.
+      this.change(this.intent && this.options.ios() && this.options.hidden() ? "loading" : "paused"); return;
+    }
     if (!this.intent || audio.ended) return;
     if (event === "pause" && audio.paused && this.phase !== "loading") {
       this.lastProgressAt = this.now();
@@ -168,21 +185,23 @@ export class AudioTransport {
     }
     if (event === "waiting" || (event === "stalled" && audio.readyState < 3)) {
       if (this.phase === "playing") this.lastProgressAt = this.now();
+      this.confirmed = false;
       this.change("waiting");
+      if (event === "stalled") this.recover(audio, false, true);
     }
     if (event === "session-interrupted") this.change("interrupted");
     if (event === "error") { this.generation++; this.requestPending = false; this.change("blocked"); }
   }
-  recover(audio: HTMLAudioElement, foreground = false) {
+  recover(audio: HTMLAudioElement, foreground = false, eventDriven = false) {
     if ((!foreground && !this.options.hidden()) || !this.options.ios() || !this.intent || !this.matches(audio) || audio.ended || audio.seeking || this.options.interrupted()) return;
     // Timers/timeupdate can be throttled while native playback keeps advancing.
     // Sample the actual element before declaring a stall after a suspended page.
-    if (this.currentResource(audio) && !audio.paused && !audio.error && audio.readyState >= 2 && Math.abs(audio.currentTime - this.lastPosition) >= .05) {
+    if (this.confirmed && this.phase === "playing" && this.currentResource(audio) && !audio.paused && !audio.error && audio.readyState >= 2 && Math.abs(audio.currentTime - this.lastPosition) >= .05) {
       this.confirm(audio); return;
     }
     const elapsed = this.now() - this.lastProgressAt;
-    const stalled = elapsed >= 8000 && (this.requestPending || audio.paused || audio.readyState < 3 || this.phase === "waiting" || this.phase === "playing");
-    const eligible = foreground ? (audio.paused || this.phase === "blocked" || stalled) : stalled || this.phase === "blocked";
+    const stalled = elapsed >= (eventDriven && !this.confirmed && audio.readyState < 2 ? 3000 : 8000) && (this.requestPending || audio.paused || audio.readyState < 3 || this.phase === "waiting" || this.phase === "playing");
+    const eligible = foreground ? (audio.paused || this.phase === "blocked" || stalled || (!this.confirmed && elapsed >= 3000)) : stalled || this.phase === "blocked";
     if (!eligible) return;
     // At most one background attempt and one foreground attempt per explicit
     // start/source. No loops, auto-skip, silence tracks or background polling
@@ -192,14 +211,17 @@ export class AudioTransport {
       return;
     }
     if (foreground) this.foregroundRetry = true; else this.attempts++;
-    this.trace(foreground ? "recover-fg" : "recover-stall", audio, true);
+    this.trace(foreground ? "recover-fg" : eventDriven ? "recover-event" : "recover-stall", audio, true);
     this.options.configure();
     // Preserve position and source. Re-request playback without replacing src.
     // Do not pause a healthy advancing stream.
-    if (foreground && audio.error) {
+    if ((foreground && audio.error) || (!this.confirmed && audio.readyState < 2 && stalled)) {
+      // WebKit can stay at HAVE_METADATA after ended. One same-source reload
+      // is allowed on concrete stall evidence, without relying on JS timers.
       this.pendingSeek = audio.currentTime;
+      this.generation++;
       audio.load();
-    } else if (!audio.paused && stalled) audio.pause();
+    } else if (!audio.paused && stalled && this.confirmed) audio.pause();
     this.request(audio);
   }
 }

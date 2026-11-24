@@ -11,7 +11,8 @@ const yes = (name, overrides) => {
 const no = (name, overrides) => {
   assert.equal(shouldHandoffBeforeEnd({ ...base, ...overrides }), false, name);
 };
-yes("iOS standalone background transition in the last 0.65 seconds", {});
+yes("iOS standalone background transition in the last 1.0 seconds", {});
+yes("bounded last second", { currentTime: 179.0 });
 no("never shorten playback when app visible", { hidden: false });
 no("never shorten playback on desktop", { enabled: false });
 no("do not override user pause", { wantsPlayback: false });
@@ -19,7 +20,7 @@ no("do not advance final queue entry", { hasNext: false });
 no("do not advance while seeking", { seeking: true });
 no("do not advance after ended", { ended: true });
 no("do not advance paused media", { paused: true });
-no("do not advance more than 0.65 seconds before end", { currentTime: 179.0 });
+no("do not advance more than 1.0 seconds before end", { currentTime: 178.99 });
 no("do not advance after duration", { currentTime: 180 });
 no("do not advance near very short audio", { currentTime: 2.8, duration: 2.9 });
 no("do not advance unknown duration", { duration: Number.NaN });
@@ -43,4 +44,4 @@ assert.equal(isIOSHomeScreenAudio(), true, "display-mode standalone");
 globalThis.navigator.userAgent = "Mozilla/5.0 (Windows NT 10.0)";
 globalThis.navigator.platform = "Win32";
 assert.equal(isIOSHomeScreenAudio(), false, "desktop not affected");
-console.log("PASS: iOS background handoff, pause/queue guards, Home Screen and AudioSession checks (18 assertions)");
+console.log("PASS: iOS background handoff, pause/queue guards, Home Screen and AudioSession checks (19 assertions)");

@@ -44,8 +44,8 @@ export type PreEndState = {
 };
 
 // Transition only while the old stream is still playing, otherwise iOS may
-// reject play() for the next track on a locked, standalone web app.
-// This is deliberately limited to the last 0.65 s and iOS in background.
+// reject play() for the next track on a locked iOS web app.
+// This is deliberately limited to the last 1.0 s and iOS in background.
 // It is a mitigation, not a guarantee for suspended WebKit pages.
 export function shouldHandoffBeforeEnd(state: PreEndState): boolean {
   if (!state.enabled || !state.hidden || !state.wantsPlayback || !state.hasNext
@@ -53,5 +53,5 @@ export function shouldHandoffBeforeEnd(state: PreEndState): boolean {
   if (!Number.isFinite(state.duration) || !Number.isFinite(state.currentTime)
     || state.duration < 3 || state.currentTime < 2) return false;
   const remaining = state.duration - state.currentTime;
-  return remaining > 0 && remaining <= 0.65;
+  return remaining > 0 && remaining <= 1.0;
 }

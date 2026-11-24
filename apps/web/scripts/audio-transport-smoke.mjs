@@ -46,7 +46,7 @@ function fixture({ios=true,hidden=true}={}){
   const f=fixture();f.start();await f.ok();f.audio.currentTime=35;f.advance(35000);
   f.t.recover(f.audio);eq(f.audio.plays,1,"native clock advanced while JS suspended");eq(f.audio.pauses,0);
   f.audio.readyState=4;f.t.observe(f.audio,"stalled");eq(f.t.phase,"playing","network stall with buffered data isn't silence");
-  f.audio.readyState=1;f.t.observe(f.audio,"waiting");eq(f.t.phase,"waiting");f.advance(7999);f.t.recover(f.audio);eq(f.audio.plays,1);f.advance(1);f.t.recover(f.audio);eq(f.audio.plays,2);eq(f.audio.currentTime,35,"recovery preserves position");
+  f.audio.readyState=1;f.t.observe(f.audio,"waiting");eq(f.t.phase,"waiting");f.advance(7999);f.t.recover(f.audio);eq(f.audio.plays,1);f.advance(1);f.t.recover(f.audio);eq(f.audio.plays,2);eq(f.audio.loads,1,"stalled resource reselected once");f.audio.readyState=1;f.t.observe(f.audio,"loadedmetadata");eq(f.audio.currentTime,35,"recovery restores position after metadata");
   f.advance(9000);f.t.recover(f.audio);eq(f.t.phase,"blocked");eq(f.audio.plays,2);
 }
 {
@@ -65,6 +65,24 @@ function fixture({ios=true,hidden=true}={}){
   const f=fixture();f.start();await f.ok();f.advance(30000);f.audio.currentTime=30;f.t.observe(f.audio,"timeupdate");eq(f.traces.filter(([e])=>e.startsWith("clock-")).length,1);
   f.t.observe(f.audio,"timeupdate");eq(f.traces.filter(([e])=>e.startsWith("clock-")).length,1);
   eq(f.traces.every(([e,k])=>e.length<=40&&k==="one"&&!e.includes("/")),true,"existing trace schema, no URL");
-  f.audio.ended=true;f.t.observe(f.audio,"ended");eq(f.t.phase,"paused");eq(f.t.intent,true,"ended retains intent for queue handoff");
+  f.audio.ended=true;f.t.observe(f.audio,"ended");eq(f.t.phase,"loading");eq(f.t.intent,true,"ended retains intent for queue handoff");
+}
+{
+  // Reproduce the real iPhone trace: new source has metadata but no playing,
+  // a stall arrives 3.2 s later, and native seek jumps are not playback.
+  const f=fixture();f.start("next-track");f.audio.readyState=1;f.audio.paused=false;
+  f.t.observe(f.audio,"loadedmetadata");f.advance(3200);f.t.observe(f.audio,"stalled");
+  eq(f.audio.plays,2,"event alone triggers recovery even with suspended timers");
+  eq(f.audio.loads,1,"one same-source reload");eq(f.t.key,"next-track");
+  f.audio.readyState=1;f.t.observe(f.audio,"loadedmetadata");
+  f.audio.currentTime=258;f.audio.seeking=true;f.t.observe(f.audio,"seeking");f.t.observe(f.audio,"timeupdate");
+  f.audio.seeking=false;f.audio.readyState=4;f.t.observe(f.audio,"seeked");f.audio.paused=false;f.t.observe(f.audio,"timeupdate");
+  eq(f.t.phase,"loading","large seek must not falsely confirm audio");
+  f.advance(9000);f.t.recover(f.audio);eq(f.audio.plays,2,"background budget respected");
+  f.setHidden(false);f.t.recover(f.audio,true);eq(f.audio.plays,3,"foreground retry after seek without confirmation");
+  await f.ok();eq(f.t.phase,"playing");
+}
+{
+  const f=fixture();f.start();f.t.stop(f.audio);f.advance(3500);f.audio.readyState=1;f.t.observe(f.audio,"stalled");eq(f.audio.plays,1,"event retry cannot undo pause");
 }
 console.log("PASS: audio transport ("+checks+" assertions)");

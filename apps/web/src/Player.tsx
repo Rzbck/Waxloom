@@ -1,6 +1,6 @@
 import { prewarmedUrlOrStream } from "./previewWarmCache";
 import { AudioTransport, type AudioPhase } from "./audioTransport";
-import { isIOSAudio, isIOSAudioInterrupted, isIOSHomeScreenAudio, setIOSPlaybackAudioSession, shouldHandoffBeforeEnd } from "./iosBackgroundAudio";
+import { isIOSAudio, isIOSAudioInterrupted, setIOSPlaybackAudioSession, shouldHandoffBeforeEnd } from "./iosBackgroundAudio";
 import {
   createContext,
   type ReactNode,
@@ -101,6 +101,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => { livePreviewRef.current = { queue: previewQueue, index: previewIndex }; }, [previewQueue, previewIndex]);
   const [previewResolving, setPreviewResolving] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const refreshMediaActionsRef = useRef<() => void>(() => {});
   const [audioPhase, setAudioPhase] = useState<AudioPhase>("idle");
   const playing = audioPhase === "playing";
   const controlPlaying = playing || audioPhase === "loading" || audioPhase === "waiting";
@@ -109,8 +110,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       // Publish immediately even if React commits are throttled in background.
       try {
         if ("mediaSession" in navigator) {
-          navigator.mediaSession.playbackState = phase === "playing" ? "playing" : "paused";
-          if (phase === "loading") navigator.mediaSession.setPositionState?.();
+          // During a source change let WebKit infer its native state instead
+          // of telling it that the user explicitly paused the audio session.
+          navigator.mediaSession.playbackState = phase === "playing" ? "playing"
+            : isIOSAudio() && (phase === "loading" || phase === "waiting") ? "none" : "paused";
         }
       } catch { /* Media Session support differs across WebKit versions. */ }
       setAudioPhase(phase);
@@ -242,6 +245,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const position = resume && restored?.id === song.id ? restored.seconds : !resume ? 0 : undefined;
     if (!resume) preEndHandoffSourceRef.current = null;
     transport.start(audio, song.id, source, event, position);
+    refreshMediaActionsRef.current();
     window.setTimeout(() => { if (localSongIdRef.current === song.id) traceLocalPlayer(event, song.id, clickedAt); }, 1200);
   }, [transport, traceLocalPlayer]);
 
@@ -255,6 +259,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!track.preview_url) { transport.selectPending(audio); return; }
     transport.start(audio, track.recording_mbid || track.id, track.preview_url, reason,
       reason === "preview-resume" || reason === "media-play" ? undefined : 0);
+    refreshMediaActionsRef.current();
   }, [transport]);
 
   useEffect(() => {
@@ -629,6 +634,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       const audio = audioRef.current;
       if (!audio) return;
       transport.trace("visibility", audio, true);
+      refreshMediaActionsRef.current();
       if (document.hidden || !transport.intent) return;
       if (audio.ended && !audio.loop) { next("ended"); return; }
       transport.recover(audio, true);
@@ -695,7 +701,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const source = audio.getAttribute("src") ?? audio.currentSrc;
     if (!nextInProgressRef.current && source && preEndHandoffSourceRef.current !== source
       && shouldHandoffBeforeEnd({
-        enabled: isIOSHomeScreenAudio(),
+        enabled: isIOSAudio(),
         hidden: document.hidden,
         wantsPlayback: transport.intent,
         hasNext: repeat !== "one" && (
@@ -727,8 +733,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const seek = useCallback((value: number) => {
     const audio = audioRef.current;
     if (!audio) return;
-    audio.currentTime = value;
-    setCurrentTime(value);
+    if (!Number.isFinite(value)) return;
+    const target = Math.max(0, Math.min(value, Number.isFinite(audio.duration) ? audio.duration : value));
+    audio.currentTime = target;
+    setCurrentTime(target);
   }, []);
 
   function cycleRepeat() {
@@ -1049,12 +1057,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id]);
 
   // Keep OS action handlers installed; dispatch to the latest actions/live queues.
-  const mediaActionsRef = useRef({ next, previous, pausePlayback, startLocalPlayback, startPreviewPlayback });
-  mediaActionsRef.current = { next, previous, pausePlayback, startLocalPlayback, startPreviewPlayback };
+  const mediaActionsRef = useRef({ next, previous, pausePlayback, startLocalPlayback, startPreviewPlayback, seek });
+  mediaActionsRef.current = { next, previous, pausePlayback, startLocalPlayback, startPreviewPlayback, seek };
   useEffect(() => {
     if (!("mediaSession" in navigator)) return;
     const session = navigator.mediaSession;
-    const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
+    const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
+      // Music controls take precedence over podcast skip intervals.
+      ["seekbackward", null], ["seekforward", null],
+      ["seekto", details => {
+        const audio = audioRef.current;
+        if (!audio || !Number.isFinite(details.seekTime)) return;
+        transport.trace("media-seek", audio, true);
+        mediaActionsRef.current.seek(details.seekTime!);
+      }],
       ["nexttrack", () => mediaActionsRef.current.next("manual", "media-next")],
       ["previoustrack", () => mediaActionsRef.current.previous("media-previous")],
       ["play", () => {
@@ -1068,15 +1084,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       }],
       ["pause", () => mediaActionsRef.current.pausePlayback()],
     ];
-    for (const [action, handler] of actions) {
-      try { session.setActionHandler(action, handler); } catch { /* Unsupported iOS action. */ }
-    }
+    const register = () => {
+      if (!audioRef.current?.getAttribute("src")) return;
+      const audio = audioRef.current;
+      let nextRegistered = false, previousRegistered = false;
+      for (const [action, handler] of actions) {
+        try {
+          session.setActionHandler(action, handler);
+          if (action === "nexttrack") nextRegistered = true;
+          if (action === "previoustrack") previousRegistered = true;
+        } catch { /* Unsupported iOS action. */ }
+      }
+      if (audio) transport.trace(nextRegistered && previousRegistered ? "media-keys-ok" : "media-keys-fail", audio);
+    };
+    refreshMediaActionsRef.current = register;
+    register();
     return () => {
+      refreshMediaActionsRef.current = () => {};
       for (const [action] of actions) {
         try { session.setActionHandler(action, null); } catch { /* Unsupported. */ }
       }
     };
-  }, []);
+  }, [transport]);
+
+  useEffect(() => {
+    // Safari may drop handlers during resource selection or metadata changes.
+    refreshMediaActionsRef.current();
+  }, [currentSong?.id, currentPreview?.id]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -1106,10 +1140,13 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
           const audio = event.currentTarget;
           if (!transport.currentResource(audio)) return;
           transport.observe(audio, "loadedmetadata");
+          refreshMediaActionsRef.current();
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
           setCurrentTime(audio.currentTime);
         }}
         onTimeUpdate={onTimeUpdate}
+        onSeeking={event => transport.observe(event.currentTarget, "seeking")}
+        onSeeked={event => { transport.observe(event.currentTarget, "seeked"); onTimeUpdate(); }}
         onPlay={(event) => { if (!transport.intent) event.currentTarget.pause(); else transport.observe(event.currentTarget, "play"); }}
         onWaiting={(event) => transport.observe(event.currentTarget, "waiting")}
         onStalled={(event) => transport.observe(event.currentTarget, "stalled")}
@@ -1119,6 +1156,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onPlaying={(event) => {
           if (!transport.currentResource(event.currentTarget) || !transport.intent) return;
           transport.observe(event.currentTarget, "playing");
+          refreshMediaActionsRef.current();
           if (mode === "preview") {
             setPreviewError(null);
             try {

@@ -78,14 +78,19 @@ try {
   await rpc("Page.addScriptToEvaluateOnNewDocument",{source:"Object.defineProperty(navigator,'userAgent',{configurable:true,value:'Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15'});Object.defineProperty(navigator,'standalone',{configurable:true,value:true});window.qaHidden=false;Object.defineProperty(document,'hidden',{configurable:true,get:()=>window.qaHidden});window.qaHandlers={};const original=navigator.mediaSession;const stub={playbackState:'none',metadata:null,setPositionState(){},setActionHandler(a,h){window.qaHandlers[a]=h}};Object.defineProperty(navigator,'mediaSession',{configurable:true,value:stub});if(typeof MediaMetadata==='undefined')window.MediaMetadata=class{constructor(v){Object.assign(this,v)}};"});
   await size(390,844,true);
   await rpc("Page.navigate",{url:base.href});
-  try{await until("document.querySelectorAll('.console-track-play').length>=4 && !!window.qaHandlers?.nexttrack","Library and media actions",15000)}catch(e){console.log("STARTUP",await ev("({rows:document.querySelectorAll('.console-track-play').length,handlers:Object.keys(window.qaHandlers||{}),body:document.body.innerText.slice(0,500),href:location.pathname})"),errors);throw e}
+  try{await until("document.querySelectorAll('.console-track-play').length>=4","Library and media actions",15000)}catch(e){console.log("STARTUP",await ev("({rows:document.querySelectorAll('.console-track-play').length,handlers:Object.keys(window.qaHandlers||{}),body:document.body.innerText.slice(0,500),href:location.pathname})"),errors);throw e}
   await ev("document.querySelector('.console-track-play').click()");
   const playing="document.querySelector('audio').currentTime>0.1&&!document.querySelector('audio').paused&&navigator.mediaSession.playbackState==='playing'";
   await until(playing,"First local track");
+  assert.ok(await ev("typeof window.qaHandlers.nexttrack==='function'&&typeof window.qaHandlers.previoustrack==='function'&&typeof window.qaHandlers.seekto==='function'&&window.qaHandlers.seekforward===null&&window.qaHandlers.seekbackward===null"),"Music actions registered after resource selection");
   const first=await ev("document.querySelector('audio').getAttribute('src')");
   await ev("window.qaAudio=document.querySelector('audio');window.qaHidden=true;document.dispatchEvent(new Event('visibilitychange'));window.qaHandlers.nexttrack();void 0");
   await until("document.querySelector('audio').getAttribute('src')!=="+JSON.stringify(first)+"&&"+playing,"Hidden media Next");
   const second=await ev("document.querySelector('audio').getAttribute('src')");
+  await ev("window.qaHandlers.previoustrack();void 0");
+  await until("document.querySelector('audio').getAttribute('src')==="+JSON.stringify(first)+"&&"+playing,"Hidden media Previous");
+  await ev("window.qaHandlers.nexttrack();void 0");
+  await until("document.querySelector('audio').getAttribute('src')==="+JSON.stringify(second)+"&&"+playing,"Hidden media Next again");
   await ev("window.qaHandlers.nexttrack();window.qaHandlers.nexttrack();void 0");
   await until("document.querySelector('audio').getAttribute('src')!=="+JSON.stringify(second)+"&&"+playing,"Rapid Next");
   const third=await ev("document.querySelector('audio').getAttribute('src')");
@@ -98,7 +103,7 @@ try {
   await until(playing,"System Play");
   assert.equal(await ev("document.querySelector('audio').getAttribute('src')"),third,"Resume same track");
   // Seek near genuine media end, allowing pre-end handoff to advance normally.
-  await ev("(()=>{const a=document.querySelector('audio');a.currentTime=Math.max(0,a.duration-0.35)})()");
+  await ev("window.qaHandlers.seekto({seekTime:Math.max(0,document.querySelector('audio').duration-0.75)});void 0");
   await until("document.querySelector('audio').getAttribute('src')!=="+JSON.stringify(third)+"&&"+playing,"Natural near-end transition",15000);
   const beforeFailure=await ev("document.querySelector('audio').getAttribute('src')");
   await ev("window.qaHandlers.pause();window.qaOriginalPlay=HTMLMediaElement.prototype.play;window.qaReject=1;HTMLMediaElement.prototype.play=function(){if(window.qaReject-->0)return Promise.reject(new DOMException('synthetic denial','NotAllowedError'));return window.qaOriginalPlay.call(this)};window.qaHandlers.play();void 0");
@@ -121,7 +126,7 @@ try {
   await until("document.querySelector('audio').paused","Discovery Pause");
   assert.ok(await ev("window.qaAudio===document.querySelector('audio')&&document.querySelectorAll('audio').length===1"),"One audio element across modes");
   assert.deepEqual(errors,[],"Uncaught JS errors");
-  console.log("PASS browser audio: real library and Discovery streams; synthetic hidden state; Media Session Next/Play/Pause; rapid Next; near-end; denied play and bounded recovery; no unsolicited resume; single audio element");
+  console.log("PASS browser audio: real library and Discovery streams; synthetic hidden state; Media Session Next/Previous/Seek/Play/Pause; rapid Next; near-end; denied play and bounded recovery; no unsolicited resume; single audio element");
 }finally{
   ws?.close();proc.kill();await sleep(400);try{fs.rmSync(profile,{recursive:true,force:true})}catch{}
 }
