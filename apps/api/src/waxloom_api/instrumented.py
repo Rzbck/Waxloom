@@ -11,6 +11,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 from pydantic import BaseModel, Field
 
@@ -77,9 +78,14 @@ class SharedNavidromeClient(NavidromeClient):
             timeout=timeout,
             limits=httpx.Limits(max_connections=12, max_keepalive_connections=8, keepalive_expiry=45),
         )
-        self._media_http = httpx.AsyncClient(
-            timeout=None,
+        # Keep artwork misses out of the audio connection budget.
+        self._audio_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(20.0, connect=5.0, pool=5.0),
             limits=httpx.Limits(max_connections=8, max_keepalive_connections=6, keepalive_expiry=45),
+        )
+        self._cover_http = httpx.AsyncClient(
+            timeout=httpx.Timeout(10.0, connect=5.0, pool=3.0),
+            limits=httpx.Limits(max_connections=3, max_keepalive_connections=3, keepalive_expiry=45),
         )
 
     async def _request(self, endpoint: str, **params: Any) -> dict[str, Any]:
@@ -122,16 +128,17 @@ class SharedNavidromeClient(NavidromeClient):
         headers: Mapping[str, str] | None = None,
     ) -> tuple[_NoCloseLease, httpx.Response]:
         last_error: Exception | None = None
+        pool = self._cover_http if endpoint == "getCoverArt" else self._audio_http
         for attempt in range(2):
             response: httpx.Response | None = None
-            request = self._media_http.build_request(
+            request = pool.build_request(
                 "GET",
                 f"{self.base_url}/rest/{endpoint}.view",
                 params=self._query_pairs(params),
                 headers=dict(headers or {}),
             )
             try:
-                response = await self._media_http.send(request, stream=True)
+                response = await pool.send(request, stream=True)
                 if response.status_code in {429, 502, 503, 504} and attempt == 0:
                     await response.aclose()
                     await asyncio.sleep(0.06)
@@ -141,7 +148,8 @@ class SharedNavidromeClient(NavidromeClient):
             except (httpx.ConnectError, httpx.ReadError, httpx.RemoteProtocolError, httpx.HTTPStatusError) as exc:
                 last_error = exc
                 if response is not None:
-                    await response.aclose()
+                    with anyio.CancelScope(shield=True):
+                        await response.aclose()
                 if attempt == 0:
                     await asyncio.sleep(0.06)
                     continue
@@ -152,7 +160,8 @@ class SharedNavidromeClient(NavidromeClient):
 
     async def aclose(self) -> None:
         await self._api_http.aclose()
-        await self._media_http.aclose()
+        await self._audio_http.aclose()
+        await self._cover_http.aclose()
 
 
 _shared_navidrome = SharedNavidromeClient(
@@ -376,6 +385,11 @@ class TimestampAccessLog:
         arrived_at = time.perf_counter()
         arrived_epoch_ms = int(time.time() * 1000)
         response_started = False
+        is_stream = path.startswith("/api/media/stream/")
+        transferred = 0
+        first_byte_ms: float | None = None
+        finished = False
+        disconnected = False
 
         if path.startswith("/api/media/stream/"):
             song_id = path.rsplit("/", 1)[-1]
@@ -385,21 +399,53 @@ class TimestampAccessLog:
             _log(f"PREVIEW request recording={recording_mbid}", epoch_ms=arrived_epoch_ms)
 
         async def timed_send(message: dict[str, Any]) -> None:
-            nonlocal response_started
+            nonlocal response_started, transferred, first_byte_ms, finished
             if message.get("type") == "http.response.start" and not response_started:
                 response_started = True
                 elapsed_ms = (time.perf_counter() - arrived_at) * 1000
                 status = int(message.get("status", 0))
                 _log(f"HTTP {method} {path} -> {status} headers={elapsed_ms:.1f}ms", epoch_ms=arrived_epoch_ms)
             await send(message)
+            if is_stream and message.get("type") == "http.response.body":
+                count = len(message.get("body", b""))
+                if count and first_byte_ms is None:
+                    first_byte_ms = (time.perf_counter() - arrived_at) * 1000
+                transferred += count
+                finished = not message.get("more_body", False)
 
         try:
-            await self.app(scope, receive, timed_send)
+            if not is_stream:
+                await self.app(scope, receive, timed_send)
+            else:
+                # Monitor disconnect even while waiting for upstream headers.
+                # Relay ASGI messages: only this task owns the original receive.
+                tx, rx = anyio.create_memory_object_stream[dict[str, Any]](2)
+                async with tx, rx, anyio.create_task_group() as group:
+                    async def monitor() -> None:
+                        nonlocal disconnected
+                        while True:
+                            message = await receive()
+                            if message["type"] == "http.disconnect":
+                                disconnected = True
+                                group.cancel_scope.cancel()
+                                return
+                            await tx.send(message)
+                    group.start_soon(monitor)
+                    try:
+                        await self.app(scope, rx.receive, timed_send)
+                    finally:
+                        group.cancel_scope.cancel()
         except Exception:
             if not response_started:
                 elapsed_ms = (time.perf_counter() - arrived_at) * 1000
                 _log(f"HTTP {method} {path} -> ERROR headers={elapsed_ms:.1f}ms", epoch_ms=arrived_epoch_ms)
             raise
+        finally:
+            if is_stream:
+                elapsed = (time.perf_counter() - arrived_at) * 1000
+                outcome = "complete" if finished else "cancelled" if disconnected else "incomplete"
+                first = "-" if first_byte_ms is None else f"{first_byte_ms:.1f}"
+                _log(f"STREAM end song={song_id} result={outcome} bytes={transferred} first_ms={first} total_ms={elapsed:.1f}")
 
 
 # Explicit Discovery range transport and cover gating sit inside the timing

@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+import anyio
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
@@ -615,14 +616,23 @@ async def _stream_upstream(
             headers[name] = value
 
     async def body() -> AsyncIterator[bytes]:
-        try:
-            async for chunk in upstream.aiter_bytes():
-                yield chunk
-        finally:
-            await upstream.aclose()
-            await client.aclose()
+        async for chunk in upstream.aiter_bytes():
+            yield chunk
 
-    return StreamingResponse(
+    class LeasedStreamingResponse(StreamingResponse):
+        async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+            try:
+                await super().__call__(scope, receive, send)
+            finally:
+                # Also release when the client disconnects before the first body
+                # iteration. Shield cleanup from the ASGI cancellation scope.
+                with anyio.CancelScope(shield=True):
+                    try:
+                        await upstream.aclose()
+                    finally:
+                        await client.aclose()
+
+    return LeasedStreamingResponse(
         body(),
         status_code=upstream.status_code,
         media_type=upstream.headers.get("content-type", "application/octet-stream"),

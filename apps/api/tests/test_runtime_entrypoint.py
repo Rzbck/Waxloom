@@ -131,3 +131,93 @@ async def test_cover_gate_limits_only_artwork_not_audio() -> None:
         finished = await asyncio.gather(*covers)
     assert all(response.status_code == 200 for response in finished)
     assert maximum == 2
+
+@pytest.mark.asyncio
+async def test_independent_media_pools():
+    client = instrumented.SharedNavidromeClient("http://synthetic.invalid", "test", "test")
+    assert client._audio_http is not client._cover_http
+    assert client._audio_http.timeout.pool == 5
+    assert client._cover_http.timeout.pool == 3
+    await client._cover_http.aclose()
+    await client._audio_http.aclose()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    async def cover(request):
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, content=b"cover")
+    async def audio(request):
+        assert request.headers["range"] == "bytes=0-1"
+        return httpx.Response(206, content=b"ab")
+    client._cover_http = httpx.AsyncClient(transport=httpx.MockTransport(cover))
+    client._audio_http = httpx.AsyncClient(transport=httpx.MockTransport(audio))
+    task = asyncio.create_task(client.open_binary("getCoverArt", params={"id": "synthetic"}))
+    try:
+        await entered.wait()
+        _, response = await asyncio.wait_for(client.open_binary("stream", params={"id": "synthetic"}, headers={"range": "bytes=0-1"}), 1)
+        assert await response.aread() == b"ab"
+        await response.aclose()
+    finally:
+        release.set()
+        _, response = await task
+        await response.aclose()
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("after_headers", [False, True])
+async def test_disconnect_releases_stream(after_headers, monkeypatch):
+    entered = asyncio.Event()
+    closed = asyncio.Event()
+    logs = []
+    monkeypatch.setattr(instrumented, "_log", lambda message, **kwargs: logs.append(message))
+    class SlowStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"ab"
+            entered.set()
+            await asyncio.sleep(60)
+        async def aclose(self):
+            await asyncio.sleep(0)
+            closed.set()
+    class FakeClient:
+        async def open_binary(self, *args, **kwargs):
+            if not after_headers:
+                try:
+                    entered.set()
+                    await asyncio.sleep(60)
+                finally:
+                    closed.set()
+            return instrumented._NO_CLOSE_LEASE, httpx.Response(206, stream=SlowStream(), headers={"content-type": "audio/mpeg", "content-length": "10"})
+    monkeypatch.setattr(main, "navidrome_client", lambda: FakeClient())
+    monkeypatch.setattr(main, "require_navidrome", lambda: None)
+    first = True
+    async def receive():
+        nonlocal first
+        if first:
+            first = False
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await entered.wait()
+        return {"type": "http.disconnect"}
+    async def send(message):
+        pass
+    scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"}, "http_version": "1.1", "method": "GET", "scheme": "http", "path": "/api/media/stream/synthetic", "raw_path": b"/api/media/stream/synthetic", "query_string": b"", "headers": [], "server": ("test", 80), "client": ("test", 1), "root_path": ""}
+    await asyncio.wait_for(instrumented.app(scope, receive, send), 2)
+    assert closed.is_set()
+    assert any("result=cancelled" in line and ("bytes=2" if after_headers else "bytes=0") in line for line in logs)
+
+
+@pytest.mark.asyncio
+async def test_completed_library_range_is_logged(monkeypatch):
+    logs = []
+    monkeypatch.setattr(instrumented, "_log", lambda message, **kwargs: logs.append(message))
+    class FakeClient:
+        async def open_binary(self, endpoint, *, params, headers):
+            assert endpoint == "stream" and headers["range"] == "bytes=0-1"
+            return instrumented._NO_CLOSE_LEASE, httpx.Response(206, content=b"ab", headers={"content-range": "bytes 0-1/10", "accept-ranges": "bytes", "content-type": "audio/mpeg"})
+    monkeypatch.setattr(main, "navidrome_client", lambda: FakeClient())
+    monkeypatch.setattr(main, "require_navidrome", lambda: None)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=instrumented.app), base_url="http://synthetic.invalid") as client:
+        response = await client.get("/api/media/stream/synthetic", headers={"range": "bytes=0-1"})
+        assert response.status_code == 206 and response.content == b"ab"
+        assert response.headers["content-range"] == "bytes 0-1/10"
+    assert any("result=complete bytes=2" in line for line in logs)
