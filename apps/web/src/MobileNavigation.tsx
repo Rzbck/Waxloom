@@ -43,7 +43,7 @@ export function MobileNavigation<T extends string>({
     };
     // A rotated phone / resized browser must never leave an invisible modal
     // locking the desktop scroll.
-    const onResize = () => { if (window.innerWidth > 820) onClose(); };
+    const onResize = () => { if (!window.matchMedia("(max-width: 820px), (max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse)").matches) onClose(); };
     document.addEventListener("keydown", onKeydown);
     window.addEventListener("resize", onResize);
     return () => {

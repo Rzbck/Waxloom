@@ -1,3 +1,7 @@
+## 2026-11-24 — Console production consolidation and orientation support
+
+- Owner validated Console design and promoted 90d1eda to production. Follow-up consolidates CSS into eight owned files, restores cascade gate (251 / 260), adds portrait/landscape phone layout, fixes queue overlay, enlarges W/record favicon. See docs/CONSOLE_CONSOLIDATION_20261124.md for exact QA and remaining physical Safari acceptance. Branch push only; no main merge. Runtime identity is maintained separately in the local manifest.
+
 ## 2026-11-24 - Console UI experiment (parallel, NOT USER VALIDATED)
 
 - Separate local worktree/branch based on deployed Web 97bbe11. Full real frontend with compact black layout, shared Home list and existing player; production unchanged. See `docs/CONSOLE_UI_EXPERIMENT_20261124.md` for QA results and blocking CSS guard. Await owner visual decision; no promotion.

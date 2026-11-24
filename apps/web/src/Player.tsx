@@ -105,7 +105,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const [shuffle, setShuffle] = useState(false);
   const [queueOpen, setQueueOpen] = useState(() => window.matchMedia("(min-width: 1100px)").matches);
   const [mobileExpanded, setMobileExpanded] = useState(false);
-  const closeMobilePlayer = useCallback(() => setMobileExpanded(false), []);
+  const queueBeforeExpanded = useRef(false);
+  const openExpandedPlayer = useCallback(() => {
+    queueBeforeExpanded.current = queueOpen;
+    setQueueOpen(false);
+    setMobileExpanded(true);
+  }, [queueOpen]);
+  const closeMobilePlayer = useCallback(() => {
+    setMobileExpanded(false);
+    setQueueOpen(queueBeforeExpanded.current && window.matchMedia("(min-width: 1100px)").matches);
+  }, []);
   // Escape dismisses the queue before the immersive player beneath it.
   useEffect(() => {
     if (!queueOpen) return;
@@ -1198,7 +1207,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
       {(currentSong || currentPreview) && (
         <>
-          <div className="console-player-rail">
+          <div className={"console-player-rail" + (mobileExpanded ? " is-expanded" : "")}>
           {queueOpen && (
             <aside className={`queue-drawer ${mobileExpanded ? "waxloom-queue-sheet" : ""}`} aria-label="Play queue">
               <div className="queue-drawer-head">
@@ -1266,7 +1275,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             <div className="console-mini-progress" aria-hidden="true"><span style={{ width: `${duration > 0 ? Math.min(100, currentTime / duration * 100) : 0}%` }} /></div>
             <div className="waxloom-mobile-mini">
               <button className="waxloom-mobile-mini-info" type="button"
-                onClick={() => setMobileExpanded(true)}
+                onClick={openExpandedPlayer}
                 aria-label={`Open full-screen player for ${activeTitle}`}>
                 <span className="waxloom-mobile-mini-cover">
                   {mode === "navidrome" && currentSong
@@ -1300,7 +1309,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               </button>
             </div>
             <div className="player-track">
-              <button className="player-cover player-cover-expand" type="button" onClick={() => setMobileExpanded(true)}
+              <button className="player-cover player-cover-expand" type="button" onClick={openExpandedPlayer}
                 title="Open Now Playing" aria-label={`Open Now Playing for ${activeTitle}`}>
                 {mode === "navidrome" && currentSong ? <CoverArtwork coverId={currentSong.coverArt || currentSong.albumId} seed={currentSong.albumId || currentSong.id} size={320} priority /> : currentPreview?.thumbnail ? <img src={currentPreview.thumbnail} alt="" /> : <span>{mode === "preview" ? "◎" : "♪"}</span>}
               </button>
@@ -1335,7 +1344,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
             <div className="player-tools">
               <button className="icon-button player-expand-action" type="button"
-                onClick={() => setMobileExpanded(true)} aria-label="Open Now Playing" title="Open Now Playing">
+                onClick={openExpandedPlayer} aria-label="Open Now Playing" title="Open Now Playing">
                 <PlayerIcon name="expand" size={19} />
               </button>
               <button className={playerLiked ? "icon-button player-quick-action player-like-action is-favorite" : "icon-button player-quick-action player-like-action"}

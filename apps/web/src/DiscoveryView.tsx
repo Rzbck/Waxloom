@@ -13,7 +13,6 @@ import type {
 } from "./types";
 
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
-import "./discovery.css";
 
 const BROWSER_CACHE_KEY = "waxloom.discovery.feed.v4";
 const BROWSER_CACHE_AGE_MS = 2 * 60 * 1000;

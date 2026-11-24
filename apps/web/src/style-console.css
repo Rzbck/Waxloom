@@ -1,0 +1,775 @@
+/* Consolidated source order: desktop-now-playing.css, console-ui.css. */
+
+/* desktop-now-playing.css */
+@layer waxloom-base {
+.player-cover-expand {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.player-cover-expand:hover { outline: 2px solid #767676; outline-offset: 2px; }
+.player-cover-expand:focus-visible,
+.player-expand-action:focus-visible { outline: 2px solid #c7c7c7; outline-offset: 3px; }
+.player-expand-action { flex: 0 0 auto; }
+
+@media ((min-width: 821px) and (not ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse)))) {
+  .waxloom-mobile-player {
+    position: fixed;
+    inset: 0;
+    z-index: 180;
+    display: grid;
+    grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr);
+    grid-template-rows: auto auto auto auto auto auto auto minmax(0, 1fr);
+    grid-template-areas:
+      "head head"
+      "art metadata"
+      "art progress"
+      "art transport"
+      "art actions"
+      "art download"
+      "art notice"
+      "art next";
+    column-gap: clamp(26px, 4.6vw, 78px);
+    row-gap: clamp(8px, 1.3dvh, 15px);
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 100dvh;
+    min-height: 0;
+    padding: clamp(20px, 3.1vw, 46px) max(24px, calc((100vw - 1180px) / 2));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    background: radial-gradient(ellipse at 26% 40%, #242424 0%, #141414 46%, #0c0c0c 100%);
+    color: #f0f0f0;
+  }
+
+  .waxloom-mobile-player-head {
+    grid-area: head;
+    display: grid;
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    margin-bottom: clamp(6px, 2dvh, 19px);
+  }
+  .waxloom-mobile-player-close {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border: 1px solid #4f4f4f;
+    border-radius: 13px;
+    background: #262626;
+    color: #ebebeb;
+    cursor: pointer;
+  }
+  .waxloom-mobile-player-close:hover,
+  .waxloom-mobile-player-close:focus-visible {
+    border-color: #aaaaaa;
+    background: #373737;
+    outline-offset: 2px;
+  }
+  .waxloom-mobile-player-head-title {
+    display: grid;
+    min-width: 0;
+    gap: 5px;
+    text-align: center;
+  }
+  .waxloom-mobile-player-head-title strong {
+    font-size: 12px;
+    letter-spacing: .18em;
+    color: #e5e5e5;
+  }
+  .waxloom-mobile-player-head-title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: #a3a3a3;
+  }
+
+  .waxloom-mobile-player-art-wrap {
+    grid-area: art;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+  }
+  .waxloom-mobile-player-art {
+    display: grid;
+    place-items: center;
+    width: min(100%, 37vw, 51dvh, 480px);
+    aspect-ratio: 1 / 1;
+    min-width: 0;
+    overflow: hidden;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #5a5a5a, #1d1d1d);
+    color: #f2f2f2;
+    box-shadow: 0 22px 72px #0009, 0 0 0 1px #ffffff19;
+  }
+  .waxloom-mobile-player-art > img,
+  .waxloom-mobile-player-art > .waxloom-generated-cover {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+  }
+
+  .waxloom-mobile-player-metadata {
+    grid-area: metadata;
+    display: grid;
+    gap: 7px;
+    align-self: end;
+    min-width: 0;
+    text-align: left;
+  }
+  .waxloom-mobile-player-metadata .waxloom-mobile-metadata-kind {
+    font-size: 11px;
+    letter-spacing: .16em;
+    color: #9b9b9b;
+  }
+  .waxloom-mobile-song-title {
+    display: block;
+    max-width: 100%;
+    color: #fff;
+    font-size: clamp(23px, 2.6vw, 36px);
+    line-height: 1.18;
+    font-weight: 750;
+  }
+  .waxloom-mobile-song-artist {
+    display: block;
+    color: #c5c5c5;
+    font-size: clamp(14px, 1.3vw, 18px);
+  }
+  .waxloom-mobile-player-progress {
+    grid-area: progress;
+    display: grid;
+    gap: 0;
+    min-width: 0;
+  }
+  .waxloom-mobile-player-progress input {
+    width: 100%;
+    height: 35px;
+    margin: 0;
+    border: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    cursor: pointer;
+    accent-color: #bcbcbc;
+  }
+  .waxloom-mobile-player-progress input::-webkit-slider-runnable-track {
+    height: 6px;
+    border-radius: 6px;
+    background: linear-gradient(to right, #bfbfbf 0%, #bfbfbf var(--progress), #4c4c4c var(--progress), #4c4c4c 100%);
+  }
+  .waxloom-mobile-player-progress input::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 17px;
+    height: 17px;
+    margin-top: -5.5px;
+    border: 2px solid #f2f2f2;
+    border-radius: 50%;
+    background: #9e9e9e;
+  }
+  .waxloom-mobile-player-progress input::-moz-range-track {
+    height: 6px;
+    border-radius: 6px;
+    background: #4c4c4c;
+  }
+  .waxloom-mobile-player-progress input::-moz-range-progress { background: #bfbfbf; height: 6px; }
+  .waxloom-mobile-player-progress input::-moz-range-thumb {
+    width: 17px;
+    height: 17px;
+    border: 2px solid #f2f2f2;
+    border-radius: 50%;
+    background: #9e9e9e;
+  }
+  .waxloom-mobile-player-timing {
+    display: flex;
+    justify-content: space-between;
+    color: #acacac;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .waxloom-mobile-player-transport {
+    grid-area: transport;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr) 1.25fr repeat(2, 1fr);
+    align-items: center;
+    justify-items: center;
+    width: 100%;
+    min-width: 0;
+    min-height: 70px;
+  }
+  .waxloom-mobile-player-transport button {
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: #ebebeb;
+    cursor: pointer;
+  }
+  .waxloom-mobile-player-transport .waxloom-transport-small { width: 44px; height: 46px; color: #afafaf; }
+  .waxloom-mobile-player-transport .waxloom-transport-small.is-active {
+    background: #383838;
+    color: #dddddd;
+  }
+  .waxloom-mobile-player-transport .waxloom-transport-skip { width: 50px; height: 54px; }
+  .waxloom-mobile-player-transport .waxloom-transport-play {
+    width: 68px;
+    height: 68px;
+    border-radius: 50%;
+    background: #c6c6c6;
+    color: #1a1a1a;
+    box-shadow: 0 5px 24px #87878755;
+  }
+  .waxloom-mobile-player-transport button:hover:not(:disabled) { filter: brightness(1.16); }
+  .waxloom-mobile-player-transport button:disabled { opacity: .45; cursor: default; }
+
+  .waxloom-mobile-player-actions {
+    grid-area: actions;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 8px;
+    min-width: 0;
+  }
+  .waxloom-mobile-player-actions button {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-width: 0;
+    min-height: 68px;
+    padding: 8px 4px;
+    border: 1px solid #4b4b4b;
+    border-radius: 12px;
+    background: #262626;
+    color: #e7e7e7;
+    cursor: pointer;
+  }
+  .waxloom-mobile-player-actions button span {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .waxloom-mobile-player-actions button.is-active {
+    background: #3d3d3d;
+    border-color: #979797;
+  }
+  .waxloom-mobile-player-actions button:hover:not(:disabled) { border-color: #a0a0a0; }
+  .waxloom-mobile-player-actions button:disabled { opacity: .4; cursor: not-allowed; }
+
+  .waxloom-mobile-preview-download {
+    grid-area: download;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: 44px;
+    padding: 8px 14px;
+    border: 1px solid #575757;
+    border-radius: 11px;
+    background: #262626;
+    color: #eaeaea;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .waxloom-mobile-preview-download > span { font-size: 20px; }
+  .waxloom-mobile-preview-download.is-complete { color: #c2e4d2; }
+  .waxloom-mobile-preview-download:disabled { opacity: .62; cursor: default; }
+  .waxloom-mobile-player-notice {
+    grid-area: notice;
+    min-width: 0;
+    padding: 8px 11px;
+    border-radius: 8px;
+    background: #2e2e2e;
+    color: #dadada;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .waxloom-mobile-player-next {
+    grid-area: next;
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    align-self: stretch;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    padding-top: 10px;
+    padding-right: 3px;
+    border-top: 1px solid #404040;
+    scrollbar-width: thin;
+  }
+  .waxloom-mobile-player-next-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: #e1e1e1;
+    font-size: 13px;
+  }
+  .waxloom-mobile-player-next-heading span { color: #969696; font-size: 11px; }
+  .waxloom-next-item {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 24px;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 12px;
+    border: 1px solid #303030;
+    border-radius: 9px;
+    background: #1e1e1e;
+    color: #e8e8e8;
+    text-align: left;
+    cursor: pointer;
+  }
+  .waxloom-next-item:hover { border-color: #777777; background: #292929; }
+  .waxloom-next-index { color: #a5a5a5; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .waxloom-next-copy { display: grid; min-width: 0; gap: 3px; }
+  .waxloom-next-copy .waxloom-marquee { font-size: 13px; font-weight: 600; }
+  .waxloom-next-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #adadad; font-size: 11px; }
+  .queue-drawer.waxloom-queue-sheet {
+    z-index: 230;
+    right: 24px;
+    bottom: 24px;
+    width: min(440px, calc(100vw - 48px));
+    max-height: min(670px, 75dvh);
+    box-shadow: 0 24px 90px #000c;
+  }
+  .player-playlist-picker.waxloom-playlist-sheet {
+    position: fixed;
+    z-index: 235;
+    right: 24px;
+    bottom: 24px;
+    width: min(440px, calc(100vw - 48px));
+    max-height: min(670px, 75dvh);
+    overflow-y: auto;
+    box-shadow: 0 24px 90px #000c;
+  }
+}
+
+@media ((min-width: 821px) and (not ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse)))) and (max-height: 710px) {
+  .waxloom-mobile-player { row-gap: 7px; padding-top: 16px; padding-bottom: 16px; }
+  .waxloom-mobile-player-head { margin-bottom: 0; }
+  .waxloom-mobile-player-art { width: min(100%, 36vw, 46dvh, 390px); }
+  .waxloom-mobile-player-actions button { min-height: 56px; }
+  .waxloom-mobile-player-transport { min-height: 61px; }
+  .waxloom-mobile-player-transport .waxloom-transport-play { width: 59px; height: 59px; }
+}
+}
+
+/* console-ui.css */
+@layer waxloom-base {
+:root{color-scheme:dark;--console-bg:#050505;--console-panel:#090909;--console-line:#252525;--console-text:#eee;--console-muted:#989898;--console-active:#83c5a1;--console-mono:"Cascadia Code","JetBrains Mono","SFMono-Regular",Consolas,monospace;--console-header:54px;--console-rail:clamp(290px,25vw,370px)}
+html,body,#root{min-height:0}
+.console-shell,.console-player-rail,.waxloom-mobile-player,.waxloom-mobile-navigation{color:var(--console-text)}
+.console-shell h1,.console-shell h2,.console-shell h3{letter-spacing:-.02em;color:#eee}
+.console-shell h2{line-height:1.25}
+.console-shell .eyebrow,.console-panel-label,.console-list-toolbar,.console-track-time,.console-shell .status-pill,.console-shell .brand,.console-idle-queue{font-family:var(--console-mono);font-size:11px;letter-spacing:.045em}
+.console-shell .topbar-title .eyebrow{display:none}
+.console-shell .global-search{min-width:0}
+.console-shell .global-search button{color:#ddd;border-color:#303030}
+.console-shell .global-search input{color:#eee}
+.console-shell .brand{color:#eee;font-weight:800;white-space:nowrap}
+.console-brand-mark{font-size:21px;vertical-align:middle;margin-right:4px;color:#eee}
+.console-brand-sub{color:#666;font-size:10px}
+.console-content-header{display:flex;gap:10px;align-items:center;min-width:0;margin-bottom:12px}
+.console-content-header .waxloom-history-controls{flex:none}
+.console-content-header .topbar{flex:1;min-width:0}
+.console-shell .section-toolbar{margin-bottom:8px}
+.console-shell .section-toolbar .eyebrow{margin-bottom:3px}
+.console-shell .section-toolbar p.muted{font-size:12px}
+.console-shell .detail-hero{grid-template-columns:minmax(90px,160px) minmax(0,1fr)}
+.console-shell .waxloom-home-quickbar-status{font-family:var(--console-mono)}
+.console-shell :is(button,input):focus-visible,.console-player-rail :is(button,input):focus-visible,.waxloom-mobile-player :is(button,input):focus-visible{outline-offset:2px}
+.console-track-list{border:1px solid #252525;border-radius:3px;background:#090909;min-width:0}
+.console-list-toolbar{min-height:34px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px;border-bottom:1px solid #252525;color:#a1a1a1}
+.console-list-toolbar button,.console-more{color:#ccc;background:#111;border:1px solid #303030;border-radius:3px;cursor:pointer;padding:6px 10px;font-size:12px}
+.console-track-row{display:flex;align-items:center;gap:4px;padding:5px 8px;border-bottom:1px solid #202020;min-width:0;min-height:54px}
+.console-track-row:last-child{border-bottom:0}
+.console-track-row:hover{background:#111}
+.console-track-row.is-current{background:#14201a;box-shadow:inset 2px 0 #83c5a1}
+.console-track-row>button:not(.console-track-play){width:32px;height:34px;display:grid;place-items:center;flex:0 0 auto;background:transparent;color:#aaa;border:1px solid transparent;border-radius:3px;cursor:pointer;padding:0}
+.console-track-row>button:not(.console-track-play):hover{border-color:#444;background:#191919;color:#eee}
+.console-track-row>button.is-favorite{color:#83c5a1}
+.console-track-play{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:9px;flex:1;min-width:0;position:relative;border:0;background:transparent;color:#eee;text-align:left;padding:0;cursor:pointer}
+.console-track-play>img,.console-track-play>.waxloom-generated-cover,.console-track-play>.waxloom-cover-art{position:relative;inset:auto;width:42px;height:42px;flex:0 0 42px;object-fit:cover;border-radius:2px;grid-column:1;grid-row:1}
+.console-track-indicator{position:absolute;left:0;width:42px;height:42px;display:grid;place-items:center;background:#0008;opacity:0;color:#fff}
+.console-track-play:hover .console-track-indicator,.is-current .console-track-indicator{opacity:1}
+.console-track-text{grid-column:2;grid-row:1;display:grid;gap:3px;flex:1;min-width:0}
+.console-track-text strong,.console-track-text small{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block}
+.console-track-text strong{font-size:13px;font-weight:650}
+.console-track-text small{font-size:11px;color:#a0a0a0}
+.console-track-time{color:#999;flex:0 0 auto;margin-right:5px}
+.console-more{display:block;width:calc(100% - 16px);margin:8px}
+.console-player-rail{display:contents}
+.console-panel-label{display:none}
+.console-idle-player{display:none}
+.player-dock input[type=range],.waxloom-mobile-player input[type=range]{accent-color:#83c5a1}
+.player-dock .player-track-copy :is(strong,span,small),.waxloom-mobile-player :is(.waxloom-mobile-song-title,.waxloom-mobile-song-artist,.waxloom-mobile-metadata-kind){color:#eee}
+@media((min-width: 821px) and (not ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse)))){
+ html,body,#root{height:100%;overflow:hidden}
+ .console-shell>.sidebar{grid-row:1;grid-column:1/-1;z-index:90}
+ .console-shell .sidebar>.brand{align-items:center;gap:4px}
+ .console-shell .sidebar>nav{align-items:center;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+ .console-shell .sidebar .nav-item{white-space:nowrap;flex:0 0 auto}
+ .console-shell .sidebar-status{white-space:nowrap}
+ .console-shell .sidebar-status strong{font-size:11px}
+ .console-shell .sidebar-status small{font-size:10px;color:#a0a0a0}
+ .console-shell .content,.console-shell.app-shell-discovery .content,.console-shell.app-shell-discovery.app-shell-with-player .content{overscroll-behavior:contain}
+ .console-shell .console-content-header{position:sticky;top:-12px;z-index:12;background:#050505;padding:10px 0 8px;margin-top:-10px;border-bottom:1px solid #252525}
+ .console-shell .topbar-title{flex:1;min-width:90px}
+ .console-shell .global-search{flex:1;max-width:420px}
+}
+@media(min-width:1100px){
+ .console-player-rail{position:fixed;z-index:65;top:calc(var(--console-header) + 12px);bottom:12px;right:12px;width:calc(var(--console-rail) - 12px);display:flex;flex-direction:column;gap:10px;min-height:0;pointer-events:none}
+ .console-player-rail>*{pointer-events:auto}
+ .console-player-rail>.player-dock{order:0;flex:0 0 auto}
+ .console-panel-label{display:flex;align-items:center;justify-content:space-between;gap:8px;color:#a0a0a0;border-bottom:1px solid #252525;padding-bottom:10px}
+ .console-panel-label span{color:#83c5a1;font-size:10px}
+ .console-player-rail .player-cover{aspect-ratio:1;overflow:hidden}
+ .console-player-rail .player-cover img{width:100%;height:100%;object-fit:cover}
+ .console-player-rail .player-track-copy{min-width:0}
+ .console-player-rail .player-track-copy strong{line-height:1.2}
+ .console-player-rail .player-track-copy span,.console-player-rail .player-track-copy small{line-height:1.4}
+ .console-player-rail .player-progress{font-family:var(--console-mono)}
+ .console-player-rail .volume-slider{flex:1}
+ .console-player-rail .queue-drawer:not(.waxloom-queue-sheet){order:1;flex:1 1 0}
+ .console-player-rail .queue-drawer-head{flex:0 0 auto}
+ .console-player-rail .queue-drawer-head .eyebrow{font-family:var(--console-mono)}
+ .console-player-rail .queue-items{flex:1}
+ .console-player-rail .waxloom-autoplay-toggle{flex:0 0 auto}
+ .console-idle-player{grid-column:2;grid-row:2;display:flex;flex-direction:column;gap:12px;margin:12px 12px 12px 0;padding:12px;background:#090909;border:1px solid #252525;border-radius:4px;min-height:0}
+ .console-idle-art{height:130px;display:grid;place-items:center;background:#111;font-size:64px;color:#555}
+ .console-idle-player p{font-size:12px;color:#999}
+ .console-idle-queue{margin-top:8px;padding-top:12px;border-top:1px solid #252525;display:grid;gap:12px}
+ .console-idle-queue small{color:#888}
+}
+@media((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))){
+ .console-shell .console-content-header{display:flex;gap:6px;align-items:flex-start;margin-bottom:8px}
+ .console-shell .console-content-header .waxloom-history-controls{flex-direction:column;gap:4px}
+ .console-shell .topbar-title{grid-column:1}
+ .console-shell .topbar .status-pill{grid-column:2;grid-row:1}
+ .console-shell .topbar .global-search{grid-column:1/-1;grid-row:2}
+ .console-track-row{padding:4px 4px;gap:1px;min-height:56px}
+ .console-track-row>button:not(.console-track-play){width:44px;height:44px}
+ .console-track-play{grid-template-columns:36px minmax(0,1fr);gap:6px;min-height:44px}
+ .console-track-play>img,.console-track-play>.waxloom-generated-cover,.console-track-play>.waxloom-cover-art,.console-track-indicator{width:36px;height:36px;flex-basis:36px}
+ .console-track-time{display:none}
+ .console-track-text strong{font-size:12px}
+ .console-track-text small{font-size:10px}
+ .console-list-toolbar button{min-height:36px}
+}
+.console-shell .console-explore{margin-top:10px;min-height:36px}
+.console-mini-progress{display:none}
+@media((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))){
+ .console-shell .sidebar>nav{flex:1;min-width:0;gap:4px;justify-content:space-between;align-items:center}
+ .console-shell .sidebar>nav>.nav-item:is([data-console-section=home],[data-console-section=discovery],[data-console-section=favorites]){flex:1;min-width:0;font-family:var(--console-mono)}
+ .console-shell .sidebar>.mobile-menu-toggle{flex:0 0 auto}
+ .console-mini-progress{display:block;position:absolute;top:0;left:0;right:0;height:2px;background:#303030;overflow:hidden}
+ .console-mini-progress>span{display:block;height:100%;background:#83c5a1}
+ .console-shell .section-toolbar .secondary-action{min-height:44px}
+ .console-shell .console-list-toolbar button{min-height:44px}
+}
+}
+@layer waxloom-priority {
+html,body,#root{color:#eee}
+body{background-image:none}
+.console-shell h1{font-size:20px;line-height:1.2;margin:0}
+.console-shell h2{font-size:18px}
+.console-shell h3{font-size:14px}
+.console-shell .muted,.console-shell .eyebrow{color:#969696}
+.console-shell .global-search{border:1px solid #303030;border-radius:4px}
+.console-shell .status-pill{border:1px solid #292929;border-radius:3px;color:#999}
+.console-shell .status-pill-ok{color:#83c5a1}
+.console-shell .sidebar{box-shadow:none;border-color:#252525;backdrop-filter:none}
+.console-shell .nav-item,.console-shell .mobile-menu-toggle{border-radius:3px;color:#aaa}
+.console-shell .nav-item:hover,.console-shell .nav-item-active{color:#fff}
+.console-content-header .waxloom-history-controls{position:static;margin:0;min-height:0}
+.console-content-header .topbar{margin:0}
+.console-shell .waxloom-history-controls button{border-color:#303030;border-radius:3px;color:#ccc}
+.console-shell .workspace-stack{gap:12px}
+.console-shell .home-quickbar{gap:8px;margin:0}
+.console-shell .panel,.console-shell .waxloom-home-tracks-main,.console-shell .waxloom-mobile-home-crate,.console-shell .detail-hero,.console-shell .playlist-card,.console-shell .state-card,.console-shell .modal{border:1px solid #252525;border-radius:4px;box-shadow:none}
+.console-shell .waxloom-home-tracks-main,.console-shell .waxloom-mobile-home-crate{padding:12px}
+.console-shell .section-toolbar{gap:8px}
+.console-shell .primary-action{color:#080808;border:1px solid #eee;border-radius:3px;box-shadow:none}
+.console-shell :is(.secondary-action,.mini-action,.filter-tab,.icon-button,.waxloom-home-see-all,.waxloom-home-explore,.waxloom-vinyl-context-trigger,.waxloom-vinyl-load-more){color:#ddd;border-color:#303030;border-radius:3px;box-shadow:none}
+.console-shell .filter-tab-active{color:#fff}
+.console-shell :is(.media-cover,.detail-cover,.artist-avatar){border-radius:4px;border-color:#292929;box-shadow:none}
+.console-shell .media-grid,.console-shell .artist-grid{gap:10px}
+.console-shell :is(.media-card,.discovery-song-card,.discovery-track-shelf,.discovery-album-card){border-radius:4px;border-color:#292929}
+.console-shell :is(.discovery-song-card,.discovery-track-shelf,.discovery-album-card){box-shadow:none}
+.console-shell .detail-hero{padding:12px}
+.console-shell :is(button,input):focus-visible,.console-player-rail :is(button,input):focus-visible,.waxloom-mobile-player :is(button,input):focus-visible{outline:2px solid #83c5a1}
+.player-dock,.queue-drawer,.player-playlist-picker,.waxloom-mobile-player,.waxloom-mobile-navigation{border-color:#303030;color:#eee;box-shadow:none;backdrop-filter:none}
+.player-dock :is(.icon-button,.player-expand-action,.waxloom-autoplay-tool),.queue-drawer .icon-button,.queue-drawer .waxloom-autoplay-toggle,.player-playlist-picker button,.waxloom-mobile-player :is(button,.waxloom-mobile-player-actions button){border-color:#303030;color:#ddd;border-radius:4px;box-shadow:none}
+.player-dock .play-button,.waxloom-mobile-player .waxloom-mobile-play-main{color:#050505}
+.player-dock :is(.icon-button-active,.is-favorite,.is-on),.queue-drawer .is-on,.waxloom-mobile-player :is(.is-active,.is-favorite,.is-on){color:#83c5a1;border-color:#42644f}
+.player-dock .player-cover,.waxloom-mobile-player .waxloom-mobile-player-art{border-radius:3px;box-shadow:none}
+.queue-drawer .queue-item{border-radius:3px;border-color:#252525;color:#ddd}
+.queue-drawer .queue-item-active{color:#a7dbb9}
+.queue-drawer .queue-item small{color:#999}
+.waxloom-mobile-navigation nav button{border-radius:4px;border-color:#303030;color:#eee}
+.waxloom-mobile-navigation nav button.is-current{border-color:#777}
+.waxloom-mobile-navigation header button{border-color:#303030;border-radius:4px}
+@media((min-width: 821px) and (not ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse)))){
+ .console-shell.app-shell{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:var(--console-header) minmax(0,1fr);height:100dvh;min-height:0;padding:0;gap:0}
+ .console-shell>.sidebar{position:relative;height:var(--console-header);min-height:0;display:flex;flex-direction:row;align-items:center;justify-content:flex-start;padding:0 14px;gap:18px;border-right:0;border-bottom:1px solid #252525}
+ .console-shell .sidebar>.brand{display:flex;padding:0;margin:0;font-size:14px}
+ .console-shell .sidebar>nav{display:flex;gap:3px}
+ .console-shell .sidebar .nav-item{min-height:34px;padding:7px 11px;font-size:12px;border:1px solid transparent}
+ .console-shell .sidebar .nav-item-active{border-color:#373737}
+ .console-shell .sidebar-status{margin:0;display:flex;padding:0;border:0;gap:6px}
+ .console-shell .content,.console-shell.app-shell-discovery .content,.console-shell.app-shell-discovery.app-shell-with-player .content{grid-row:2;grid-column:1;display:block;height:auto;min-height:0;min-width:0;max-height:none;padding:12px;margin:0}
+ .console-shell .topbar{display:flex;align-items:center;gap:10px;min-height:34px;height:auto;padding:0;position:static}
+ .console-shell .global-search{height:34px}
+ .console-shell .topbar .status-pill{padding:7px 8px}
+ .console-shell .waxloom-preserved-view:not([hidden]){height:auto;min-height:0}
+ .console-shell .discovery-fit-page{height:auto;min-height:0;max-height:none}
+ .console-shell .app-shell-imports .waxloom-history-controls{position:static}
+ .console-shell .waxloom-home-desktop{display:block}
+ .console-shell .waxloom-home-tracks-main{max-width:none}
+ .console-shell .waxloom-home-mobile{display:none}
+ .console-player-rail>.player-dock{border-top:1px solid #303030}
+ .console-shell.app-shell-with-player .content{padding-bottom:100px}
+}
+@media(min-width:1100px){
+ .console-shell.app-shell{grid-template-columns:minmax(0,1fr) var(--console-rail)}
+ .console-shell .content,.console-shell.app-shell-with-player .content{padding-bottom:12px}
+ .console-player-rail>.player-dock{position:relative;display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:12px;padding:12px;height:auto;min-height:0;max-height:none;border:1px solid #252525;border-radius:4px}
+ .console-player-rail .player-track{display:grid;grid-template-columns:92px minmax(0,1fr);gap:10px;align-items:center}
+ .console-player-rail .player-cover{height:92px;min-width:0}
+ .console-player-rail .player-track-copy{max-width:none}
+ .console-player-rail .player-track-copy strong{font-size:16px;white-space:normal}
+ .console-player-rail .player-track-copy span,.console-player-rail .player-track-copy small{font-size:11px;color:#aaa;white-space:normal}
+ .console-player-rail .player-center{display:grid;gap:10px;min-width:0}
+ .console-player-rail .player-buttons{display:flex;justify-content:space-between;gap:5px}
+ .console-player-rail .player-buttons .play-button{height:44px;border-radius:4px}
+ .console-player-rail .player-buttons .icon-button{height:38px}
+ .console-player-rail .player-progress{display:grid;grid-template-columns:36px minmax(0,1fr) 36px;gap:5px;font-size:10px}
+ .console-player-rail .player-tools{display:flex;flex-wrap:wrap;justify-content:flex-start;gap:5px;min-width:0}
+ .console-player-rail .player-tools button{min-height:32px;min-width:32px}
+ .console-player-rail .volume-slider{min-width:60px;max-width:110px}
+ .console-player-rail .queue-drawer:not(.waxloom-queue-sheet){position:relative;height:auto;max-height:none;min-height:0;display:flex;flex-direction:column;border-radius:4px}
+ .console-player-rail .queue-drawer-head{padding:10px;border-bottom:1px solid #252525}
+ .console-player-rail .queue-drawer-head .eyebrow{font-size:10px}
+ .console-player-rail .queue-items{min-height:0;padding:4px}
+ .console-player-rail .queue-item{min-height:45px;padding:6px}
+ .console-player-rail .queue-item strong{font-size:12px}
+ .console-player-rail .queue-item small{font-size:10px}
+ .console-player-rail .waxloom-autoplay-toggle{font-size:11px;margin:5px}
+}
+@media((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))){
+ .console-shell .console-content-header .waxloom-history-controls{display:flex;margin:0}
+ .console-shell .console-content-header .waxloom-history-controls button{height:32px}
+ .console-shell .topbar{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px}
+ .console-shell .topbar .status-pill{padding:4px 6px;font-size:9px}
+ .console-shell .topbar .global-search{height:37px}
+ .console-shell .global-search input{font-size:16px;padding-left:8px}
+ .console-shell .sidebar .mobile-menu-toggle{border:1px solid #303030;border-radius:4px;color:#eee}
+ .console-shell .waxloom-mobile-home{gap:10px}
+ .console-shell .waxloom-mobile-home-crate{padding:8px}
+ .console-shell .waxloom-mobile-home-section-head{padding:0;gap:6px}
+ .player-dock{border-radius:4px}
+ .console-shell .detail-hero{grid-template-columns:85px minmax(0,1fr)}
+}
+.console-shell .console-unified-home{display:block}
+@media(min-width:1100px){
+ .console-player-rail .player-track{grid-template-columns:112px minmax(0,1fr)}
+ .console-player-rail .player-cover{height:112px}
+}
+@media((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))){
+ .console-shell .console-unified-home{display:block;min-width:0}
+ .console-shell .console-unified-home .waxloom-home-tracks-main{display:block;max-width:none;padding:8px}
+ .console-shell .sidebar{flex-direction:row;gap:4px;justify-content:space-between;padding-left:max(6px,env(safe-area-inset-left));padding-right:max(6px,env(safe-area-inset-right))}
+ .console-shell .sidebar>nav{display:flex}
+ .console-shell .sidebar>nav>.nav-item{display:none}
+ .console-shell .sidebar>nav>.nav-item:is([data-console-section=home],[data-console-section=discovery],[data-console-section=favorites]){display:flex;justify-content:center;align-items:center;min-height:44px;padding:5px 2px;border:1px solid transparent;font-size:11px}
+ .console-shell .sidebar>nav>.nav-item.nav-item-active{border-color:#373737;color:#fff}
+ .console-shell .sidebar>.mobile-menu-toggle{min-width:54px;min-height:44px;font-size:12px;padding:4px 8px}
+ .console-shell .sidebar>.brand,.console-shell .sidebar>.sidebar-status{display:none}
+ .console-shell .section-toolbar .muted{font-size:11px}
+}
+}
+/* Motion/inline-sensitive priority: preserve original !important semantics. */
+html,body,#root{background:#050505!important}
+.console-shell .global-search{background:#0d0d0d!important}
+.console-shell .global-search button{background:#171717!important}
+.console-shell .status-pill{background:#090909!important}
+.console-shell .sidebar{background:#090909!important}
+.console-shell .nav-item:hover,.console-shell .nav-item-active{background:#191919!important}
+.console-shell .waxloom-history-controls button{background:#111!important}
+.console-shell .panel,.console-shell .waxloom-home-tracks-main,.console-shell .waxloom-mobile-home-crate,.console-shell .detail-hero,.console-shell .playlist-card,.console-shell .state-card,.console-shell .modal{background:#090909!important}
+.console-shell .primary-action{background:#eee!important}
+.console-shell :is(.secondary-action,.mini-action,.filter-tab,.icon-button,.waxloom-home-see-all,.waxloom-home-explore,.waxloom-vinyl-context-trigger,.waxloom-vinyl-load-more){background:#111!important}
+.console-shell .filter-tab-active{background:#252525!important}
+.console-shell :is(.discovery-song-card,.discovery-track-shelf,.discovery-album-card){background:#090909!important}
+.player-dock,.queue-drawer,.player-playlist-picker,.waxloom-mobile-player,.waxloom-mobile-navigation{background:#090909!important}
+.player-dock :is(.icon-button,.player-expand-action,.waxloom-autoplay-tool),.queue-drawer .icon-button,.queue-drawer .waxloom-autoplay-toggle,.player-playlist-picker button,.waxloom-mobile-player :is(button,.waxloom-mobile-player-actions button){background:#111!important}
+.player-dock .play-button,.waxloom-mobile-player .waxloom-mobile-play-main{background:#eee!important}
+.player-dock .player-cover,.waxloom-mobile-player .waxloom-mobile-player-art{background:#151515!important}
+.queue-drawer .queue-item{background:#0d0d0d!important}
+.queue-drawer .queue-item-active{background:#17221c!important}
+.waxloom-mobile-navigation nav button{background:#111!important}
+.waxloom-mobile-navigation nav button.is-current{background:#222!important}
+.waxloom-mobile-navigation header button{background:#111!important}
+@media((min-width: 821px) and (not ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse)))){
+ .console-shell.app-shell{overflow:hidden!important}
+ .console-shell>.sidebar{inset:auto!important;width:100%!important}
+ .console-shell .sidebar-status{background:transparent!important}
+ .console-shell .content,.console-shell.app-shell-discovery .content,.console-shell.app-shell-discovery.app-shell-with-player .content{width:auto!important;overflow:auto!important}
+ .console-shell .waxloom-preserved-view:not([hidden]){overflow:visible!important}
+ .console-shell .discovery-fit-page{overflow:visible!important}
+ .console-shell .waxloom-home-tracks-main{width:100%!important}
+ .console-player-rail>.player-dock{left:0!important;right:0!important;width:auto!important;background:#090909!important}
+}
+@media(min-width:1100px){
+ .console-player-rail>.player-dock{inset:auto!important;width:100%!important;overflow:visible!important}
+ .console-player-rail .player-track{width:100%!important}
+ .console-player-rail .player-cover{width:92px!important}
+ .console-player-rail .player-center{width:100%!important}
+ .console-player-rail .player-buttons .play-button{width:44px!important}
+ .console-player-rail .player-buttons .icon-button{width:38px!important}
+ .console-player-rail .player-tools{width:100%!important}
+ .console-player-rail .volume-slider{width:auto!important}
+ .console-player-rail .queue-drawer:not(.waxloom-queue-sheet){inset:auto!important;width:100%!important;overflow:hidden!important}
+ .console-player-rail .queue-items{overflow-y:auto!important}
+}
+@media((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))){
+ .console-shell .console-content-header .waxloom-history-controls button{width:44px!important}
+ .console-shell .sidebar .mobile-menu-toggle{background:#111!important}
+ .console-shell .sidebar{background:#090909!important}
+ .player-dock{background:#111!important}
+ .waxloom-mobile-player{background:#050505!important}
+}
+@media(prefers-reduced-motion:reduce){.console-shell *, .console-player-rail *{scroll-behavior:auto!important}}
+@media(min-width:1100px){
+ .console-player-rail .player-cover{width:112px!important}
+}
+@media((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))){
+ .console-shell .console-unified-home{width:100%!important}
+ .console-shell .console-unified-home .waxloom-home-tracks-main{width:100%!important}
+ .console-shell .sidebar>nav>.nav-item.nav-item-active{background:#1a1a1a!important}
+ .console-shell .sidebar>.mobile-menu-toggle{width:auto!important}
+}
+
+
+/* Responsive Console: one scroll owner, fixed touch navigation, no duplicate player. */
+@layer waxloom-priority {
+  .console-player-rail.is-expanded { display: contents; }
+  .console-player-rail.is-expanded > .player-dock { display: none; }
+  .waxloom-mobile-player .waxloom-mobile-player-transport .waxloom-transport-play { color: #050505; }
+  @media ((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))) {
+    .console-shell.app-shell {
+      display: grid;
+      grid-template-columns: minmax(0,1fr);
+      grid-template-rows: minmax(0,1fr);
+      height: 100dvh;
+      min-height: 0;
+      padding: 0 0 calc(var(--mobile-nav-h,58px) + env(safe-area-inset-bottom));
+      gap: 0;
+    }
+    .console-shell.app-shell.app-shell-with-player {
+      padding-bottom: calc(var(--mobile-nav-h,58px) + var(--mobile-player-h,68px) + 5px + env(safe-area-inset-bottom));
+    }
+    .console-shell.app-shell .content,
+    .console-shell.app-shell.app-shell-with-player .content {
+      grid-column: 1;
+      grid-row: 1;
+      display: block;
+      height: auto;
+      min-height: 0;
+      max-height: none;
+      margin: 0;
+      padding: calc(8px + env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) 12px max(8px,env(safe-area-inset-left));
+    }
+    .console-shell.app-shell .discovery-fit-page,
+    .console-shell.app-shell .discovery-cover-shelf,
+    .console-shell.app-shell .waxloom-preserved-view:not([hidden]) {
+      height: auto;
+      min-height: 0;
+      max-height: none;
+      flex: none;
+    }
+    .console-shell:not(.app-shell-imports) .console-content-header {
+      display: grid;
+      grid-template-columns: auto minmax(0,1fr) auto;
+      align-items: center;
+      gap: 5px 8px;
+    }
+    .console-shell:not(.app-shell-imports) .console-content-header .topbar { display: contents; }
+    .console-shell:not(.app-shell-imports) .console-content-header .waxloom-history-controls {
+      grid-column: 1; grid-row: 1; flex-direction: row; gap: 3px;
+    }
+    .console-shell:not(.app-shell-imports) .console-content-header .waxloom-history-controls button { height: 44px; }
+    .console-shell:not(.app-shell-imports) .topbar-title { grid-column: 2; grid-row: 1; min-width: 0; }
+    .console-shell:not(.app-shell-imports) .topbar-title h1 { font-size: clamp(15px,4.8vw,20px); overflow-wrap: anywhere; }
+    .console-shell:not(.app-shell-imports) .topbar .status-pill { grid-column: 3; grid-row: 1; font-size: 9px; }
+    .console-shell:not(.app-shell-imports) .topbar .global-search { grid-column: 1/-1; grid-row: 2; height: 44px; }
+    .waxloom-mobile-player { padding: calc(8px + env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); gap: 8px; }
+    .waxloom-mobile-player .waxloom-mobile-player-actions { grid-template-columns: repeat(5,minmax(0,1fr)); gap: 4px; }
+    .waxloom-mobile-player .waxloom-mobile-player-actions button { min-height: 52px; padding: 3px; }
+    .waxloom-mobile-player .waxloom-mobile-player-actions button span { font-size: 10px; }
+    .waxloom-mobile-player .waxloom-mobile-player-transport { min-height: 56px; }
+    .waxloom-mobile-player .waxloom-mobile-player-transport .waxloom-transport-play { height: 54px; }
+    .waxloom-mobile-player .waxloom-mobile-player-art { width: min(74vw,32dvh,300px); }
+    .waxloom-mobile-player .waxloom-mobile-player-next { padding-bottom: 8px; }
+  }
+  @media (max-width: 380px) and (orientation: portrait) {
+    .waxloom-mobile-player .waxloom-mobile-player-art { width: min(60vw,26dvh); }
+    .waxloom-mobile-player .waxloom-mobile-player-actions { grid-template-columns: repeat(3,minmax(0,1fr)); }
+    .waxloom-mobile-player .waxloom-mobile-player-actions button { min-height: 44px; }
+  }
+  @media (max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse) {
+    .console-shell:not(.app-shell-imports) .console-content-header {
+      grid-template-columns: auto minmax(0,1fr) minmax(0,2fr) auto;
+      gap: 8px;
+    }
+    .console-shell:not(.app-shell-imports) .topbar .global-search { grid-column: 3; grid-row: 1; }
+    .console-shell:not(.app-shell-imports) .topbar .status-pill { grid-column: 4; }
+    .waxloom-mobile-player {
+      grid-template-columns: minmax(120px,31vw) minmax(0,1fr);
+      grid-template-rows: 44px auto auto auto auto auto auto;
+      align-content: start;
+      gap: 6px 12px;
+    }
+    .waxloom-mobile-player .waxloom-mobile-player-art { width: min(28vw,60dvh); }
+    .waxloom-mobile-player .waxloom-mobile-player-art-wrap { grid-row: 2 / span 5; position: sticky; top: 0; }
+    .waxloom-mobile-player .waxloom-mobile-player-metadata { text-align: left; }
+    .waxloom-mobile-player .waxloom-mobile-player-actions button { min-height: 44px; }
+    .waxloom-mobile-player .waxloom-mobile-preview-download { grid-column: 2; }
+    .waxloom-mobile-player .waxloom-mobile-player-notice { grid-column: 2; }
+    .waxloom-mobile-player .waxloom-mobile-player-next { grid-column: 2; grid-row: auto; }
+  }
+}
+.waxloom-mobile-player .waxloom-mobile-player-transport .waxloom-transport-play { background: #eee !important; }
+@media ((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))) {
+  .console-shell.app-shell { overflow: hidden !important; }
+  .console-shell.app-shell .content,
+  .console-shell.app-shell.app-shell-with-player .content { overflow: auto !important; }
+  .console-shell.app-shell .discovery-fit-page,
+  .console-shell.app-shell .discovery-cover-shelf,
+  .console-shell.app-shell .waxloom-preserved-view:not([hidden]) { overflow: visible !important; }
+  .waxloom-mobile-player .waxloom-mobile-player-transport .waxloom-transport-play { width: 54px !important; }
+}

@@ -31,12 +31,13 @@ for (const file of cssFiles) {
 for (const file of references.keys()) {
   assert.ok(cssFiles.includes(file), `${file}: imported stylesheet is missing`);
 }
-// Ratcheted count after verified same-selector override pruning; future CSS changes
-// should lower it, not silently add another layer of !important patches.
-assert.ok(important <= 669,
-  `${important} !important declarations exceed 2026-10-25 tranche 2 baseline of 669`);
+// Explicit normal/priority layers replace generic important patches.
+assert.ok(important <= 260, "CSS !important budget exceeded: " + important);
 const main = readFileSync(join(src, "main.tsx"), "utf8");
-assert.ok(main.indexOf('import "./ui-control-polish.css";') >= 0
-  && main.indexOf('import "./layout-stability.css";') > main.indexOf('import "./ui-control-polish.css";'),
-  "UI controls and layout stability must retain their cascade order");
-console.log(`PASS CSS cascade: ${cssFiles.length} referenced stylesheets, ${important} !important (<= 669 baseline)`);
+const expected = ["style-foundation.css", "style-library-controls.css", "style-responsive.css",
+  "style-discovery.css", "style-mobile-player.css", "style-vinyl-library.css", "style-artwork.css", "style-console.css"];
+const actual = [...main.matchAll(/import "\.\/([^"]+\.css)";/g)].map(m => m[1]);
+assert.deepEqual(actual, expected, "CSS ownership and cascade order changed");
+assert.equal(cssFiles.length, expected.length, "No extra override stylesheet");
+assert.match(readFileSync(join(src, expected[0]), "utf8"), /@layer waxloom-base, waxloom-priority;/);
+console.log("PASS CSS cascade: " + cssFiles.length + " owned stylesheets, " + important + " !important (<= 260)");

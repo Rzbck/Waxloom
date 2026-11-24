@@ -10,8 +10,6 @@ import type {
   DiscoveryCandidate, ImportResult, PlaylistSummary, YouTubeBrowseCollection,
   YouTubeBrowseTrack, YouTubeBrowseChannel, YouTubeRuntime,
 } from "./types";
-import "./imports-v2.css";
-import "./imports-v3.css";
 
 type Filter = "all" | "tracks" | "collections";
 type SearchSnapshot = {
