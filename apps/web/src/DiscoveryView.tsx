@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { downloadPhase, enqueueDiscoveryDownload, useDownloads } from "./downloadQueue";
 import { VinylRack } from "./VinylRack";
+import { PlayerIcon } from "./MobilePlayerPanel";
 
 import { api } from "./api";
 import { usePlayer } from "./Player";
@@ -169,6 +170,16 @@ function DiscoveryShelf({
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [followRequest, setFollowRequest] = useState(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const [listOverride, setListOverride] = useState<boolean | null>(null);
+  const [phone, setPhone] = useState(() => matchMedia("(max-width: 820px), (max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse)").matches);
+  useEffect(() => {
+    const query = matchMedia("(max-width: 820px), (max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse)");
+    const update = () => setPhone(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  const list = listOverride ?? phone;
+  const [rowOptions, setRowOptions] = useState<string | null>(null);
   // Do not start HTTP requests for every transient sleeve crossed by a
   // fast wheel fling. Prefetch only the final selected vinyl after settling.
   useEffect(() => {
@@ -190,7 +201,30 @@ function DiscoveryShelf({
   const liked = taste[candidate.recording_mbid]?.value ?? candidate.feedback ?? 0;
   return (
     <section className="discovery-cover-shelf" aria-label="All Discovery recommendations">
-      <div className="waxloom-discovery-vinyl">
+      <div className="console-discovery-switch"><button type="button" className="secondary-action" onClick={() => setListOverride(!list)}>{list ? "Vinyl view" : "List view"}</button></div>
+      {list ? <div className="console-discovery-list">
+        {items.map(item => {
+          const id = item.recording_mbid;
+          const active = id === currentPreviewMbid;
+          const feedback = taste[id]?.value ?? item.feedback ?? 0;
+          const download = downloadPhase(id);
+          const working = ["queued", "searching", "downloading"].includes(download ?? "");
+          const canAdd = ownership.get(id) === "absent" && !["indexed", "existing"].includes(download ?? "");
+          return <div key={id} className={"console-discovery-entry" + (active ? " is-current" : "")}>
+            <div className="console-discovery-row">
+              <button type="button" className="console-discovery-play" aria-label={"Play " + item.title} onClick={() => { setFollowRequest(v => v + 1); onPlayQueue(items,item); }}><PlayerIcon name={active && playing ? "pause" : "play"} size={20}/><span><strong>{item.title}</strong><small>{item.artist}</small></span></button>
+              {canAdd && <button type="button" disabled={working} aria-label={"Download " + item.title} onClick={() => onQuickAdd(item)}><PlayerIcon name="download" size={18}/></button>}
+              <button type="button" aria-label={"Options for " + item.title} aria-expanded={rowOptions === id} onClick={() => setRowOptions(v => v === id ? null : id)}>···</button>
+              <button type="button" aria-label={"Remove " + item.title + " from Discovery"} onClick={() => onDismiss(item)}>×</button>
+            </div>
+            {rowOptions === id && <div className="console-discovery-options" role="group" aria-label={"Actions for " + item.title}>
+              <button type="button" aria-pressed={feedback === 1} onClick={() => onFeedback(item,feedback === 1 ? 0 : 1)}>More like this</button>
+              <button type="button" aria-pressed={feedback === -1} onClick={() => onFeedback(item,feedback === -1 ? 0 : -1)}>Less like this</button>
+              {item.source === "youtube_dig" && <button type="button" disabled={rejectingMbid === id} onClick={() => onBadSource(item)}>Not music / bad source</button>}
+            </div>}
+          </div>;
+        })}
+      </div> : <div className="waxloom-discovery-vinyl">
         <VinylRack count={items.length} contentKey={items[0]?.recording_mbid}
           label="Discover tracks. Tap cover to play a preview, or choose actions below."
           variant="discovery"
@@ -248,7 +282,7 @@ function DiscoveryShelf({
             )}
           </div>
         )}
-      </div>
+      </div>}
     </section>
   );
 }

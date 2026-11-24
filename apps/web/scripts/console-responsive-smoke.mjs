@@ -71,6 +71,7 @@ try {
   async function size(w,h,mobile){
     await rpc("Emulation.setTouchEmulationEnabled",{enabled:mobile,maxTouchPoints:mobile?5:1});
     await rpc("Emulation.setDeviceMetricsOverride",{width:w,height:h,deviceScaleFactor:1,mobile,screenOrientation:{type:w>h?"landscapePrimary":"portraitPrimary",angle:w>h?90:0}});
+    if(process.env.WAXLOOM_QA_SAFE_AREA==="1"){await rpc("Emulation.setSafeAreaInsetsOverride",{insets:mobile?(w>h?{top:0,left:44,right:44,bottom:21}:{top:44,left:0,right:0,bottom:34}):{top:0,left:0,right:0,bottom:0}});}
     await sleep(120);
   }
   const summary="(()=>{const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return [r.x,r.y,r.width,r.height].map(Math.round)};const el=s=>document.querySelector(s);const rows=[...document.querySelectorAll('.console-track-play')].filter(e=>e.getBoundingClientRect().width>0);const gaps=rows.map(e=>e.querySelector('.console-track-text').getBoundingClientRect().left-e.querySelector('.waxloom-generated-cover').getBoundingClientRect().right);return {viewport:[innerWidth,innerHeight],doc:[document.documentElement.scrollWidth,document.documentElement.scrollHeight],coarse:matchMedia('(pointer: coarse)').matches,rows:rows.length,minGap:gaps.length?Math.min(...gaps):null,audio:document.querySelectorAll('audio').length,nav:rect(el('.sidebar')),content:rect(el('.content')),dock:rect(el('.player-dock')),dialog:rect(el('.waxloom-mobile-player')),menu:rect(el('.mobile-menu-toggle')),scroll:el('.content')?.scrollHeight,client:el('.content')?.clientHeight}})()";
@@ -80,12 +81,18 @@ try {
     assert.ok(s.content[1]+s.content[3]<=h+1,"Content outside viewport");
     if(mobile){assert.ok(s.menu[2]>=44&&s.menu[3]>=44,"Mobile menu inaccessible");assert.ok(s.nav[1]>=0&&s.nav[1]+s.nav[3]<=h+1);}
   }
-  for(const [w,h,mobile] of [[1440,900,false],[1366,768,false],[390,844,true],[320,568,true],[844,390,true],[932,430,true]]){
+  for(const [w,h,mobile] of [[1440,900,false],[1366,768,false],[390,844,true],[320,568,true],[667,375,true],[812,375,true],[844,390,true],[932,430,true]]){
     await size(w,h,mobile);await rpc("Page.navigate",{url:base.href});
     await until("!!document.querySelector('.console-track-play')","Home tracks");
     const s=await ev(summary);console.log("HOME",JSON.stringify(s));layoutCheck(s,w,h,mobile);
+    if(mobile){
+      const visible = await ev("(()=>{const c=document.querySelector('.content').getBoundingClientRect();return [...document.querySelectorAll('.console-track-row')].filter(e=>{const r=e.getBoundingClientRect();return r.width>0&&r.top>=c.top&&r.bottom<=c.bottom+1}).length})()");
+      console.log("VISIBLE HOME TRACKS",w,visible);
+      assert.ok(visible>=1,"No complete track visible on arrival");
+      if(w>h && s.dock && s.dock[2]>0){assert.ok(await ev("(()=>{const b=document.querySelector('.player-dock .player-buttons .play-button');const r=b.getBoundingClientRect();return r.width>0&&r.height>=40&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b})()"),"Landscape play button is not directly tappable");assert.ok(s.dock[0]>=s.content[0]+s.content[2]-1,"Side player overlaps content");assert.ok(s.nav[1]+s.nav[3]<=s.content[1]+1,"Landscape nav not above content");}
+    }
     if(mobile){assert.equal(s.coarse,true);assert.ok(s.scroll>=s.client);await ev("document.querySelector('.content').scrollTop=999999");await sleep(80);assert.ok(await ev("document.querySelector('.content').scrollTop>0"),"Content cannot scroll");}
-    if(w!==1440&&w!==390&&w!==932)continue;
+    if(w!==1440&&w!==390&&w!==812&&w!==932)continue;
     await ev("document.querySelector('.content').scrollTop=0;document.querySelector('.console-track-play').click()");
     await until("document.querySelector('audio')?.currentTime>0.1 && !document.querySelector('audio')?.paused","Real playback");
     const open=mobile?".waxloom-mobile-mini-info":".player-cover-expand";
@@ -94,6 +101,7 @@ try {
     assert.ok(await ev("!document.querySelector('audio').paused"),"Opening dialog interrupted playback");
     const panel=await ev(summary);console.log("PLAYER",JSON.stringify(panel));
     assert.ok(panel.dialog[2]===w&&panel.dialog[3]===h,"Dialog does not fit viewport");
+    if(mobile&&w>h){assert.ok(await ev("(()=>{const b=document.querySelector('.waxloom-mobile-player .waxloom-transport-play');const r=b.getBoundingClientRect();return r.width>0&&r.bottom<=innerHeight&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b})()"),"Expanded play inaccessible");}
     await ev("document.querySelector('.waxloom-action-queue').scrollIntoView({block:'center'});document.querySelector('.waxloom-action-queue').click()");
     await until("!!document.querySelector('.waxloom-queue-sheet')","Open queue");
     const queueOnTop=await ev("(()=>{const b=document.querySelector('.waxloom-queue-sheet button[aria-label=\"Close queue\"]');const r=b.getBoundingClientRect();return r.width>0&&r.height>0&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)?.closest('button')===b})()");
@@ -118,9 +126,20 @@ try {
       assert.equal(await ev("document.querySelectorAll('.waxloom-mobile-navigation nav button').length"),7);
       await ev("[...document.querySelectorAll('.waxloom-mobile-navigation nav button')].find(e=>e.textContent.includes('Discovery')).click()");
       await until("location.hash.includes('discovery')","Mobile Discovery");
-      await sleep(500);
+      await until("!!document.querySelector('.console-discovery-play')","Discovery list");
+      await sleep(200);
+      const visibleDiscovery=await ev("(()=>{const c=document.querySelector('.content').getBoundingClientRect();return [...document.querySelectorAll('.console-discovery-row')].filter(e=>{const r=e.getBoundingClientRect();return r.top>=c.top&&r.bottom<=c.bottom+1&&r.width>0}).length})()");
+      console.log("VISIBLE DISCOVERY",w,visibleDiscovery);
+      assert.ok(visibleDiscovery>=1,"Discovery has no visible playable track");
+      await ev("document.querySelector('.console-discovery-row button[aria-expanded]').click()");
+      assert.ok(await ev("!!document.querySelector('.console-discovery-options')"),"Discovery actions missing");
+      await ev("document.querySelector('.console-discovery-row button[aria-expanded]').click()");
       const disc=await ev(summary);console.log("DISCOVERY",JSON.stringify(disc));assert.equal(disc.doc[0],w);
       assert.ok(disc.content[1]+disc.content[3]<=h+1);
+      await ev("location.hash='#/favorites'");
+      await until("!!document.querySelector('.waxloom-favorites-grid .waxloom-grid-card:not(.waxloom-grid-placeholder)')","Favorites");
+      const visibleFavorites=await ev("(()=>{const c=document.querySelector('.content').getBoundingClientRect();return [...document.querySelectorAll('.waxloom-favorites-grid .waxloom-grid-card')].filter(e=>{const r=e.getBoundingClientRect();return r.top>=c.top&&r.bottom<=c.bottom+1&&r.width>0}).length})()");
+      console.log("VISIBLE FAVORITES",w,visibleFavorites);assert.ok(visibleFavorites>=1,"No complete favorite visible");
     }
   }
   await size(1440,900,false);await rpc("Page.navigate",{url:base.href});
