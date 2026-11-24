@@ -24,6 +24,8 @@
     "qa:discovery-instant": "node scripts/discovery-instant-neutral-smoke.mjs",
     "qa:home-fluidity": "node scripts/home-shuffle-fluidity-smoke.mjs",
     "qa:home-album": "node --experimental-strip-types scripts/home-album-metadata-smoke.mjs",
+    "qa:audio-transport": "node --experimental-strip-types scripts/audio-transport-smoke.mjs",
+    "qa:audio-browser": "node scripts/audio-browser-smoke.mjs",
     "qa:ios-background": "node --experimental-strip-types scripts/ios-background-audio-smoke.mjs",
     "qa:css-cascade": "node scripts/css-cascade-guard.mjs",
     "qa:console": "node scripts/console-responsive-smoke.mjs",

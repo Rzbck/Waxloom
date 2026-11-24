@@ -1,5 +1,6 @@
 import { prewarmedUrlOrStream } from "./previewWarmCache";
-import { isIOSHomeScreenAudio, setIOSPlaybackAudioSession, shouldHandoffBeforeEnd } from "./iosBackgroundAudio";
+import { AudioTransport, type AudioPhase } from "./audioTransport";
+import { isIOSAudio, isIOSAudioInterrupted, isIOSHomeScreenAudio, setIOSPlaybackAudioSession, shouldHandoffBeforeEnd } from "./iosBackgroundAudio";
 import {
   createContext,
   type ReactNode,
@@ -71,10 +72,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const scrobbledRef = useRef<string | null>(null);
   const localSongIdRef = useRef<string | null>(null);
   const explicitQueueRef = useRef(false);
-  const previewStartAtZeroRef = useRef(false);
+  const restorePositionRef = useRef<{ id: string; seconds: number } | null>(null);
   // User playback intent must not be overwritten by a transient pause fired
   // when an HTMLAudioElement changes source (or an old play promise rejects).
-  const wantsPlaybackRef = useRef(false);
+  const intentRevisionRef = useRef(0);
   const preEndHandoffSourceRef = useRef<string | null>(null);
   // Media Session callbacks must not rely on stale React renders.
   const liveQueueRef = useRef<Song[]>([]);
@@ -91,13 +92,41 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   const previewResolveRef = useRef<Map<string, Promise<{ url: string; title: string; duration?: number } | null>>>(new Map());
 
   const [mode, setMode] = useState<PlayerMode>("navidrome");
+  const liveModeRef = useRef<PlayerMode>("navidrome");
+  const livePreviewRef = useRef<{ queue: PreviewTrack[]; index: number }>({ queue: [], index: -1 });
   const [queue, setQueue] = useState<Song[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [previewQueue, setPreviewQueue] = useState<PreviewTrack[]>([]);
   const [previewIndex, setPreviewIndex] = useState(-1);
+  useEffect(() => { livePreviewRef.current = { queue: previewQueue, index: previewIndex }; }, [previewQueue, previewIndex]);
   const [previewResolving, setPreviewResolving] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
+  const [audioPhase, setAudioPhase] = useState<AudioPhase>("idle");
+  const playing = audioPhase === "playing";
+  const controlPlaying = playing || audioPhase === "loading" || audioPhase === "waiting";
+  const [transport] = useState(() => new AudioTransport({
+    phase: phase => {
+      // Publish immediately even if React commits are throttled in background.
+      try {
+        if ("mediaSession" in navigator) {
+          navigator.mediaSession.playbackState = phase === "playing" ? "playing" : "paused";
+          if (phase === "loading") navigator.mediaSession.setPositionState?.();
+        }
+      } catch { /* Media Session support differs across WebKit versions. */ }
+      setAudioPhase(phase);
+    },
+    trace: (event, key) => {
+      if (!isIOSAudio() && !event.startsWith("audio-playing-")) return;
+      if (!isIOSAudio()) event = "audio-playing";
+      void fetch("/api/player/trace", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ event, song_id: key.slice(0, 200), client_epoch_ms: Date.now() }), keepalive: true }).catch(() => undefined);
+    },
+    ios: isIOSAudio, hidden: () => document.hidden, interrupted: isIOSAudioInterrupted, configure: setIOSPlaybackAudioSession,
+  }));
+  const pausePlayback = useCallback(() => {
+    intentRevisionRef.current++;
+    if (audioRef.current) transport.stop(audioRef.current);
+  }, [transport]);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(0.86);
@@ -200,35 +229,33 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     performance.mark("waxloom-local-play-click");
     const audio = audioRef.current;
     if (!audio) return;
-
     const source = api.streamUrl(song.id);
-    if (localSongIdRef.current !== song.id || audio.getAttribute("src") !== source) {
-      localSongIdRef.current = song.id;
+    if (localSongIdRef.current !== song.id || !transport.matches(audio) || transport.source !== source) {
       preEndHandoffSourceRef.current = null;
-      audio.src = source;
-      audio.load();
     }
-
-    wantsPlaybackRef.current = true;
-    setPlaying(true);
-    void audio.play()
-      .then(() => traceLocalPlayer("audio-playing", song.id, Date.now()))
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        if (event === "next" && isIOSHomeScreenAudio() && document.hidden
-          && error instanceof DOMException && error.name === "NotAllowedError") {
-          // Keep intent: WebKit may reject a background handoff. Resume on foreground.
-          setPlaying(false);
-          return;
-        }
-        if (wantsPlaybackRef.current && localSongIdRef.current === song.id) {
-          wantsPlaybackRef.current = false;
-          setPlaying(false);
-        }
-      });
-    // Fire-and-forget diagnostics cannot occupy a connection ahead of audio.
+    localSongIdRef.current = song.id;
+    liveModeRef.current = "navidrome";
+    intentRevisionRef.current++;
+    const restored = restorePositionRef.current;
+    restorePositionRef.current = null;
+    const resume = event === "resume" || event === "media-session-play";
+    const position = resume && restored?.id === song.id ? restored.seconds : !resume ? 0 : undefined;
+    if (!resume) preEndHandoffSourceRef.current = null;
+    transport.start(audio, song.id, source, event, position);
     window.setTimeout(() => { if (localSongIdRef.current === song.id) traceLocalPlayer(event, song.id, clickedAt); }, 1200);
-  }, [traceLocalPlayer]);
+  }, [transport, traceLocalPlayer]);
+
+  const startPreviewPlayback = useCallback((track: PreviewTrack, reason = "preview-start") => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    intentRevisionRef.current++;
+    localSongIdRef.current = null;
+    liveModeRef.current = "preview";
+    preEndHandoffSourceRef.current = null;
+    if (!track.preview_url) { transport.selectPending(audio); return; }
+    transport.start(audio, track.recording_mbid || track.id, track.preview_url, reason,
+      reason === "preview-resume" || reason === "media-play" ? undefined : 0);
+  }, [transport]);
 
   useEffect(() => {
     void api
@@ -243,7 +270,9 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         const index = saved.current ? entries.findIndex((song) => song.id === saved.current) : 0;
         liveIndexRef.current = index >= 0 ? index : 0;
         setCurrentIndex(liveIndexRef.current);
-        setCurrentTime((saved.position ?? 0) / 1000);
+        const seconds = Math.max(0, (saved.position ?? 0) / 1000);
+        restorePositionRef.current = { id: entries[liveIndexRef.current].id, seconds };
+        setCurrentTime(seconds);
       })
       .catch(() => undefined)
       .finally(() => setRestoreDone(true));
@@ -259,7 +288,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (mode !== "navidrome" || !currentSong) return;
     scrobbledRef.current = null;
-    setCurrentTime(0);
+    setCurrentTime(restorePositionRef.current?.id === currentSong.id ? restorePositionRef.current.seconds : 0);
     setDuration(currentSong.duration ?? 0);
     void api.scrobble(currentSong.id, false).catch(() => undefined);
   }, [mode, currentSong?.id]);
@@ -299,7 +328,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       setPreviewResolving(null);
       if (!resolved) {
-        setPlaying(false);
+        if (audioRef.current) transport.stop(audioRef.current, "preview-unavailable");
         setPreviewError("Preview unavailable for this track.");
         return;
       }
@@ -308,7 +337,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         : item));
     });
     return () => { cancelled = true; };
-  }, [mode, currentPreview?.id, currentPreview?.preview_url, resolvePreview]);
+  }, [mode, currentPreview?.id, currentPreview?.preview_url, resolvePreview, transport]);
 
   useEffect(() => {
     if (mode !== "preview" || previewIndex < 0) return;
@@ -326,49 +355,14 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
   }, [mode, previewIndex, previewQueue, resolvePreview]);
 
   useEffect(() => {
-    if (mode !== "preview" || !currentPreview?.preview_url) return;
+    if (mode !== "preview" || !currentPreview?.preview_url || !transport.intent) return;
     const audio = audioRef.current;
     if (!audio) return;
-
-    localSongIdRef.current = null;
-    if (audio.getAttribute("src") !== currentPreview.preview_url) {
-      preEndHandoffSourceRef.current = null;
-      audio.pause();
-      setCurrentTime(0);
-      audio.src = currentPreview.preview_url;
-      audio.load();
-    }
-
-    if (previewStartAtZeroRef.current) {
-      try {
-        audio.currentTime = 0;
-      } catch {
-        // Metadata may not exist yet. onLoadedMetadata performs the hard reset.
-      }
-      setCurrentTime(0);
-    }
-
-    if (playing) {
-      void audio.play().catch((error: unknown) => {
-        // AbortError is expected when a newer track supersedes a pending
-        // play() promise. Only real current-source failures stop playback.
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        if (isIOSHomeScreenAudio() && document.hidden
-          && error instanceof DOMException && error.name === "NotAllowedError") {
-          // Preserve intent for visibility recovery when WebKit disallows playback.
-          setPlaying(false);
-          return;
-        }
-        if (wantsPlaybackRef.current && audio.getAttribute("src") === currentPreview.preview_url) {
-          wantsPlaybackRef.current = false;
-          setPlaying(false);
-          setPreviewError("Audio source unavailable. Choose another track or press Play to retry.");
-        }
-      });
-    } else if (!audio.paused) {
-      audio.pause();
-    }
-  }, [mode, currentPreview?.preview_url, playing]);
+    // Known URLs are started synchronously by the action. Only an asynchronously
+    // resolved URL reaches this fallback. Never re-run play on phase changes.
+    if (!transport.matches(audio) || transport.source !== currentPreview.preview_url || transport.key !== (currentPreview.recording_mbid || currentPreview.id))
+      startPreviewPlayback(currentPreview, "preview-resolved");
+  }, [mode, currentPreview?.id, currentPreview?.preview_url, startPreviewPlayback, transport]);
 
   useEffect(() => {
     if (!restoreDone || mode !== "navidrome" || !currentSong || queue.length === 0) return;
@@ -436,7 +430,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   // Preload before the current song ends, without delaying its first audio frame.
   useEffect(() => {
-    if (!autoplay || mode !== "navidrome" || !currentSong || !wantsPlaybackRef.current
+    if (!autoplay || mode !== "navidrome" || !currentSong || !transport.intent
       || queue.length - currentIndex > 8) return;
     void refillAutoplay(currentSong, queueEpochRef.current).catch(() => undefined);
   }, [autoplay, mode, currentSong?.id, currentIndex, queue, playing, refillAutoplay]);
@@ -499,35 +493,32 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!target) return;
 
     const samePreview = mode === "preview" && currentPreview?.id === target.id;
-    const audio = audioRef.current;
 
     if (samePreview) {
-      const shouldPause = wantsPlaybackRef.current;
-      wantsPlaybackRef.current = !shouldPause;
-      setPlaying(!shouldPause);
-      if (shouldPause) audio?.pause();
+      if (transport.intent && !["blocked", "interrupted"].includes(transport.phase)) pausePlayback();
+      else startPreviewPlayback(currentPreview ?? target, "preview-resume");
       return;
     }
 
-    previewStartAtZeroRef.current = true;
-    wantsPlaybackRef.current = true;
     performance.mark("waxloom-discovery-play-click");
-    // Exactly one source switch, performed by the preview effect AFTER
-    // React commits mode/index. Calling audio.play() here as well caused
-    // duplicate play/pause events and stale AbortError state updates.
+    // Start known URLs within the user gesture; the effect handles unresolved URLs only.
     setCurrentTime(0);
     setDuration(target.duration ?? 0);
     setMode("preview");
-    setPreviewQueue(shuffle ? planShuffleUpcoming(preparedTracks, safeIndex) : preparedTracks);
+    const planned = shuffle ? planShuffleUpcoming(preparedTracks, safeIndex) : preparedTracks;
+    livePreviewRef.current = { queue: planned, index: safeIndex };
+    setPreviewQueue(planned);
     setPreviewIndex(safeIndex);
-    setPlaying(true);
+    startPreviewPlayback(target);
     setPreviewError(null);
-  }, [mode, currentPreview?.id, playing, shuffle]);
+  }, [mode, currentPreview?.id, shuffle, pausePlayback, startPreviewPlayback]);
 
   const toggleShuffle = useCallback(() => {
     const enabled = !shuffle;
     if (enabled && mode === "preview") {
-      setPreviewQueue((items) => planShuffleUpcoming(items, previewIndex));
+      const planned = planShuffleUpcoming(livePreviewRef.current.queue, livePreviewRef.current.index);
+      livePreviewRef.current = { ...livePreviewRef.current, queue: planned };
+      setPreviewQueue(planned);
     } else if (enabled && mode === "navidrome" && liveIndexRef.current >= 0) {
       const planned = planShuffleUpcoming(liveQueueRef.current, liveIndexRef.current);
       liveQueueRef.current = planned;
@@ -555,39 +546,40 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const next = useCallback((cause: "manual" | "ended" | "preend" = "manual") => {
-    if (nextInProgressRef.current) return;
-    if (mode === "preview") {
-      if (activeLength === 0) return;
+  const next = useCallback((cause: "manual" | "ended" | "preend" = "manual", origin = "next") => {
+    if (nextInProgressRef.current || (cause !== "manual" && !transport.intent)) return;
+    if (liveModeRef.current === "preview") {
+      const { queue: previews, index: current } = livePreviewRef.current;
+      const length = previews.length;
+      if (length === 0) return;
       if (repeat === "one" && cause !== "manual") {
         const audio = audioRef.current;
-        if (audio) { audio.currentTime = 0; setCurrentTime(0); void audio.play().catch(() => undefined); }
+        if (audio && transport.intent) { audio.currentTime = 0; setCurrentTime(0); transport.start(audio, transport.key, transport.source, "repeat-one"); }
         return;
       }
-      const index = activeIndex < activeLength - 1 ? activeIndex + 1 : repeat === "all" && cause !== "manual" ? 0 : -1;
+      const index = current < length - 1 ? current + 1 : repeat === "all" && cause !== "manual" ? 0 : -1;
       if (index < 0) {
-        if (cause !== "manual") { wantsPlaybackRef.current = false; setPlaying(false); }
+        if (cause !== "manual" && audioRef.current) transport.stop(audioRef.current, "queue-end");
         return;
       }
-      const audio = audioRef.current;
-      wantsPlaybackRef.current = true;
-      previewStartAtZeroRef.current = true;
-      audio?.pause();
-      if (audio) { try { audio.currentTime = 0; } catch { /* reset after metadata */ } }
-      setCurrentTime(0);
-      setDuration(previewQueue[index]?.duration ?? 0);
+        setCurrentTime(0);
+      setDuration(previews[index]?.duration ?? 0);
+      livePreviewRef.current.index = index;
       setPreviewIndex(index);
-      setPlaying(true);
+      if (previews[index]) startPreviewPlayback(previews[index], cause === "manual" ? origin + "-preview" : "preview-" + cause);
       return;
     }
     if (!liveQueueRef.current.length) return;
     if (repeat === "one" && cause !== "manual") {
       const audio = audioRef.current;
-      if (audio) { audio.currentTime = 0; setCurrentTime(0); void audio.play().catch(() => undefined); }
+      if (audio && transport.intent) { audio.currentTime = 0; setCurrentTime(0); transport.start(audio, transport.key, transport.source, "repeat-one"); }
       return;
     }
     nextInProgressRef.current = true;
     const epoch = queueEpochRef.current;
+    const revision = intentRevisionRef.current;
+    const hadIntent = transport.intent;
+    const superseded = () => epoch !== queueEpochRef.current || revision !== intentRevisionRef.current || (hadIntent && !transport.intent);
     void (async () => {
       try {
         const index = liveIndexRef.current;
@@ -601,16 +593,16 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         if (!target && (autoplay || cause === "manual")) {
           traceLocalPlayer("next-request", current.id);
           await refillAutoplay(current, epoch);
-          if (epoch !== queueEpochRef.current) return; // Newer selection wins.
+          if (superseded()) return; // Newer selection or pause wins.
           target = nextFromQueue(liveQueueRef.current, liveIndexRef.current, false, "off");
         }
         if (!target) {
-          if (cause !== "manual") { wantsPlaybackRef.current = false; setPlaying(false); }
+          if (cause !== "manual" && audioRef.current) transport.stop(audioRef.current, "queue-end");
           setRadioNotice("No more library tracks are available right now.");
           return;
         }
         const upcoming = target.queue[target.index];
-        if (!upcoming || epoch !== queueEpochRef.current) return;
+        if (!upcoming || superseded()) return;
         const compacted = compactPlayedHistory(target.queue, target.index);
         liveQueueRef.current = compacted.queue;
         liveIndexRef.current = compacted.index;
@@ -618,78 +610,73 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         setCurrentIndex(compacted.index);
         setCurrentTime(0);
         setRadioNotice(null);
-        startLocalPlayback(upcoming, "next");
+        startLocalPlayback(upcoming, cause === "manual" ? origin : cause);
       } catch {
         if (epoch === queueEpochRef.current) {
           setRadioNotice("Could not load more tracks. Press Next to retry.");
-          if (cause !== "manual" && audioRef.current?.ended) setPlaying(false);
+          if (cause !== "manual" && audioRef.current?.ended) transport.stop(audioRef.current, "queue-error");
         }
       } finally {
         nextInProgressRef.current = false;
       }
     })();
   }, [mode, activeLength, activeIndex, previewQueue, repeat, shuffle,
-      autoplay, refillAutoplay, traceLocalPlayer, startLocalPlayback]);
+      autoplay, refillAutoplay, traceLocalPlayer, startLocalPlayback, startPreviewPlayback, transport]);
 
   useEffect(() => {
-    if (!isIOSHomeScreenAudio()) return;
-    const recoverOnForeground = () => {
-      if (document.hidden || !wantsPlaybackRef.current) return;
+    if (!isIOSAudio()) return;
+    const visibility = () => {
       const audio = audioRef.current;
       if (!audio) return;
-      if (audio.ended && !audio.loop) {
-        // On iOS the ended callback or the next play() may have been suspended.
-        next("ended");
-        return;
-      }
-      if (audio.paused) {
-        void audio.play().then(() => setPlaying(true)).catch(() => {
-          // Keep the existing paused UI until a real playback succeeds.
-          setPlaying(false);
-        });
-      }
+      transport.trace("visibility", audio, true);
+      if (document.hidden || !transport.intent) return;
+      if (audio.ended && !audio.loop) { next("ended"); return; }
+      transport.recover(audio, true);
     };
-    document.addEventListener("visibilitychange", recoverOnForeground);
-    window.addEventListener("pageshow", recoverOnForeground);
+    const watchdog = window.setInterval(() => {
+      const audio = audioRef.current;
+      if (audio) transport.recover(audio);
+    }, 2000);
+    const session = (navigator as Navigator & { audioSession?: EventTarget }).audioSession;
+    const sessionChanged = () => { const audio = audioRef.current; if (audio) transport.observe(audio, isIOSAudioInterrupted() ? "session-interrupted" : "session-change"); };
+    session?.addEventListener?.("statechange", sessionChanged);
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("pageshow", visibility);
     return () => {
-      document.removeEventListener("visibilitychange", recoverOnForeground);
-      window.removeEventListener("pageshow", recoverOnForeground);
+      window.clearInterval(watchdog);
+      session?.removeEventListener?.("statechange", sessionChanged);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("pageshow", visibility);
     };
-  }, [next]);
+  }, [next, transport]);
 
-  const previous = useCallback(() => {
+  const previous = useCallback((origin = "previous") => {
     const audio = audioRef.current;
     if (audio && audio.currentTime > 4) {
       audio.currentTime = 0;
       setCurrentTime(0);
       return;
     }
-    if (activeIndex <= 0) return;
-
-    const previousIndex = activeIndex - 1;
-    if (mode === "preview") {
-      wantsPlaybackRef.current = true;
-      previewStartAtZeroRef.current = true;
-      audio?.pause();
-      if (audio) {
-        try {
-          audio.currentTime = 0;
-        } catch {
-          // loadedmetadata performs the hard reset for the new preview.
-        }
-      }
+    const previewMode = liveModeRef.current === "preview";
+    const active = previewMode ? livePreviewRef.current.index : liveIndexRef.current;
+    if (active <= 0) return;
+    const previousIndex = active - 1;
+    if (previewMode) {
+      const previews = livePreviewRef.current.queue;
       setCurrentTime(0);
-      setDuration(previewQueue[previousIndex]?.duration ?? 0);
+      setDuration(previews[previousIndex]?.duration ?? 0);
+      livePreviewRef.current.index = previousIndex;
       setPreviewIndex(previousIndex);
-      setPlaying(true);
+      if (previews[previousIndex]) startPreviewPlayback(previews[previousIndex], origin + "-preview");
       return;
     }
 
-    const song = queue[previousIndex];
+    const song = liveQueueRef.current[previousIndex];
     if (!song) return;
-    startLocalPlayback(song, "previous");
+    liveIndexRef.current = previousIndex;
+    startLocalPlayback(song, origin);
     setCurrentIndex(previousIndex);
-  }, [activeIndex, mode, queue, previewQueue, startLocalPlayback]);
+  }, [activeIndex, mode, queue, previewQueue, startLocalPlayback, startPreviewPlayback]);
 
   const submitScrobble = useCallback(() => {
     if (mode !== "navidrome" || !currentSong || scrobbledRef.current === currentSong.id) return;
@@ -701,25 +688,25 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
   function onTimeUpdate() {
     const audio = audioRef.current;
-    if (!audio) return;
+    if (!audio || !transport.currentResource(audio)) return;
+    transport.observe(audio, "timeupdate");
     setCurrentTime(audio.currentTime);
     const effectiveDuration = audio.duration || activeDuration || 0;
     const source = audio.getAttribute("src") ?? audio.currentSrc;
-    if (source && preEndHandoffSourceRef.current !== source
+    if (!nextInProgressRef.current && source && preEndHandoffSourceRef.current !== source
       && shouldHandoffBeforeEnd({
         enabled: isIOSHomeScreenAudio(),
         hidden: document.hidden,
-        wantsPlayback: wantsPlaybackRef.current,
+        wantsPlayback: transport.intent,
         hasNext: repeat !== "one" && (
-          (shuffle && activeLength > 1)
-          || activeIndex < activeLength - 1
-          || (repeat === "all" && activeLength > 1)
+          (liveModeRef.current === "navidrome" ? liveQueueRef.current.length > 1 && Boolean(nextFromQueue(liveQueueRef.current, liveIndexRef.current, false, repeat))
+            : (livePreviewRef.current.index < livePreviewRef.current.queue.length - 1 && Boolean(livePreviewRef.current.queue[livePreviewRef.current.index + 1]?.preview_url)) || (repeat === "all" && livePreviewRef.current.queue.length > 1 && Boolean(livePreviewRef.current.queue[0]?.preview_url)))
         ),
         paused: audio.paused,
         seeking: audio.seeking,
         ended: audio.ended,
         currentTime: audio.currentTime,
-        duration: effectiveDuration,
+        duration: audio.duration,
       })) {
       // Transition before 'ended' shuts down the iOS background audio session.
       // A source latch prevents duplicate handoffs from adjacent timeupdate events.
@@ -752,12 +739,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     const audio = audioRef.current;
     if (!audio) return;
 
-    if (wantsPlaybackRef.current) {
-      wantsPlaybackRef.current = false;
-      audio.pause();
-      setPlaying(false);
-      return;
-    }
+    if (transport.intent && !["blocked", "interrupted"].includes(transport.phase)) { pausePlayback(); return; }
 
     if (mode === "navidrome" && currentSong) {
       startLocalPlayback(currentSong, "resume");
@@ -771,16 +753,17 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       if (currentPreview.recording_mbid.startsWith("yt:")) {
         const videoId = currentPreview.recording_mbid.slice(3);
         if (/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+          const revision = ++intentRevisionRef.current;
+          transport.selectPending(audio);
           void api.youtubePreview(`https://www.youtube.com/watch?v=${videoId}`)
             .then((result) => {
+              if (revision !== intentRevisionRef.current || !transport.intent) return;
               setPreviewQueue((items) => items.map((item) => item.id === currentPreview.id
                 ? { ...item, preview_url: result.preview_url } : item));
               setPreviewError(null);
-              wantsPlaybackRef.current = true;
-              setPlaying(true);
             }).catch(() => {
-              wantsPlaybackRef.current = false;
-              setPlaying(false);
+              if (revision !== intentRevisionRef.current) return;
+              transport.stop(audio, "preview-renew-error");
               setPreviewError("YouTube preview is unavailable for this video.");
             });
         }
@@ -791,22 +774,11 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         ? { ...item, preview_url: `${api.previewStreamUrl(item.recording_mbid, item.artist, item.title)}&retry=${Date.now()}` }
         : item));
       setPreviewError(null);
-      wantsPlaybackRef.current = true;
-      setPlaying(true);
+      intentRevisionRef.current++;
+      transport.selectPending(audio);
       return;
     }
-    wantsPlaybackRef.current = true;
-    setPlaying(true);
-    // Preview source effect owns the actual play() call; do not race it.
-    if (mode !== "preview") {
-      void audio.play().catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        if (wantsPlaybackRef.current) {
-          wantsPlaybackRef.current = false;
-          setPlaying(false);
-        }
-      });
-    }
+    if (currentPreview) startPreviewPlayback(currentPreview, "preview-resume");
   }
 
   async function toggleCurrentFavorite() {
@@ -1046,23 +1018,18 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (mode === "navidrome") {
       const song = queue[targetIndex];
       if (!song) return;
+      liveIndexRef.current = targetIndex;
       startLocalPlayback(song, "queue");
       setCurrentIndex(targetIndex);
       return;
     }
     const preview = previewQueue[targetIndex];
     if (!preview) return;
-    const audio = audioRef.current;
-    previewStartAtZeroRef.current = true;
-    wantsPlaybackRef.current = true;
-    audio?.pause();
-    if (audio) {
-      try { audio.currentTime = 0; } catch { /* Metadata not yet loaded. */ }
-    }
     setCurrentTime(0);
     setDuration(preview.duration ?? 0);
+    livePreviewRef.current.index = targetIndex;
     setPreviewIndex(targetIndex);
-    setPlaying(true);
+    startPreviewPlayback(preview, "preview-queue");
   };
 
   const activeQueue = mode === "preview" ? previewQueue : queue;
@@ -1079,24 +1046,27 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       album: currentSong ? (songDisplayAlbum(currentSong) ?? "") : "",
       artwork: currentSong?.coverArt ? [{ src: api.coverUrl(currentSong.coverArt, 600), sizes: "600x600" }] : [],
     });
+  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id]);
+
+  // Keep OS action handlers installed; dispatch to the latest actions/live queues.
+  const mediaActionsRef = useRef({ next, previous, pausePlayback, startLocalPlayback, startPreviewPlayback });
+  mediaActionsRef.current = { next, previous, pausePlayback, startLocalPlayback, startPreviewPlayback };
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const session = navigator.mediaSession;
     const actions: Array<[MediaSessionAction, MediaSessionActionHandler]> = [
-      ["nexttrack", () => next("manual")],
-      ["previoustrack", () => previous()],
+      ["nexttrack", () => mediaActionsRef.current.next("manual", "media-next")],
+      ["previoustrack", () => mediaActionsRef.current.previous("media-previous")],
       ["play", () => {
-        if (mode === "navidrome" && currentSong) {
-          startLocalPlayback(currentSong, "media-session-play");
+        if (liveModeRef.current === "navidrome") {
+          const song = liveQueueRef.current[liveIndexRef.current];
+          if (song) mediaActionsRef.current.startLocalPlayback(song, "media-session-play");
         } else {
-          wantsPlaybackRef.current = true;
-          setPlaying(true);
-          const audio = audioRef.current;
-          if (audio && !audio.ended) void audio.play().catch(() => undefined);
+          const preview = livePreviewRef.current.queue[livePreviewRef.current.index];
+          if (preview) mediaActionsRef.current.startPreviewPlayback(preview, "media-play");
         }
       }],
-      ["pause", () => {
-        wantsPlaybackRef.current = false;
-        audioRef.current?.pause();
-        setPlaying(false);
-      }],
+      ["pause", () => mediaActionsRef.current.pausePlayback()],
     ];
     for (const [action, handler] of actions) {
       try { session.setActionHandler(action, handler); } catch { /* Unsupported iOS action. */ }
@@ -1106,24 +1076,20 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         try { session.setActionHandler(action, null); } catch { /* Unsupported. */ }
       }
     };
-  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id, mode, next, previous, startLocalPlayback]);
+  }, []);
 
   useEffect(() => {
-    if (!("mediaSession" in navigator)) return;
-    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
-  }, [playing]);
-
-  useEffect(() => {
-    if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState
-        || !Number.isFinite(duration) || duration <= 0) return;
+    const audio = audioRef.current;
+    if (!("mediaSession" in navigator) || !navigator.mediaSession.setPositionState || !audio
+        || !transport.currentResource(audio) || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
     try {
       navigator.mediaSession.setPositionState({
-        duration,
-        playbackRate: 1,
-        position: Math.min(Math.max(currentTime, 0), duration),
+        duration: audio.duration,
+        playbackRate: audio.playbackRate || 1,
+        position: Math.min(Math.max(audio.currentTime, 0), audio.duration),
       });
     } catch { /* Older Safari versions may not accept position updates. */ }
-  }, [currentTime, duration]);
+  }, [currentTime, duration, playing, transport]);
 
 
 
@@ -1138,27 +1104,21 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         loop={repeat === "one"}
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
+          if (!transport.currentResource(audio)) return;
+          transport.observe(audio, "loadedmetadata");
           setDuration(Number.isFinite(audio.duration) ? audio.duration : activeDuration);
-          if (mode === "preview" && previewStartAtZeroRef.current) {
-            try {
-              audio.currentTime = 0;
-            } catch {
-              // A newly loaded Discovery preview still starts from its default 0.
-            }
-            setCurrentTime(0);
-            previewStartAtZeroRef.current = false;
-            return;
-          }
-          if (mode === "navidrome" && currentTime > 0 && audio.currentTime === 0) {
-            audio.currentTime = currentTime;
-          }
+          setCurrentTime(audio.currentTime);
         }}
         onTimeUpdate={onTimeUpdate}
-        onPlay={() => {
-          if (wantsPlaybackRef.current) setPlaying(true);
-          else audioRef.current?.pause();
-        }}
-        onPlaying={() => {
+        onPlay={(event) => { if (!transport.intent) event.currentTarget.pause(); else transport.observe(event.currentTarget, "play"); }}
+        onWaiting={(event) => transport.observe(event.currentTarget, "waiting")}
+        onStalled={(event) => transport.observe(event.currentTarget, "stalled")}
+        onSuspend={(event) => transport.observe(event.currentTarget, "suspend")}
+        onCanPlay={(event) => transport.observe(event.currentTarget, "canplay")}
+        onLoadStart={(event) => transport.observe(event.currentTarget, "loadstart")}
+        onPlaying={(event) => {
+          if (!transport.currentResource(event.currentTarget) || !transport.intent) return;
+          transport.observe(event.currentTarget, "playing");
           if (mode === "preview") {
             setPreviewError(null);
             try {
@@ -1174,21 +1134,23 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             } catch { /* mark absent on saved-queue restore */ }
           }
         }}
-        onPause={() => {
-          if (!wantsPlaybackRef.current) setPlaying(false);
-        }}
-        onEnded={() => {
-          // A previously advanced stream can emit a late ended event on iOS.
-          const source = audioRef.current?.getAttribute("src") ?? audioRef.current?.currentSrc;
-          if (source && preEndHandoffSourceRef.current === source) return;
+        onPause={(event) => transport.observe(event.currentTarget, "pause")}
+        onEnded={(event) => {
+          if (!event.currentTarget.ended || !transport.intent || !transport.currentResource(event.currentTarget)) return;
+          transport.observe(event.currentTarget, "ended");
+          // A late event from an old resource is rejected by the current ended/resource guard.
+          // If an early handoff failed, the genuine ended event must still be processed.
           submitScrobble();
           next("ended");
         }}
-        onError={() => {
+        onError={(event) => {
+          const audio = event.currentTarget;
+          if (!transport.currentResource(audio) || !audio.error) return;
+          transport.observe(audio, "error-" + audio.error.code);
+          transport.observe(audio, "error");
           if (mode !== "preview" || !currentPreview) {
             // Ordinary Navidrome streams are unaffected by Discovery failover.
-            wantsPlaybackRef.current = false;
-            setPlaying(false);
+            if (!isIOSAudio() || !document.hidden) transport.stop(audio, "stream-error");
             return;
           }
           const src = audioRef.current?.currentSrc;
@@ -1199,8 +1161,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
 
           // Keep the selected title and queue: failing audio is not consent
           // to skip to another recommendation.
-          wantsPlaybackRef.current = false;
-          setPlaying(false);
+          if (!isIOSAudio() || !document.hidden) transport.stop(audio, "preview-error");
           setPreviewError("Preview unavailable. Press Play to retry or choose another title.");
         }}
       />
@@ -1271,7 +1232,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             </aside>
           )}
           <footer className={`player-dock ${canDownloadCurrent ? "player-dock-preview" : ""}`}>
-            <div className="console-panel-label">NOW PLAYING <span>{previewResolving ? "● LOADING" : playing ? "● PLAYING" : "Ⅱ PAUSED"}</span></div>
+            <div className="console-panel-label">NOW PLAYING <span>{previewResolving || audioPhase === "loading" ? "LOADING" : audioPhase === "waiting" ? "BUFFERING" : audioPhase === "blocked" || audioPhase === "interrupted" ? "INTERRUPTED" : playing ? "PLAYING" : "PAUSED"}</span></div>
             <div className="console-mini-progress" aria-hidden="true"><span style={{ width: `${duration > 0 ? Math.min(100, currentTime / duration * 100) : 0}%` }} /></div>
             <div className="waxloom-mobile-mini">
               <button className="waxloom-mobile-mini-info" type="button"
@@ -1301,8 +1262,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
               )}
               <button className="waxloom-mobile-mini-play" type="button" onClick={togglePlayback}
                 disabled={mode === "preview" && Boolean(previewResolving)}
-                aria-label={playing ? "Pause" : "Play"}>
-                <PlayerIcon name={playing ? "pause" : "play"} size={24} />
+                aria-label={controlPlaying ? "Pause" : "Play"}>
+                <PlayerIcon name={controlPlaying ? "pause" : "play"} size={24} />
               </button>
               <button className="waxloom-mobile-mini-next" type="button" onClick={() => next("manual")} aria-label="Next track">
                 <PlayerIcon name="next" size={22} />
@@ -1324,8 +1285,8 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             <div className="player-center">
               <div className="player-buttons">
                 <button className={shuffle ? "icon-button icon-button-active" : "icon-button"} type="button" onClick={toggleShuffle} aria-label="Shuffle">⤨</button>
-                <button className="icon-button" type="button" onClick={previous} aria-label="Previous">◀◀</button>
-                <button className="play-button" type="button" onClick={togglePlayback} aria-label={playing ? "Pause" : "Play"} disabled={mode === "preview" && Boolean(previewResolving)}>
+                <button className="icon-button" type="button" onClick={() => previous()} aria-label="Previous">◀◀</button>
+                <button className="play-button" type="button" onClick={togglePlayback} aria-label={controlPlaying ? "Pause" : "Play"} disabled={mode === "preview" && Boolean(previewResolving)}>
                   {mode === "preview" && previewResolving ? "…" : playing ? "Ⅱ" : "▶"}
                 </button>
                 <button className="icon-button" type="button" onClick={() => next("manual")} aria-label="Next">▶▶</button>
@@ -1400,7 +1361,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             coverId={currentSong?.coverArt || currentSong?.albumId}
             coverSeed={currentSong?.albumId || currentSong?.id || activeTitle}
             isPreview={mode === "preview"}
-            playing={playing}
+            playing={controlPlaying}
             resolving={Boolean(previewResolving)}
             currentTime={currentTime}
             duration={duration}
@@ -1418,7 +1379,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
             playbackError={previewError}
             suspended={playlistPickerOpen || queueOpen}
             onPlayPause={togglePlayback}
-            onPrevious={previous}
+            onPrevious={() => previous()}
             onNext={() => next("manual")}
             onSeek={seek}
             onShuffle={toggleShuffle}

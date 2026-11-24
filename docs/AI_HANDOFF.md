@@ -1,3 +1,7 @@
+## 2026-11-24 - iOS audio recovery A1-A7
+
+- Dedicated fix/ios-audio-recovery-20261124 based on live ad93906. Central AudioTransport, generation-safe transitions, bounded recovery and diagnostics, truthful Media Session state; browser audio gate PASS, physical locked iPhone validation pending. See docs/IOS_AUDIO_RECOVERY_20261124.md. API unchanged.
+
 ## 2026-11-24 - Stable Now Playing single screen
 
 - Round transport, body portal, viewport-bound mobile player, locally scrolling queue and compact landscape menu. Nine viewport checks including safe areas and repeated rotation pass. Physical Safari retest pending. See docs/CONSOLE_CONSOLIDATION_20261124.md.

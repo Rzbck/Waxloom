@@ -3,23 +3,32 @@
 // recovery path; neither can override WebKit's background execution policy.
 type AudioNavigator = Navigator & {
   standalone?: boolean;
-  audioSession?: { type: string };
+  audioSession?: { type: string; state?: string };
 };
 
-export function isIOSHomeScreenAudio(): boolean {
+export function isIOSAudio(): boolean {
   if (typeof navigator === "undefined" || typeof window === "undefined") return false;
   const nav = navigator as AudioNavigator;
   const ios = /iPad|iPhone|iPod/.test(nav.userAgent)
     || (nav.platform === "MacIntel" && nav.maxTouchPoints > 1);
-  if (!ios) return false;
+  return ios;
+}
+
+export function isIOSHomeScreenAudio(): boolean {
+  if (!isIOSAudio()) return false;
+  const nav = navigator as AudioNavigator;
   return nav.standalone === true || window.matchMedia?.("(display-mode: standalone)")?.matches === true;
 }
 
 export function setIOSPlaybackAudioSession(): void {
-  if (!isIOSHomeScreenAudio()) return;
+  if (!isIOSAudio()) return;
   const session = (navigator as AudioNavigator).audioSession;
   if (!session) return;
-  try { session.type = "playback"; } catch { /* iOS versions may not support AudioSession. */ }
+  try { if (session.type !== "playback") session.type = "playback"; } catch { /* iOS versions may not support AudioSession. */ }
+}
+
+export function isIOSAudioInterrupted(): boolean {
+  return isIOSAudio() && (navigator as AudioNavigator).audioSession?.state === "interrupted";
 }
 
 export type PreEndState = {
