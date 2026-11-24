@@ -65,7 +65,7 @@
     .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)
   .waxloom-vinyl-sleeve[data-centered="true"] > :is(.waxloom-track-face, .waxloom-vinyl-face, .waxloom-entity-face) {
   transform: scale(1.075) !important;
-  box-shadow: 0 0 0 2px rgba(206, 153, 235, .53), 0 9px 23px #000b !important;
+  box-shadow: 0 0 0 2px rgba(170,170,170, .53), 0 9px 23px #000b !important;
 }
 :is(.waxloom-vinyl-display--track, .waxloom-vinyl-display--album,
     .waxloom-vinyl-display--artist, .waxloom-vinyl-display--playlist)

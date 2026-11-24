@@ -7,9 +7,9 @@
 }
 
 .compact-action-playing {
-  color: #f0e8f7;
-  border-color: #72568e;
-  background: #241a2d;
+  color: #ebebeb;
+  border-color: #606060;
+  background: #1d1d1d;
 }
 
 /* Use geometry instead of a font glyph so the play triangle is optically
@@ -36,7 +36,7 @@
 }
 
 .cover-play {
-  color: #17131b;
+  color: #141414;
 }
 
 .cover-play::before {
@@ -46,15 +46,15 @@
 }
 
 .track-play {
-  color: #8c8792;
+  color: #898989;
   border: 1px solid transparent;
   transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease;
 }
 
 .track-play:hover {
-  color: #111015;
-  border-color: #eeeaf2;
-  background: #eeeaf2;
+  color: #111111;
+  border-color: #ebebeb;
+  background: #ebebeb;
   transform: scale(1.04);
 }
 

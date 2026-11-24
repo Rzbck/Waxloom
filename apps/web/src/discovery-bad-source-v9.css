@@ -30,9 +30,9 @@
   width: 26px !important;
   height: 26px !important;
   min-width: 26px !important;
-  color: #8d8792;
-  border-color: rgba(150, 139, 155, .22);
-  background: rgba(105, 96, 112, .05);
+  color: #898989;
+  border-color: rgba(142,142,142, .22);
+  background: rgba(99,99,99, .05);
 }
 
 .compact-action-bad-source:hover,

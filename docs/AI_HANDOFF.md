@@ -1,3 +1,7 @@
+## 2026-11-24 - Console UI experiment (parallel, NOT USER VALIDATED)
+
+- Separate local worktree/branch based on deployed Web 97bbe11. Full real frontend with compact black layout, shared Home list and existing player; production unchanged. See `docs/CONSOLE_UI_EXPERIMENT_20261124.md` for QA results and blocking CSS guard. Await owner visual decision; no promotion.
+
 ## 2026-11-23 — Shuffle order shown in Now Playing
 
 - Root cause: `MobilePlayerPanel` displays the original queue tail while `nextFromQueue` was choosing a random item only at actual Next. Therefore "Up next" was not a trustworthy forecast in Shuffle mode.

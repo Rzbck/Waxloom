@@ -4,11 +4,11 @@
    once scrolling has stopped. The bin is behind artwork, never in front. */
 .waxloom-vinyl-crate {
   background:
-    radial-gradient(ellipse 70% 95% at 48% -16%, rgba(155,109,177,.19), transparent 67%),
-    repeating-linear-gradient(90deg, rgba(160,122,178,.026) 0 2px, transparent 2px 25px),
-    linear-gradient(180deg,#27202e 0%,#130f1b 67%,#282030 100%) !important;
-  border: 1px solid #493850;
-  box-shadow: inset 0 12px 25px #08040d6b, inset 0 -9px 17px #171020, 0 8px 19px #05030841;
+    radial-gradient(ellipse 70% 95% at 48% -16%, rgba(124,124,124,.19), transparent 67%),
+    repeating-linear-gradient(90deg, rgba(134,134,134,.026) 0 2px, transparent 2px 25px),
+    linear-gradient(180deg,#222222 0%,#111111 67%,#232323 100%) !important;
+  border: 1px solid #3d3d3d;
+  box-shadow: inset 0 12px 25px #0606066b, inset 0 -9px 17px #131313, 0 8px 19px #04040441;
   isolation: isolate;
 }
 /* Record sleeves pass into dark side slots at the edges of the crate.
@@ -21,8 +21,8 @@
   pointer-events: none;
   border-radius: inherit;
   background: linear-gradient(90deg,
-    #100c17e6 0px, #1710209c 7px, transparent 17px,
-    transparent calc(100% - 17px), #1710209c calc(100% - 7px), #100c17e6 100%);
+    #0e0e0ee6 0px, #1313139c 7px, transparent 17px,
+    transparent calc(100% - 17px), #1313139c calc(100% - 7px), #0e0e0ee6 100%);
   box-shadow: inset 8px 0 10px -7px #000c, inset -8px 0 10px -7px #000c;
 }
 .waxloom-vinyl-sleeve {
@@ -45,12 +45,12 @@
   width: 112px;
   height: 112px;
   box-sizing: border-box;
-  border: 2px solid #48444e;
+  border: 2px solid #464646;
   border-radius: 50%;
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(circle at center, #a38eae 0 6%, #131219 7% 12%, #35323d 13% 14%, #100e15 15% 28%, #29252e 29% 29.5%, #100e15 30% 39%, #2b2631 39.5% 40%, #14121a 41% 51%, #292631 51.5% 52%, #131119 53% 100%);
+    radial-gradient(circle at center, #959595 0 6%, #131313 7% 12%, #333333 13% 14%, #0f0f0f 15% 28%, #272727 29% 29.5%, #0f0f0f 30% 39%, #282828 39.5% 40%, #131313 41% 51%, #272727 51.5% 52%, #121212 53% 100%);
   box-shadow: 0 2px 9px #000a;
   transition: top 290ms cubic-bezier(.16,.85,.19,1);
 }
@@ -69,7 +69,7 @@
 }
 .waxloom-vinyl-sleeve[data-centered="true"] .waxloom-vinyl-face,
 .waxloom-vinyl-sleeve[data-centered="true"] .waxloom-track-face {
-  border-color: #bf9bd4;
+  border-color: #a7a7a7;
 }
 .waxloom-vinyl-play { z-index: 3; }
 .waxloom-vinyl-display--discovery .waxloom-vinyl-sleeve::before,
@@ -86,9 +86,9 @@
   height: 23px;
   border-radius: 0 0 8px 8px;
   pointer-events: none;
-  background: repeating-linear-gradient(90deg, transparent 0 23px, #987ba518 24px 25px),
-    linear-gradient(180deg, #211726, #0e0a13);
-  box-shadow: 0 -8px 17px #06030b73;
+  background: repeating-linear-gradient(90deg, transparent 0 23px, #84848418 24px 25px),
+    linear-gradient(180deg, #1a1a1a, #0c0c0c);
+  box-shadow: 0 -8px 17px #04040473;
 }
 /* Native scroll-synced vinyl motion: the *black record behind the sleeve*
    rises out of its slot near viewport center and sinks toward either edge.
@@ -131,13 +131,13 @@
   height: 162px;
   box-sizing: border-box;
   padding: 0;
-  border: 2px solid #594363;
+  border: 2px solid #4a4a4a;
   border-radius: 3px;
   overflow: hidden;
-  background: linear-gradient(142deg, #46324e, #201827);
-  color: #d7c5df;
+  background: linear-gradient(142deg, #383838, #1b1b1b);
+  color: #cbcbcb;
   cursor: pointer;
-  box-shadow: 3px 5px 12px #0503089c;
+  box-shadow: 3px 5px 12px #0404049c;
 }
 .waxloom-track-face img {
   display: block;
@@ -148,7 +148,7 @@
   object-fit: cover;
 }
 .waxloom-track-face img[hidden] { display:none; }
-.waxloom-track-fallback { font-size: 45px; color: #b49ac5; }
+.waxloom-track-fallback { font-size: 45px; color: #a3a3a3; }
 .waxloom-track-play-indicator {
   position: absolute;
   left: 13px;
@@ -158,10 +158,10 @@
   place-items: center;
   height: 36px;
   width: 36px;
-  border: 1px solid #b299c6;
+  border: 1px solid #a2a2a2;
   border-radius: 50%;
-  background: #1b1422dc;
-  color: #eee2f6;
+  background: #161616dc;
+  color: #e6e6e6;
 }
 .waxloom-track-copy {
   display: grid;
@@ -180,8 +180,8 @@
   white-space:nowrap;
   text-overflow:ellipsis;
 }
-.waxloom-track-copy strong { font-size:12px; color:#f1e8f7; }
-.waxloom-track-copy small { font-size:10px; color:#beafca; }
+.waxloom-track-copy strong { font-size:12px; color:#ebebeb; }
+.waxloom-track-copy small { font-size:10px; color:#b4b4b4; }
 .waxloom-track-actions {
   display: flex;
   align-items: center;
@@ -199,28 +199,28 @@
   width: 39px;
   height: 39px;
   padding: 0;
-  border: 1px solid #8d6d9e;
+  border: 1px solid #777777;
   border-radius: 9px;
-  background: #46334e;
-  color: #f1e6f8;
+  background: #393939;
+  color: #eaeaea;
   cursor: pointer;
 }
-.waxloom-track-action.is-starred { color:#ffc2d2; border-color:#a16077; background:#613747; }
+.waxloom-track-action.is-starred { color:#d0d0d0; border-color:#6f6f6f; background:#414141; }
 .waxloom-track-action:nth-child(2) { color:#b7e8e0; background:#2e4847; border-color:#54847a; }
 .waxloom-track-action:nth-child(3) { color:#c1dff4; background:#304354; border-color:#577992; }
 .waxloom-track-remove { color:#f0a5b1; font-size:20px; }
-.waxloom-track-sleeve.is-current .waxloom-track-face { border-color:#d4a6f5; }
+.waxloom-track-sleeve.is-current .waxloom-track-face { border-color:#b5b5b5; }
 /* Reflect the actual playing album in every vinyl crate, not just the manually centered cover. */
-.waxloom-vinyl-sleeve.is-current .waxloom-vinyl-face { border-color: #d4a6f5; box-shadow: 0 0 0 2px #b877e950, 3px 5px 12px #0007; }
+.waxloom-vinyl-sleeve.is-current .waxloom-vinyl-face { border-color: #b5b5b5; box-shadow: 0 0 0 2px #8d8d8d50, 3px 5px 12px #0007; }
 .waxloom-vinyl-load-more {
   display:flex; align-items:center; justify-content:space-between;
   width:100%; min-height:42px; padding:10px 14px;
-  border:1px solid #554266; border-radius:10px;
-  color:#ebdbf6; background:#2b2035; font-size:12px; font-weight:700; cursor:pointer;
+  border:1px solid #494949; border-radius:10px;
+  color:#e0e0e0; background:#242424; font-size:12px; font-weight:700; cursor:pointer;
 }
-.waxloom-vinyl-load-more span { font-size:11px; color:#a898b3; font-variant-numeric:tabular-nums; }
+.waxloom-vinyl-load-more span { font-size:11px; color:#9d9d9d; font-variant-numeric:tabular-nums; }
 .waxloom-song-vinyl button:focus-visible,.waxloom-album-vinyl button:focus-visible {
-  outline:2px solid #dbb0ee; outline-offset:2px;
+  outline:2px solid #bebebe; outline-offset:2px;
 }
 
 /* Constrain grid tracks to the viewport, never the intrinsic width of 24
@@ -236,8 +236,8 @@
   width:36px;
   height:36px;
   min-width:36px;
-  border-color:#786185;
-  background:#41324a;
+  border-color:#686868;
+  background:#373737;
 }
 /* People and playlists use the same swipeable physical sleeve language. */
 .waxloom-entity-vinyl { display:grid; gap:11px; min-width:0; }
@@ -251,17 +251,17 @@
 .waxloom-entity-face {
   position:relative; z-index:1; display:grid; place-items:center;
   width:162px; height:162px; box-sizing:border-box; padding:0;
-  border:2px solid #5f4c6a; border-radius:4px; overflow:hidden;
-  background:linear-gradient(145deg,#664575,#2c2038); color:#f5e6ff;
-  box-shadow:3px 5px 12px #08060bac; cursor:pointer;
+  border:2px solid #525252; border-radius:4px; overflow:hidden;
+  background:linear-gradient(145deg,#4f4f4f,#242424); color:#ebebeb;
+  box-shadow:3px 5px 12px #070707ac; cursor:pointer;
 }
 .waxloom-entity-face img { position:absolute; inset:0; width:100%; height:100%; display:block; object-fit:cover; }
 .waxloom-entity-face img[hidden] {display:none;}
 .waxloom-entity-fallback {font-size:68px;font-weight:800;opacity:.73;}
 .waxloom-entity-open {
   position:absolute;bottom:9px;left:12px;z-index:2;display:grid;place-items:center;
-  width:36px;height:36px;border:1px solid #b599c5;border-radius:50%;
-  background:#1e1528dd;color:#fff;font-size:19px;
+  width:36px;height:36px;border:1px solid #a2a2a2;border-radius:50%;
+  background:#181818dd;color:#fff;font-size:19px;
 }
 .waxloom-entity-copy {
   display:grid;gap:4px;align-content:center;min-width:0;width:162px;
@@ -270,10 +270,10 @@
 .waxloom-entity-copy strong,.waxloom-entity-copy small {
   display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
 }
-.waxloom-entity-copy strong {font-size:12px;color:#f1e4f7;}
-.waxloom-entity-copy small {font-size:10px;color:#bda7c9;}
+.waxloom-entity-copy strong {font-size:12px;color:#e8e8e8;}
+.waxloom-entity-copy small {font-size:10px;color:#aeaeae;}
 .waxloom-entity-sleeve[data-centered="true"] .waxloom-entity-face {
-  border-color:#c39bd9;
+  border-color:#a8a8a8;
 }
 @media (min-width:821px) {
   .waxloom-vinyl-display--artist .waxloom-vinyl-crate,
@@ -284,17 +284,17 @@
 @media(max-width:820px) {
   .waxloom-home-track-rail {
     border-radius:12px;
-    background:linear-gradient(180deg,#281f2f30,#100c16 78%,#241b2c);
+    background:linear-gradient(180deg,#22222230,#0e0e0e 78%,#1e1e1e);
     gap:7px;
     padding:10px 4px 11px;
   }
   .waxloom-home-track-card {position:relative;flex-basis:117px;}
   .waxloom-home-track-card::before {
     content:"";position:absolute;left:15px;top:-9px;width:82px;height:82px;
-    border-radius:50%;border:2px solid #524359;pointer-events:none;
-    background:repeating-radial-gradient(circle at center,#1a141f 0 6px,#302735 7px 8px,#151119 9px 12px);
+    border-radius:50%;border:2px solid #484848;pointer-events:none;
+    background:repeating-radial-gradient(circle at center,#161616 0 6px,#2a2a2a 7px 8px,#121212 9px 12px);
   }
-  .waxloom-home-track-cover {z-index:1;box-shadow:2px 3px 8px #06030b7d;}
+  .waxloom-home-track-cover {z-index:1;box-shadow:2px 3px 8px #0404047d;}
 }
 /* Actual desktop parity: same collection browsing model, larger viewport.
    No duplicate hidden media grid/table remains visible. */
@@ -307,7 +307,7 @@
   .waxloom-vinyl-rack {
     position:relative; z-index:1; display:flex; align-items:flex-start; width:100%; height:100%;
     box-sizing:border-box; padding:28px 27px 0; overflow-x:auto; overflow-y:hidden;
-    scrollbar-width:thin; scrollbar-color:#644d70 transparent; overscroll-behavior-x:contain;
+    scrollbar-width:thin; scrollbar-color:#545454 transparent; overscroll-behavior-x:contain;
   }
   .waxloom-vinyl-sleeve {
     position:relative; flex:0 0 162px; width:162px; min-width:162px;
@@ -315,19 +315,19 @@
   }
   .waxloom-vinyl-face {
     position:relative; display:block; padding:0; width:162px; height:162px; box-sizing:border-box;
-    overflow:hidden; border:2px solid #6b536f; border-radius:4px;
-    background:linear-gradient(135deg,#4d3858,#201828); cursor:pointer; box-shadow:3px 5px 12px #0007;
+    overflow:hidden; border:2px solid #5a5a5a; border-radius:4px;
+    background:linear-gradient(135deg,#3f3f3f,#1b1b1b); cursor:pointer; box-shadow:3px 5px 12px #0007;
   }
   .waxloom-vinyl-face img {
     position:absolute; inset:0; width:100%; height:100%; display:block; object-fit:cover;
   }
   .waxloom-vinyl-face img[hidden] { display:none; }
-  .waxloom-vinyl-fallback { display:grid; place-items:center; width:100%; height:100%; font-size:51px; color:#c8a6d7; }
+  .waxloom-vinyl-fallback { display:grid; place-items:center; width:100%; height:100%; font-size:51px; color:#b1b1b1; }
   .waxloom-vinyl-shine { position:absolute; inset:0; pointer-events:none; background:linear-gradient(110deg,#ffffff20,transparent 28%,#00000018); }
   .waxloom-vinyl-play {
     position:absolute; left:22px; top:115px; z-index:3; display:grid; place-items:center;
-    width:37px; height:37px; border:1px solid #d6bae6; border-radius:50%;
-    background:#1e1628e3; color:white; cursor:pointer;
+    width:37px; height:37px; border:1px solid #c3c3c3; border-radius:50%;
+    background:#191919e3; color:white; cursor:pointer;
   }
   .waxloom-vinyl-label {
     display:grid; gap:3px; box-sizing:border-box; width:162px; padding:8px 3px 0;
@@ -336,30 +336,30 @@
   .waxloom-vinyl-label strong, .waxloom-vinyl-label small {
     overflow:hidden; text-overflow:ellipsis; white-space:nowrap; width:100%;
   }
-  .waxloom-vinyl-label strong { font-size:11px; color:#f0e3f5; }
-  .waxloom-vinyl-label small { font-size:10px; color:#ac96ba; }
+  .waxloom-vinyl-label strong { font-size:11px; color:#e7e7e7; }
+  .waxloom-vinyl-label small { font-size:10px; color:#9d9d9d; }
   .waxloom-vinyl-controls {
     display:flex; align-items:center; gap:12px; min-height:47px;
     padding:5px 6px; box-sizing:border-box;
   }
-  .waxloom-vinyl-count { color:#e7d4f4; font-size:12px; min-width:52px; font-weight:750; font-variant-numeric:tabular-nums; }
+  .waxloom-vinyl-count { color:#dadada; font-size:12px; min-width:52px; font-weight:750; font-variant-numeric:tabular-nums; }
   .waxloom-vinyl-selected { flex:1 1 auto; display:grid; gap:3px; min-width:0; text-align:center; }
   .waxloom-vinyl-selected strong, .waxloom-vinyl-selected small {
     display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
   }
-  .waxloom-vinyl-selected strong { color:#f2e9f7; font-size:12px; }
-  .waxloom-vinyl-selected small { color:#aa9ab5; font-size:11px; }
-  .waxloom-vinyl-drag-hint { flex:1; text-align:center; color:#aa9ab5; font-size:11px; }
+  .waxloom-vinyl-selected strong { color:#ececec; font-size:12px; }
+  .waxloom-vinyl-selected small { color:#9f9f9f; font-size:11px; }
+  .waxloom-vinyl-drag-hint { flex:1; text-align:center; color:#9f9f9f; font-size:11px; }
   .waxloom-vinyl-arrows { display:flex; gap:8px; }
   .waxloom-vinyl-arrows button {
-    height:34px; width:39px; border:1px solid #5c4869; border-radius:9px;
-    background:#292033; color:#e5d4f3; cursor:pointer; font-size:18px;
+    height:34px; width:39px; border:1px solid #4f4f4f; border-radius:9px;
+    background:#232323; color:#dadada; cursor:pointer; font-size:18px;
   }
   .waxloom-album-vinyl .waxloom-vinyl-group + .waxloom-vinyl-group {
-    margin-top:16px; border-top:1px solid #392c41; padding-top:14px;
+    margin-top:16px; border-top:1px solid #303030; padding-top:14px;
   }
-  .waxloom-vinyl-group-heading {display:flex;justify-content:space-between;gap:8px;font-size:14px;color:#d7c2e4;}
-  .waxloom-vinyl-group-heading small {font-size:11px;color:#a291ab;}
+  .waxloom-vinyl-group-heading {display:flex;justify-content:space-between;gap:8px;font-size:14px;color:#c9c9c9;}
+  .waxloom-vinyl-group-heading small {font-size:11px;color:#969696;}
   .waxloom-vinyl-display--album .waxloom-vinyl-crate {height:251px;}
   .waxloom-vinyl-display--track .waxloom-vinyl-crate {height:285px;}
   .waxloom-vinyl-display--discovery .waxloom-vinyl-crate {height:293px;}
@@ -370,11 +370,11 @@
     width:174px; height:auto; padding:4px; border:0; background:transparent;
   }
   .waxloom-discovery-vinyl .discovery-cover-art {
-    width:166px;aspect-ratio:1;border:2px solid #6d537e;border-radius:3px;
+    width:166px;aspect-ratio:1;border:2px solid #5c5c5c;border-radius:3px;
   }
   .waxloom-discovery-vinyl .discovery-cover-copy {display:grid;gap:2px;text-align:center;padding:0 4px;}
   .waxloom-discovery-vinyl .discovery-cover-copy strong {font-size:12px;}
-  .waxloom-discovery-vinyl .discovery-cover-copy small {font-size:10px;color:#af9ac0;}
+  .waxloom-discovery-vinyl .discovery-cover-copy small {font-size:10px;color:#a1a1a1;}
   .waxloom-discovery-vinyl .discovery-cover-actions {display:flex;gap:5px;align-items:center;justify-content:center;min-height:35px;}
   .waxloom-discovery-vinyl .discovery-cover-actions button {min-width:34px;height:34px;border-radius:8px;}
 }

@@ -23,9 +23,9 @@
 .playlist-select-label select {
   width: 100%;
   padding: 11px 12px;
-  border: 1px solid #302f36;
+  border: 1px solid #303030;
   border-radius: 10px;
-  color: #ece8f0;
+  color: #e9e9e9;
   background: #111116;
   outline: none;
 }
@@ -33,7 +33,7 @@
 .seed-search input:focus,
 .import-search-form input:focus,
 .playlist-select-label select:focus {
-  border-color: #655676;
+  border-color: #5b5b5b;
 }
 
 .seed-search-results {
@@ -50,16 +50,16 @@
   gap: 3px 14px;
   width: 100%;
   padding: 10px 12px;
-  border: 1px solid #242329;
+  border: 1px solid #242424;
   border-radius: 10px;
   color: inherit;
   text-align: left;
-  background: #151419;
+  background: #151515;
   cursor: pointer;
 }
 
 .seed-result:hover {
-  border-color: #45404c;
+  border-color: #424242;
 }
 
 .seed-result strong,
@@ -70,7 +70,7 @@
 }
 
 .seed-result span {
-  color: #817d88;
+  color: #7f7f7f;
   font-size: 0.8rem;
 }
 
@@ -78,7 +78,7 @@
   grid-column: 2;
   grid-row: 1 / span 2;
   align-self: center;
-  color: #b9a8d0;
+  color: #afafaf;
 }
 
 .seed-chips {
@@ -96,10 +96,10 @@
   gap: 8px;
   max-width: min(100%, 420px);
   padding: 7px 9px;
-  border: 1px solid #3a3542;
+  border: 1px solid #373737;
   border-radius: 999px;
-  color: #d7d0de;
-  background: #19171e;
+  color: #d2d2d2;
+  background: #181818;
   cursor: pointer;
 }
 
@@ -110,13 +110,13 @@
 }
 
 .seed-chip b {
-  color: #81788d;
+  color: #7b7b7b;
 }
 
 .underground-control {
   margin-top: 24px;
   padding-top: 20px;
-  border-top: 1px solid #27252c;
+  border-top: 1px solid #262626;
 }
 
 .underground-control > div:first-child,
@@ -128,7 +128,7 @@
 }
 
 .underground-control > div:first-child span {
-  color: #bca8d5;
+  color: #b0b0b0;
   font-weight: 700;
 }
 
@@ -138,7 +138,7 @@
 }
 
 .underground-labels {
-  color: #716d78;
+  color: #6f6f6f;
   font-size: 0.72rem;
 }
 
@@ -158,16 +158,16 @@
   align-items: center;
   gap: 10px;
   padding: 11px 12px;
-  border: 1px solid #25232a;
+  border: 1px solid #242424;
   border-radius: 12px;
   color: inherit;
   text-align: left;
-  background: #151419;
+  background: #151515;
   cursor: pointer;
 }
 
 .local-similar-card:hover {
-  border-color: #494052;
+  border-color: #434343;
 }
 
 .local-similar-card > div {
@@ -185,12 +185,12 @@
 
 .local-similar-card span,
 .local-similar-card small {
-  color: #817d88;
+  color: #7f7f7f;
   font-size: 0.78rem;
 }
 
 .local-play {
-  color: #c8b5df !important;
+  color: #bcbcbc !important;
 }
 
 .discovery-results,
@@ -205,13 +205,13 @@
   align-items: center;
   gap: 16px;
   padding: 14px 15px;
-  border: 1px solid #25232a;
+  border: 1px solid #242424;
   border-radius: 14px;
-  background: rgba(19, 18, 23, 0.84);
+  background: rgba(19,19,19, 0.84);
 }
 
 .discovery-rank {
-  color: #5f5a66;
+  color: #5c5c5c;
   font-variant-numeric: tabular-nums;
   font-weight: 750;
 }
@@ -231,11 +231,11 @@
 }
 
 .discovery-copy > span {
-  color: #aaa3b1;
+  color: #a5a5a5;
 }
 
 .discovery-copy > small {
-  color: #6f6a75;
+  color: #6c6c6c;
 }
 
 .tag-row {
@@ -248,9 +248,9 @@
 .tag-row span {
   padding: 3px 6px;
   border-radius: 999px;
-  color: #90859b;
+  color: #898989;
   font-size: 0.65rem;
-  background: #201d25;
+  background: #1e1e1e;
 }
 
 .score-stack {
@@ -266,12 +266,12 @@
 }
 
 .score-stack span {
-  color: #6f6a75;
+  color: #6c6c6c;
   font-size: 0.7rem;
 }
 
 .score-stack b {
-  color: #c9bad9;
+  color: #bfbfbf;
   font-size: 0.82rem;
 }
 
@@ -293,11 +293,11 @@
 
 .runtime-pill {
   padding: 7px 10px;
-  border: 1px solid #3a3135;
+  border: 1px solid #333333;
   border-radius: 999px;
   color: #bb959d;
   font-size: 0.74rem;
-  background: #181316;
+  background: #141414;
 }
 
 .runtime-pill-ok {
@@ -317,13 +317,13 @@
   display: grid;
   gap: 4px;
   padding: 10px 12px;
-  border: 1px solid #27252c;
+  border: 1px solid #262626;
   border-radius: 10px;
-  background: #151419;
+  background: #151515;
 }
 
 .runtime-grid span {
-  color: #716d78;
+  color: #6f6f6f;
   font-size: 0.72rem;
 }
 
@@ -344,7 +344,7 @@
 
 .import-search-form label > span,
 .playlist-select-label > span {
-  color: #817d88;
+  color: #7f7f7f;
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -359,13 +359,13 @@
   gap: 4px;
   margin-top: 17px;
   padding: 12px 14px;
-  border-left: 2px solid #70548e;
-  background: rgba(70, 45, 91, 0.12);
+  border-left: 2px solid #5e5e5e;
+  background: rgba(54,54,54, 0.12);
 }
 
 .import-origin span,
 .import-origin small {
-  color: #81778a;
+  color: #7a7a7a;
   font-size: 0.74rem;
 }
 
@@ -379,18 +379,18 @@
   align-items: center;
   gap: 14px;
   padding: 10px;
-  border: 1px solid #25232a;
+  border: 1px solid #242424;
   border-radius: 13px;
   color: inherit;
   text-align: left;
-  background: #151419;
+  background: #151515;
   cursor: pointer;
 }
 
 .youtube-candidate:hover,
 .youtube-candidate-active {
-  border-color: #655676;
-  background: #19171f;
+  border-color: #5b5b5b;
+  background: #181818;
 }
 
 .youtube-thumb {
@@ -400,7 +400,7 @@
   height: 54px;
   overflow: hidden;
   border-radius: 8px;
-  color: #8d7c9f;
+  color: #828282;
   background: #0f0f12;
 }
 
@@ -425,7 +425,7 @@
 
 .youtube-copy span,
 .youtube-copy small {
-  color: #817d88;
+  color: #7f7f7f;
   font-size: 0.78rem;
 }
 
@@ -436,17 +436,17 @@
 }
 
 .youtube-score b {
-  color: #c9bad9;
+  color: #bfbfbf;
   font-size: 0.95rem;
 }
 
 .youtube-score span {
-  color: #6f6a75;
+  color: #6c6c6c;
   font-size: 0.66rem;
 }
 
 .candidate-radio {
-  color: #a58dbf;
+  color: #969696;
   font-size: 1rem;
 }
 
@@ -466,7 +466,7 @@
   align-items: center;
   gap: 9px;
   min-height: 41px;
-  color: #aca7b0;
+  color: #a9a9a9;
   font-size: 0.82rem;
 }
 
@@ -544,4 +544,4 @@
 /* Discovery simplified 2026-10: one compact, responsive track feed. */
 .discovery-mode-controls { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .discovery-mode-controls .secondary-action { font-size: 12px; padding: 5px 9px; min-height: 30px; }
-.discovery-mode-active { border-color: var(--accent, #9c89ff) !important; background: rgba(130, 112, 203, .15) !important; }
+.discovery-mode-active { border-color: var(--accent, #969696) !important; background: rgba(122,122,122, .15) !important; }

@@ -5,7 +5,6 @@ import { albumDisplayInfo, knownMusicValue } from "./albumDisplay";
 import { DiscoveryView } from "./DiscoveryView";
 import { ImportsView } from "./ImportsView";
 import { MobileNavigation } from "./MobileNavigation";
-import { MobileHome } from "./MobileHome";
 import { AlbumCoverGrid, FavoriteTrackGrid, LibraryGridSkeleton } from "./LibraryGrids";
 import { CoverArtwork } from "./CoverArtwork";
 import { catalogSnapshot } from "./catalogSnapshot";
@@ -520,7 +519,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const closeMobileMenu = useCallback(() => setMobileMenuOpen(false), []);
   const navItems: Array<{ id: View; label: string }> = [
-    { id: "home", label: "Home" },
+    { id: "home", label: "Library" },
     { id: "albums", label: "Albums" },
     { id: "artists", label: "Artists" },
     { id: "playlists", label: "Playlists" },
@@ -530,7 +529,7 @@ export default function App() {
   ];
 
   const title = useMemo(() => {
-    if (view === "home") return "Your music, one interface.";
+    if (view === "home") return "Library";
     if (view === "search") return searchQuery ? `Search: ${searchQuery}` : "Search";
     return navItems.find((item) => item.id === view)?.label ?? "Waxloom";
   }, [view, searchQuery]);
@@ -570,14 +569,15 @@ export default function App() {
   }
 
   return (
-    <main className={`app-shell ${player.currentSong || player.currentPreview ? "app-shell-with-player" : ""} ${view === "discovery" ? "app-shell-discovery" : ""} ${view === "home" ? "app-shell-home" : ""} ${view === "imports" ? "app-shell-imports" : ""}`}>
+    <main className={`app-shell console-shell ${player.currentSong || player.currentPreview ? "app-shell-with-player" : ""} ${view === "discovery" ? "app-shell-discovery" : ""} ${view === "home" ? "app-shell-home" : ""} ${view === "imports" ? "app-shell-imports" : ""}`}>
       <aside className="sidebar">
-        <div className="brand">Waxloom</div>
+        <div className="brand"><span className="console-brand-mark" aria-hidden="true">◎</span> WAXLOOM<span className="console-brand-sub"> / MUSIC</span></div>
         <nav aria-label="Waxloom sections">
           {navItems.map((item) => (
             <button
               className={`nav-item ${view === item.id ? "nav-item-active" : ""}`}
               key={item.id}
+              data-console-section={item.id}
               type="button"
               onClick={() => { navigate(item.id); setMobileMenuOpen(false); }}
             >
@@ -603,6 +603,7 @@ export default function App() {
         onNavigate={(id) => { navigate(id); closeMobileMenu(); }}
       />
       <section className="content">
+        <div className="console-content-header">
         <nav className="waxloom-history-controls" aria-label="Navigation history">
           <button type="button" aria-label="Back to previous screen"
             title="Back · Alt+Left" disabled={!canBack}
@@ -629,6 +630,7 @@ export default function App() {
             {health?.status === "ok" ? `API · v${health.version}` : "API offline"}
           </div>
         </header>
+        </div>
 
         {error && (
           <div className="state-card state-card-error global-state">
@@ -655,15 +657,7 @@ export default function App() {
                 {navidromeHealth?.status === "ok" ? "Library online" : "Library unavailable"}
               </span>
             </section>
-
-            <MobileHome recent={recentSongs}
-              starOverrides={starOverrides}
-              onToggleStar={(song) => void toggleStar(song)}
-              onAddPlaylist={setPlaylistSongTarget}
-              onBrowseAlbums={() => navigate("albums")}
-              onRefreshRecent={() => void api.recentSongs(24).then((res) => setRecentSongs(res.items)).catch(() => undefined)}
-            />
-            <div className="waxloom-home-desktop">
+            <div className="waxloom-home-desktop console-unified-home">
               <section className="waxloom-home-tracks-main">
                 <div className="section-toolbar">
                   <div><p className="eyebrow">Just arrived</p><h2>Fresh tracks</h2>
@@ -678,6 +672,7 @@ export default function App() {
                   ? <SongTable songs={recentSongs} ordered starOverrides={starOverrides}
                       onToggleStar={(song) => void toggleStar(song)} onAddPlaylist={setPlaylistSongTarget} />
                   : <p className="muted">Recently imported music will appear here.</p>}
+                <button className="secondary-action console-explore" type="button" onClick={() => navigate("albums")}>Explore albums →</button>
               </section>
             </div>
           </div>
@@ -791,6 +786,7 @@ export default function App() {
         </div>}
       </section>
 
+      {!player.currentSong && !player.currentPreview && <aside className="console-idle-player" aria-label="Now playing"><div className="console-panel-label">NOW PLAYING <span>● IDLE</span></div><div className="console-idle-art" aria-hidden="true">◎</div><strong>No track selected</strong><p>Select a track or start Shuffle to begin listening.</p><button className="primary-action" type="button" disabled={shuffling} onClick={() => void shuffleSomething()}>Shuffle library</button><div className="console-idle-queue">UP NEXT <small>Nothing queued</small></div></aside>}
       <DownloadTray />
 
       {playlistSongTarget && (

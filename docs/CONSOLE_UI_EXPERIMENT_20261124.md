@@ -1,0 +1,13 @@
+# Console UI comparison candidate — 2026-11-24
+
+Status: IMPLEMENTED / NOT USER VALIDATED. Dedicated local branch based on deployed Web 97bbe11. User authorized a parallel full frontend on a separate test port; existing production Web/API remain untouched. Same backend, so real library mutations are shared, not sandboxed. No push or main merge.
+
+Changes: compact monochrome dashboard shell, horizontal desktop navigation, right-side Now Playing/queue rail, shared Home list with optional existing vinyl view, mobile quick navigation and mini-player progress. Existing audio element, playback actions, queue planning, API adapters and routes retained. Legacy feature styling retained where needed; experimental CSS is intentionally isolated pending owner design decision.
+
+Checks: TypeScript/Vite build PASS; HTTP/API health on production and parallel frontend PASS; isolated Chromium at 1440x900, 1366x768, 390x844, 320x568: no horizontal overflow; all seven desktop routes checked on initial build; final build: real local playback (muted test; non-GET API requests blocked), expanded player open/close while audio advances, mobile menu and Albums navigation, single audio node, no uncaught JS errors. Smart Autoplay 7208 assertions PASS, iOS helper 18 PASS, player clock isolation 22 PASS. Physical Safari/PWA and full functional regression remain pending. Existing CSS cascade guard FAIL (984 important declarations vs 669 baseline); do not promote this experimental overlay without consolidating style ownership and restoring the guard. Discovery/import writes not exercised by tests.
+
+Rollback: stop only the comparison container and disable its private HTTPS proxy if owner rejects design. Production does not need a rollback. Keep all other worktrees and deployment manifest unchanged.
+
+## 2026-11-24 — Owner approved the Console direction and requested local production port 8091
+
+Corrected track artwork positioning using a dedicated grid column; neutralized violet UI and generated-cover palettes without changing real album artwork. Added an original WL-to-vinyl animated favicon inspired by the FitBoyRepack animation lifecycle, with static reduced-motion/hidden-tab behavior and iOS touch icon. QA: 24 rows at each of 1920, 1366, 390 and 320 px, zero overlaps and horizontal overflow; favicon changed across eight sampled PNG frames, reduced motion restored static icon, playback passed, zero uncaught JS errors. Existing CSS cascade debt remains (guard not green); owner requested local runtime promotion of the approved design, not a main merge. Retain prior production image/config for rollback. Physical Safari validation and full regression remain pending.

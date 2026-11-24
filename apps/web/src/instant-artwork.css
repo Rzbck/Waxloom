@@ -36,11 +36,11 @@
   top: 13%;
   left: 14%;
   background: repeating-radial-gradient(circle,
-    transparent 0 4px, #f7edff25 4.5px 5px, transparent 6px 9px),
-    radial-gradient(circle, transparent 0 7%, #080709e8 8% 12%,
+    transparent 0 4px, #f0f0f025 4.5px 5px, transparent 6px 9px),
+    radial-gradient(circle, transparent 0 7%, #070707e8 8% 12%,
     hsla(var(--cover-accent), 91%, 66%, .95) 13% 18%,
-    #080609d9 19% 100%);
-  box-shadow: 12px 9px 22px #0009, 0 0 2px #f6d7ff66;
+    #070707d9 19% 100%);
+  box-shadow: 12px 9px 22px #0009, 0 0 2px #e0e0e066;
 }
 .waxloom-generated-disc::after {
   content: "";
@@ -50,8 +50,8 @@
   top: 45.5%;
   left: 45.5%;
   border-radius: 50%;
-  background: #f3e9fa;
-  box-shadow: 0 0 0 3px #090609;
+  background: #ececec;
+  box-shadow: 0 0 0 3px #070707;
 }
 .waxloom-generated-flare {
   position: absolute;
@@ -108,7 +108,7 @@
 .waxloom-grid-placeholder .waxloom-grid-artwork { overflow: hidden; border-radius: 7px; }
 .waxloom-grid-placeholder .waxloom-grid-caption i {
   display: block; height: 10px; width: 84%; border-radius: 5px;
-  background: #54455f73;
+  background: #4a4a4a73;
 }
 .waxloom-grid-placeholder .waxloom-grid-caption i:nth-child(2) { width: 52%; }
 .waxloom-detail-cover-pending {
@@ -121,7 +121,7 @@
   width: min(100%, 290px);
   height: 11px;
   border-radius: 6px;
-  background: #4b3a5180;
+  background: #3f3f3f80;
 }
 .waxloom-detail-cover-pending > span:nth-child(2) { width: 75%; }
 .waxloom-detail-cover-pending > span:nth-child(3) { width: 44%; }

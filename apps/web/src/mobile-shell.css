@@ -53,10 +53,10 @@
     width: min(100%, 520px);
     min-height: 44px;
     padding: 7px 20px;
-    border: 1px solid #554663;
+    border: 1px solid #4b4b4b;
     border-radius: 12px;
-    background: #2b2235;
-    color: #eee8f5;
+    background: #252525;
+    color: #eaeaea;
     font-size: 15px;
     font-weight: 700;
     letter-spacing: .01em;
@@ -64,7 +64,7 @@
   }
   .mobile-menu-toggle:focus-visible, .waxloom-mobile-navigation button:focus-visible,
   .waxloom-mobile-player button:focus-visible, .waxloom-mobile-mini button:focus-visible {
-    outline: 2px solid #d2b6f6;
+    outline: 2px solid #c1c1c1;
     outline-offset: 2px;
   }
 
@@ -75,7 +75,7 @@
     display: flex !important;
     flex-direction: column;
     gap: 20px;
-    background: #121018;
+    background: #111111;
     padding: calc(18px + env(safe-area-inset-top))
       17px calc(24px + env(safe-area-inset-bottom));
     overflow-y: auto;
@@ -95,10 +95,10 @@
     gap: 8px;
     min-height: 45px;
     padding: 8px 14px;
-    border: 1px solid #584964;
-    background: #2b2234;
+    border: 1px solid #4e4e4e;
+    background: #252525;
     border-radius: 10px;
-    color: #eee5f2;
+    color: #e8e8e8;
     font-size: 13px;
     cursor: pointer;
   }
@@ -110,20 +110,20 @@
     gap: 16px;
     min-height: 56px;
     padding: 12px 16px;
-    border: 1px solid #3d3348;
+    border: 1px solid #373737;
     border-radius: 12px;
-    background: #201b28;
-    color: #e9e1ef;
+    background: #1d1d1d;
+    color: #e4e4e4;
     font-size: 16px;
     text-align: left;
     cursor: pointer;
   }
   .waxloom-mobile-navigation nav button.is-current {
-    background: #3b2b4b;
-    border-color: #a181c2;
+    background: #313131;
+    border-color: #8c8c8c;
     color: #fff;
   }
-  .waxloom-mobile-navigation nav button span:last-child { color: #c3a3df; }
+  .waxloom-mobile-navigation nav button span:last-child { color: #aeaeae; }
 
   /* Mini player: a precise height instead of putting an extra row in the old grid. */
   .player-dock {
@@ -138,9 +138,9 @@
     grid-template-columns: none !important;
     padding: 5px !important;
     gap: 0 !important;
-    border: 1px solid #443850;
+    border: 1px solid #3c3c3c;
     border-radius: 12px;
-    background: #18141f;
+    background: #161616;
     box-shadow: 0 5px 24px rgba(0,0,0,.48);
     z-index: 109;
     box-sizing: border-box;
@@ -172,7 +172,7 @@
     min-width: 0;
     height: 100%;
     padding: 2px 4px;
-    color: #f6f0f9;
+    color: #f2f2f2;
     background: transparent;
     text-align: left;
   }
@@ -184,26 +184,26 @@
     height: 47px;
     overflow: hidden;
     border-radius: 7px;
-    background: #41364d;
-    color: #dcc6f3;
+    background: #3a3a3a;
+    color: #cecece;
   }
   .waxloom-mobile-mini-cover img { width: 100%; height: 100%; object-fit: cover; }
   .waxloom-mobile-mini-copy { display: grid; gap: 4px; min-width: 0; flex: 1; overflow: hidden; }
-  .waxloom-mobile-mini-title { font-size: 12.5px; font-weight: 700; color: #f6f1fa; }
+  .waxloom-mobile-mini-title { font-size: 12.5px; font-weight: 700; color: #f3f3f3; }
   .waxloom-mobile-mini-artist {
     font-size: 11px;
-    color: #b7aabd;
+    color: #aeaeae;
     text-overflow: ellipsis;
     white-space: nowrap;
     overflow: hidden;
   }
-  .waxloom-mobile-mini-chevron { flex: 0 0 17px; color: #a68dbf; transform: rotate(180deg); }
+  .waxloom-mobile-mini-chevron { flex: 0 0 17px; color: #969696; transform: rotate(180deg); }
   .waxloom-mobile-mini-download {
     display: grid;
     place-items: center;
     height: 44px;
-    color: #dac2f1;
-    background: #443553;
+    color: #cacaca;
+    background: #3a3a3a;
     font-size: 24px;
     font-weight: 700;
   }
@@ -211,15 +211,15 @@
     display: grid;
     place-items: center;
     height: 47px;
-    color: #130c1b;
-    background: #d7b4f8;
+    color: #0f0f0f;
+    background: #c0c0c0;
   }
   .waxloom-mobile-mini-next {
     display: grid;
     place-items: center;
     height: 47px;
-    color: #ebd9fa;
-    background: #392b49;
+    color: #dfdfdf;
+    background: #303030;
   }
   .waxloom-mobile-mini button:disabled { opacity: .5; cursor: default; }
 
@@ -242,8 +242,8 @@
     grid-row: 1 / 3;
     width: 36px;
     height: 36px;
-    color: #e1c3f7;
-    background: #30243a;
+    color: #cdcdcd;
+    background: #282828;
   }
   .track-list .track-row .track-title-button {
     grid-column: 2;
@@ -263,7 +263,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 11px;
-    color: #aaa1b0;
+    color: #a4a4a4;
   }
   .track-list .track-row > span:nth-of-type(2),
   .track-list .track-row > span:nth-of-type(3) { display: none; }
@@ -284,16 +284,16 @@
     min-height: 44px;
     height: 44px;
     padding: 4px 8px;
-    border: 1px solid #5c4a6b;
+    border: 1px solid #505050;
     border-radius: 9px;
-    background: #2b2235;
-    color: #e6d7ed;
+    background: #252525;
+    color: #dcdcdc;
     font-size: 12px;
   }
   .track-list .track-row .mini-action-active {
-    border-color: #d59cba;
-    color: #f5b7d0;
-    background: #462a3c;
+    border-color: #aaaaaa;
+    color: #c6c6c6;
+    background: #313131;
   }
 
   /* Immersive mobile player: independent of .player-dock and legacy mobile.css. */
@@ -315,8 +315,8 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: none;
-    background: radial-gradient(ellipse at 50% 8%, #2b2038 0, #17131d 52%, #100e15 100%);
-    color: #f3edf8;
+    background: radial-gradient(ellipse at 50% 8%, #242424 0, #151515 52%, #0f0f0f 100%);
+    color: #efefef;
     box-sizing: border-box;
   }
   .waxloom-mobile-player::-webkit-scrollbar { display: none; }
@@ -331,13 +331,13 @@
   .waxloom-mobile-player-close {
     display: grid; place-items: center;
     width: 44px; height: 44px;
-    border: 1px solid #59476a; border-radius: 11px;
-    background: #34273e; color: #e3d3f0;
+    border: 1px solid #4d4d4d; border-radius: 11px;
+    background: #2b2b2b; color: #d8d8d8;
     cursor: pointer;
   }
   .waxloom-mobile-player-head-title { display: grid; gap: 3px; text-align: center; min-width: 0; }
-  .waxloom-mobile-player-head-title strong { font-size: 11px; letter-spacing: .13em; color: #ecdef9; }
-  .waxloom-mobile-player-head-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #b6a8c4; font-size: 12px; }
+  .waxloom-mobile-player-head-title strong { font-size: 11px; letter-spacing: .13em; color: #e3e3e3; }
+  .waxloom-mobile-player-head-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #adadad; font-size: 12px; }
   .waxloom-mobile-player-art-wrap { flex: 0 0 auto; display: flex; justify-content: center; width: 100%; min-width: 0; }
   .waxloom-mobile-player-art {
     width: min(78vw, 38dvh, 340px);
@@ -345,48 +345,48 @@
     flex: 0 0 auto;
     display: grid; place-items: center;
     overflow: hidden; border-radius: 14px;
-    background: linear-gradient(135deg, #6a537f, #2a2035);
-    color: #e9d7f8;
+    background: linear-gradient(135deg, #5b5b5b, #242424);
+    color: #dddddd;
     box-shadow: 0 14px 32px #0008;
   }
   .waxloom-mobile-player-art img { width: 100%; height: 100%; object-fit: cover; }
   .waxloom-mobile-player-metadata { display: grid; gap: 5px; flex: 0 0 auto; width: 100%; min-width: 0; text-align: center; }
   .waxloom-mobile-song-title { color: #fff; font-size: clamp(18px, 5vw, 22px); font-weight: 750; }
-  .waxloom-mobile-song-artist { color: #c8b3d7; font-size: clamp(13px, 3.6vw, 15px); }
+  .waxloom-mobile-song-artist { color: #bababa; font-size: clamp(13px, 3.6vw, 15px); }
   .waxloom-mobile-player-progress { flex: 0 0 auto; display: grid; gap: 1px; width: 100%; }
   .waxloom-mobile-player-progress input {
     display: block; width: 100%; height: 42px; margin: 0; padding: 0;
     appearance: none; -webkit-appearance: none;
-    background: transparent; accent-color: #d7affb; cursor: pointer;
+    background: transparent; accent-color: #bdbdbd; cursor: pointer;
     touch-action: pan-y;
   }
   .waxloom-mobile-player-progress input::-webkit-slider-runnable-track {
     height: 6px;
     border: 0; border-radius: 6px;
     background: linear-gradient(to right,
-      #dab5fc 0%, #dab5fc var(--progress),
-      #554860 var(--progress), #554860 100%);
+      #c2c2c2 0%, #c2c2c2 var(--progress),
+      #4c4c4c var(--progress), #4c4c4c 100%);
   }
   .waxloom-mobile-player-progress input::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
     width: 19px; height: 19px; margin-top: -6.5px;
-    border: 2px solid #f8edff;
-    border-radius: 50%; background: #bd82e6;
-    box-shadow: 0 0 0 4px #b18cd52b;
+    border: 2px solid #f1f1f1;
+    border-radius: 50%; background: #969696;
+    box-shadow: 0 0 0 4px #9999992b;
   }
   .waxloom-mobile-player-progress input::-moz-range-track {
-    height: 6px; background: #554860; border-radius: 6px;
+    height: 6px; background: #4c4c4c; border-radius: 6px;
   }
   .waxloom-mobile-player-progress input::-moz-range-progress {
-    height: 6px; background: #dab5fc; border-radius: 6px;
+    height: 6px; background: #c2c2c2; border-radius: 6px;
   }
   .waxloom-mobile-player-progress input::-moz-range-thumb {
-    width: 19px; height: 19px; border: 2px solid #f8edff;
-    background: #bd82e6; border-radius: 50%;
+    width: 19px; height: 19px; border: 2px solid #f1f1f1;
+    background: #969696; border-radius: 50%;
   }
   .waxloom-mobile-player-timing {
     display: flex; justify-content: space-between;
-    color: #c3b2ce; font-size: 12px; font-variant-numeric: tabular-nums;
+    color: #b8b8b8; font-size: 12px; font-variant-numeric: tabular-nums;
   }
   .waxloom-mobile-player-transport {
     flex: 0 0 auto; display: grid;
@@ -397,21 +397,21 @@
   .waxloom-mobile-player-transport button {
     display: grid; place-items: center;
     border: 0; border-radius: 12px; cursor: pointer;
-    color: #ebe2f4; background: transparent;
+    color: #e5e5e5; background: transparent;
   }
   .waxloom-mobile-player-transport .waxloom-transport-small {
-    width: 44px; height: 46px; color: #b1a2be;
+    width: 44px; height: 46px; color: #a7a7a7;
   }
   .waxloom-mobile-player-transport .waxloom-transport-small.is-active {
-    color: #eacbff; background: #463152;
+    color: #d5d5d5; background: #383838;
   }
   .waxloom-mobile-player-transport .waxloom-transport-skip {
-    width: 48px; height: 52px; color: #eee2f7;
+    width: 48px; height: 52px; color: #e6e6e6;
   }
   .waxloom-mobile-player-transport .waxloom-transport-play {
     width: 65px; height: 65px; border-radius: 50%;
-    color: #1e1129; background: #dab4f9;
-    box-shadow: 0 4px 20px #ab73d45b;
+    color: #151515; background: #c1c1c1;
+    box-shadow: 0 4px 20px #8686865b;
   }
   .waxloom-mobile-player-transport button:disabled { opacity: .45; cursor: default; }
 
@@ -424,9 +424,9 @@
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
     gap: 5px; min-width: 0; min-height: 67px;
-    border: 1px solid #675479; border-radius: 11px;
-    background: #33273f;
-    color: #f0e3f7; cursor: pointer;
+    border: 1px solid #5b5b5b; border-radius: 11px;
+    background: #2b2b2b;
+    color: #e7e7e7; cursor: pointer;
   }
   .waxloom-mobile-player-actions button span {
     display: block; max-width: 100%;
@@ -434,16 +434,16 @@
     font-size: 11px; font-weight: 600;
   }
   .waxloom-mobile-player-actions .waxloom-action-favorite {
-    color: #ffc0d1; border-color: #87516b; background: #42293a;
+    color: #cfcfcf; border-color: #5e5e5e; background: #303030;
   }
   .waxloom-mobile-player-actions .waxloom-action-favorite.is-active {
-    color: #ffcedb; background: #793952;
+    color: #d9d9d9; background: #484848;
   }
   .waxloom-mobile-player-actions .waxloom-action-playlist {
     color: #c1e3fa; border-color: #51738e; background: #263c50;
   }
   .waxloom-mobile-player-actions .waxloom-action-mix {
-    color: #ecc7ff; border-color: #82569d; background: #452e58;
+    color: #d3d3d3; border-color: #646464; background: #363636;
   }
   .waxloom-mobile-player-actions .waxloom-action-queue {
     color: #b4eddf; border-color: #48867b; background: #28453f;
@@ -452,30 +452,30 @@
   .waxloom-mobile-player-notice {
     flex: 0 0 auto;
     padding: 8px 10px; border-radius: 7px;
-    background: #362a3d; color: #e9cfe9;
+    background: #2e2e2e; color: #d6d6d6;
     font-size: 12px; line-height: 1.3; overflow-wrap: anywhere;
   }
   .waxloom-mobile-player-next {
     display: grid; gap: 6px; flex: 0 0 auto; min-width: 0;
-    padding-top: 9px; border-top: 1px solid #493a55;
+    padding-top: 9px; border-top: 1px solid #3f3f3f;
   }
   .waxloom-mobile-player-next-heading {
     display: flex; align-items: baseline; justify-content: space-between;
-    gap: 10px; color: #e8deed; font-size: 13px;
+    gap: 10px; color: #e1e1e1; font-size: 13px;
   }
-  .waxloom-mobile-player-next-heading span { font-size: 11px; color: #aea0bd; }
+  .waxloom-mobile-player-next-heading span { font-size: 11px; color: #a5a5a5; }
   .waxloom-next-item {
     display: grid; grid-template-columns: 22px minmax(0,1fr) 22px;
     gap: 10px; align-items: center;
     width: 100%; min-height: 44px; padding: 8px 10px;
-    border: 1px solid #3c3246; border-radius: 9px;
-    background: #24202d; color: #e9e0ef; text-align: left;
+    border: 1px solid #363636; border-radius: 9px;
+    background: #222222; color: #e3e3e3; text-align: left;
     cursor: pointer;
   }
-  .waxloom-next-index { color: #b08ccc; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .waxloom-next-index { color: #989898; font-size: 12px; font-variant-numeric: tabular-nums; }
   .waxloom-next-copy { display: grid; min-width: 0; gap: 3px; }
   .waxloom-next-copy .waxloom-marquee { font-size: 13px; font-weight: 600; }
-  .waxloom-next-copy small { color: #b4a8bf; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .waxloom-next-copy small { color: #acacac; font-size: 11px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
   /* These sheets must sit ABOVE the immersive player and remain dismissible. */
   .queue-drawer.waxloom-queue-sheet {
@@ -484,8 +484,8 @@
     left: 10px; right: 10px;
     bottom: calc(12px + env(safe-area-inset-bottom));
     width: auto; max-height: 69dvh;
-    border-color: #705a80;
-    background: #201b29;
+    border-color: #616161;
+    background: #1d1d1d;
   }
   .player-playlist-picker.waxloom-playlist-sheet {
     position: fixed !important;
@@ -495,8 +495,8 @@
     bottom: calc(12px + env(safe-area-inset-bottom));
     max-height: 69dvh;
     overflow-y: auto;
-    border-color: #796188;
-    background: #241d2e;
+    border-color: #696969;
+    background: #202020;
   }
   .player-playlist-picker.waxloom-playlist-sheet .player-playlist-options {
     grid-template-columns: repeat(2, minmax(0,1fr));

@@ -128,8 +128,8 @@
 .waxloom-vinyl-display .waxloom-vinyl-sleeve[data-centered="true"] > .waxloom-track-face,
 .waxloom-vinyl-display .waxloom-vinyl-sleeve[data-centered="true"] > .waxloom-entity-face,
 .waxloom-vinyl-display .waxloom-vinyl-sleeve[data-centered="true"] .discovery-cover-art {
-  border-color: #c18fde !important;
-  box-shadow: 0 0 0 2px #c18fde4c, 2px 5px 13px #0007 !important;
+  border-color: #9f9f9f !important;
+  box-shadow: 0 0 0 2px #9f9f9f4c, 2px 5px 13px #0007 !important;
 }
 /* Single title and contextual controls live BELOW the vinyl browsing area. */
 .waxloom-song-vinyl .waxloom-track-actions,
@@ -168,10 +168,10 @@
   min-height: 38px;
   min-width: 122px;
   padding: 7px 14px;
-  border: 1px solid #4d3c58;
+  border: 1px solid #424242;
   border-radius: 12px;
-  background: #28202f;
-  color: #e6d6ef;
+  background: #232323;
+  color: #dbdbdb;
   font-size: 12px;
   cursor: pointer;
 }
@@ -191,9 +191,9 @@
   padding: 9px 11px;
   min-height: 40px;
   border-radius: 10px;
-  border: 1px solid #69547a;
-  background: #33283f;
-  color: #efe1fa;
+  border: 1px solid #5b5b5b;
+  background: #2c2c2c;
+  color: #e6e6e6;
   cursor: pointer;
   font-size: 12px;
 }
@@ -203,12 +203,12 @@
 .waxloom-mobile-player-actions button { gap: 5px; min-height: 65px; padding: 5px 1px; }
 .waxloom-mobile-player-actions button span { font-size: 10px; }
 .waxloom-mobile-player-actions .waxloom-action-less {
-  background: #442b39;
-  border-color: #8f536c;
-  color: #f5bac9;
+  background: #313131;
+  border-color: #626262;
+  color: #c8c8c8;
 }
 .waxloom-mobile-player-actions .waxloom-action-less.is-active {
-  background:#8f4059; border-color:#ed98b3; color:#fff1f3;
+  background:#535353; border-color:#acacac; color:#fff1f3;
 }
 @media(max-width:355px) {
   .waxloom-vinyl-display .waxloom-vinyl-rack { gap:25px !important; }
@@ -222,7 +222,7 @@
 }
 
 /* Desktop now-playing Dislike is distinct from Favorites. */
-.player-tools .player-quick-action.is-less { color: #f5b5c8; border-color: #aa647b; background: #482b3b; }
+.player-tools .player-quick-action.is-less { color: #c4c4c4; border-color: #757575; background: #323232; }
 
 /* A single visible Download action sits ON the Discovery artwork. It never
    nests inside the Play button, moves the cover, or opens the Options drawer.
@@ -241,10 +241,10 @@
   min-width: 39px;
   min-height: 39px;
   padding: 0;
-  border: 1.5px solid #d1a6ef;
+  border: 1.5px solid #b4b4b4;
   border-radius: 12px;
-  background: #4b325dcf;
-  color: #ffeefa;
+  background: #3a3a3acf;
+  color: #f2f2f2;
   box-shadow: 0 2px 11px #0008;
   font-size: 24px;
   font-weight: 700;
@@ -271,7 +271,7 @@
 .waxloom-discovery-vinyl .discovery-cover-quick-download.is-failed {
   color: #ffd5db;
   border-color: #e78c9d;
-  background: #5a2e3ce6;
+  background: #383838e6;
 }
 .waxloom-discovery-vinyl .discovery-cover-quick-download:disabled {
   opacity: .92;
@@ -286,10 +286,10 @@
   width: 100%;
   min-height: 44px;
   padding: 9px 12px;
-  border: 1px solid #9b75bb;
+  border: 1px solid #828282;
   border-radius: 11px;
-  color: #f2dfff;
-  background: #463153;
+  color: #e5e5e5;
+  background: #383838;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -368,7 +368,7 @@
   min-width: 35px;
   height: 35px;
   padding: 0;
-  border: 1px solid rgba(202, 170, 220, .18);
+  border: 1px solid rgba(180,180,180, .18);
   border-radius: 9px;
   background: rgba(255,255,255,.035);
 }
@@ -382,7 +382,7 @@
   background: rgba(187, 63, 77, .25);
   border-color: #ed707d;
 }
-.player-tools .player-download-action { color: #d2b6fb; }
+.player-tools .player-download-action { color: #c1c1c1; }
 .player-tools .player-download-action:disabled { opacity: .5; cursor: default; }
 
 /* Desktop wheel and pointer-drag are driven by ONE scrollLeft animation in

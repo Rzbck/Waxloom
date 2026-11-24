@@ -7,14 +7,14 @@
 }
 .waxloom-history-controls button {
   display:grid;place-items:center;
-  width:31px;height:30px;border:1px solid #433848;
-  border-radius:9px;background:#211b25;color:#e4d5e9;
+  width:31px;height:30px;border:1px solid #3b3b3b;
+  border-radius:9px;background:#1d1d1d;color:#dadada;
   cursor:pointer;font-size:18px;line-height:1;
   transition:background .13s,border-color .13s;
 }
 .waxloom-history-controls button:hover:not(:disabled),
 .waxloom-history-controls button:focus-visible {
-  background:#483650; border-color:#9575a4;
+  background:#3c3c3c; border-color:#7f7f7f;
 }
 .waxloom-history-controls button:disabled {
   opacity:.28;cursor:default;

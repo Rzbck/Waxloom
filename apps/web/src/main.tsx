@@ -36,6 +36,8 @@ import "./cover-editorial.css";
 import "./pixel-covers.css";
 import "./youtube-art.css";
 import "./desktop-now-playing.css";
+import "./console-ui.css";
+import "./faviconAnimation";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

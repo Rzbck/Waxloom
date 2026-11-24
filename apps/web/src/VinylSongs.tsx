@@ -23,6 +23,7 @@ export function VinylSongs({
 }: VinylSongsProps) {
   const player = usePlayer();
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [display, setDisplay] = useState<"list" | "vinyl">("list");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [optionsOpen, setOptionsOpen] = useState(false);
 
@@ -51,8 +52,32 @@ export function VinylSongs({
     player.playSongs(songs, index, { ordered });
   };
 
+  if (display === "list") return (
+    <div className="console-track-list">
+      <div className="console-list-toolbar"><span>{songs.length} TRACKS</span><button type="button" onClick={() => setDisplay("vinyl")}>Vinyl view</button></div>
+      {selected.map((song, index) => {
+        const current = player.currentSong?.id === song.id;
+        const favorite = starOverrides[song.id] ?? Boolean(song.starred);
+        return <div key={`${song.id}-${index}`} className={`console-track-row ${current ? "is-current" : ""}`}>
+          <button type="button" className="console-track-play" aria-label={`Play track ${songDisplayTitle(song)}`} onClick={() => start(index)}>
+            <CoverArtwork coverId={song.coverArt || song.albumId} seed={song.albumId || song.id} size={80} priority={index < 8} />
+            <span className="console-track-indicator"><PlayerIcon name={current && player.playing ? "pause" : "play"} size={16} /></span>
+            <span className="console-track-text"><strong>{songDisplayTitle(song)}</strong><small>{songDisplayArtist(song)} · {songDisplayAlbum(song) ?? "Not tagged"}</small></span>
+          </button>
+          <span className="console-track-time">{Math.floor((song.duration ?? 0)/60)}:{String(Math.floor((song.duration ?? 0)%60)).padStart(2,"0")}</span>
+          <button type="button" className={favorite ? "is-favorite" : ""} aria-label={favorite ? "Unfavorite track" : "Favorite track"} title="Favorite" onClick={() => onToggleStar(song)}><PlayerIcon name="thumbs-up" size={17}/></button>
+          <button type="button" aria-label="Add track to queue" title="Add to queue" onClick={() => player.addToQueue(song)}><PlayerIcon name="next" size={17}/></button>
+          <button type="button" aria-label="Add track to playlist" title="Add to playlist" onClick={() => onAddPlaylist(song)}><PlayerIcon name="list-plus" size={17}/></button>
+          {onRemove && <button type="button" aria-label="Remove from playlist" onClick={() => onRemove(index)}>×</button>}
+        </div>;
+      })}
+      {visibleCount < songs.length && <button type="button" className="console-more" onClick={() => setVisibleCount(v => Math.min(songs.length, v + PAGE_SIZE))}>Show next {Math.min(PAGE_SIZE,songs.length-visibleCount)} tracks · {visibleCount}/{songs.length}</button>}
+    </div>
+  );
+
   return (
     <div className="waxloom-song-vinyl" aria-label="Browse tracks as vinyl sleeves">
+      <div className="console-list-toolbar"><span>{songs.length} TRACKS</span><button type="button" onClick={() => setDisplay("list")}>List view</button></div>
       <VinylRack
         count={selected.length}
         contentKey={selected[0]?.id}

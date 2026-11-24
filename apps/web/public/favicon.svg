@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Waxloom">
-  <rect width="64" height="64" rx="15" fill="#0b0b0d"/>
-  <path d="M11 17 21 47 32 24 43 47 53 17" fill="none" stroke="#9b87ff" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M17 17 25 39" fill="none" stroke="#d5ccff" stroke-width="3" stroke-linecap="round" opacity=".78"/>
-  <path d="M47 17 39 39" fill="none" stroke="#d5ccff" stroke-width="3" stroke-linecap="round" opacity=".78"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect x=".5" y=".5" width="63" height="63" rx="10" fill="#090909" stroke="#373737"/><path d="M10 18h6l4 21 6-15h6l6 15 4-21h6l-7 29h-6l-6-15-6 15h-6z" fill="#eeeeee"/><path d="M47 18h6v23h7v6H47z" fill="#83c5a1"/></svg>

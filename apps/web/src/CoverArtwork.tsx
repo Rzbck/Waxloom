@@ -18,18 +18,18 @@ export function artworkTheme(seed: string) {
   const palettes = [
     ["#101923", "#344957", "#c1b5a1", "#d0b692"], // blue slate / paper
     ["#1e2423", "#4d665c", "#c0bf9d", "#e3c99e"], // moss / bone
-    ["#2b1d23", "#795b60", "#ddc3b0", "#cf998a"], // dusty wine
-    ["#1c222e", "#485267", "#c5c1c2", "#929eb8"], // blue graphite
+    ["#202020", "#795b60", "#ddc3b0", "#cf998a"], // dusty wine
+    ["#1c222e", "#485267", "#c2c2c2", "#929eb8"], // blue graphite
     ["#30241d", "#765b46", "#d8ba90", "#ebd2ab"], // analog sepia
     ["#171b1e", "#586269", "#cec6ba", "#e1d9c8"], // monochrome silver
-    ["#2b292e", "#686278", "#c9bbc1", "#afa1b5"], // muted lavender
+    ["#2a2a2a", "#656565", "#bebebe", "#a5a5a5"], // neutral graphite
     ["#22272a", "#5b7678", "#bac9bf", "#cad4bd"], // muted cyan
   ];
   return {
     variant: (unsigned >>> 5) % 8,
-    hue: unsigned % 360,
+    hue: [32, 55, 155, 180, 205][unsigned % 5],
     angle: 20 + ((unsigned >>> 8) % 180),
-    accent: (unsigned * 17 + 47) % 360,
+    accent: [32, 55, 155, 180, 205][(unsigned >>> 7) % 5],
     palette: palettes[unsigned % palettes.length],
     offset: 18 + ((unsigned >>> 13) % 60),
   };

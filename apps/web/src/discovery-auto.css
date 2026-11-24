@@ -5,8 +5,8 @@
 .discovery-profile-panel {
   min-height: 0;
   background:
-    radial-gradient(circle at 88% 12%, rgba(139, 95, 184, 0.18), transparent 25rem),
-    linear-gradient(135deg, rgba(53, 35, 68, 0.55), rgba(17, 16, 21, 0.95));
+    radial-gradient(circle at 88% 12%, rgba(111,111,111, 0.18), transparent 25rem),
+    linear-gradient(135deg, rgba(41,41,41, 0.55), rgba(17,17,17, 0.95));
 }
 
 .discovery-profile-panel .section-toolbar {
@@ -35,7 +35,7 @@
   padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 12px;
-  background: rgba(11, 10, 14, 0.42);
+  background: rgba(11,11,11, 0.42);
 }
 
 .profile-stat-grid strong {
@@ -44,7 +44,7 @@
 }
 
 .profile-stat-grid span {
-  color: #817a87;
+  color: #7c7c7c;
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.07em;
@@ -53,10 +53,10 @@
 .discovery-building {
   margin-top: 24px;
   padding: 15px 16px;
-  border: 1px solid #302b36;
+  border: 1px solid #2d2d2d;
   border-radius: 12px;
-  color: #b9adc4;
-  background: rgba(19, 16, 23, 0.72);
+  color: #b1b1b1;
+  background: rgba(17,17,17, 0.72);
 }
 
 .recommendation-section {
@@ -81,15 +81,15 @@
   grid-template-rows: minmax(122px, 1fr) auto auto;
   gap: 14px;
   padding: 17px;
-  border: 1px solid #28252d;
+  border: 1px solid #262626;
   border-radius: 15px;
-  background: linear-gradient(145deg, rgba(27, 24, 31, 0.92), rgba(16, 15, 19, 0.94));
+  background: linear-gradient(145deg, rgba(25,25,25, 0.92), rgba(16,16,16, 0.94));
   content-visibility: auto;
   contain-intrinsic-size: 220px;
 }
 
 .recommendation-card:hover {
-  border-color: #453c4d;
+  border-color: #3f3f3f;
 }
 
 .recommendation-copy {
@@ -112,18 +112,18 @@
 }
 
 .recommendation-copy > span {
-  color: #aaa2b1;
+  color: #a5a5a5;
   font-size: 0.86rem;
 }
 
 .recommendation-copy > small {
-  color: #6f6976;
+  color: #6b6b6b;
   font-size: 0.72rem;
 }
 
 .recommendation-copy > p {
   margin: 7px 0 0;
-  color: #82798a;
+  color: #7c7c7c;
   font-size: 0.76rem;
   line-height: 1.4;
 }
@@ -136,15 +136,15 @@
 
 .recommendation-scores > span {
   padding: 5px 7px;
-  border: 1px solid #2f2b35;
+  border: 1px solid #2d2d2d;
   border-radius: 999px;
-  color: #77717e;
+  color: #737373;
   font-size: 0.68rem;
-  background: #141217;
+  background: #131313;
 }
 
 .recommendation-scores b {
-  color: #cbbbdc;
+  color: #c1c1c1;
 }
 
 .recommendation-card .discovery-actions {
@@ -154,20 +154,20 @@
 .discovery-note,
 .discovery-details {
   padding: 13px 15px;
-  border: 1px solid #2d2932;
+  border: 1px solid #2b2b2b;
   border-radius: 12px;
-  color: #867d8d;
-  background: rgba(17, 15, 20, 0.72);
+  color: #808080;
+  background: rgba(16,16,16, 0.72);
 }
 
 .discovery-details summary {
-  color: #aaa1b1;
+  color: #a4a4a4;
   cursor: pointer;
 }
 
 .discovery-details p {
   margin: 11px 0 0;
-  color: #746d79;
+  color: #6f6f6f;
   font-size: 0.78rem;
   line-height: 1.5;
 }
