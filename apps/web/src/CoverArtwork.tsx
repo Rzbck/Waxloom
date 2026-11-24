@@ -70,6 +70,50 @@ export function isStockNavidromeArtwork(img: HTMLImageElement): boolean {
   }
 }
 
+// Media Session and the library use the very same stock-image classifier.
+// A raster fallback is used for native lock-screen artwork (no CSS/SVG dependency).
+const mediaPixelCache = new Map<string, string>();
+function loadArtworkImage(src: string): Promise<HTMLImageElement | null> {
+  return new Promise(resolve => {
+    const image = new Image();
+    const finish = (result: HTMLImageElement | null) => {
+      window.clearTimeout(timer); image.onload = image.onerror = null; resolve(result);
+    };
+    const timer = window.setTimeout(() => finish(null), 4000);
+    image.onload = () => finish(image); image.onerror = () => finish(null); image.src = src;
+  });
+}
+async function rasterPixelArtwork(seed: string): Promise<MediaImage[]> {
+  const cached = mediaPixelCache.get(seed);
+  if (cached) return [{ src: cached, sizes: "320x320", type: "image/png" }];
+  const image = await loadArtworkImage(pixelCoverUrl(seed));
+  if (!image) return [];
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 320;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return [];
+    ctx.imageSmoothingEnabled = false; ctx.drawImage(image, 0, 0, 320, 320);
+    const src = canvas.toDataURL("image/png");
+    if (mediaPixelCache.size >= 64) mediaPixelCache.delete(mediaPixelCache.keys().next().value!);
+    mediaPixelCache.set(seed, src);
+    return [{ src, sizes: "320x320", type: "image/png" }];
+  } catch { return []; }
+}
+export async function resolveMediaArtwork(coverId: string | undefined, seed: string): Promise<MediaImage[]> {
+  if (coverId && artworkStatus.get(coverId) !== "synthetic") {
+    // Same size as the expanded player, same classifier and same album seed.
+    const src = new URL(api.coverUrl(coverId, 320), document.baseURI).href;
+    const image = await loadArtworkImage(src);
+    if (image && !isStockNavidromeArtwork(image)) {
+      artworkStatus.set(coverId, "real");
+      return [{ src, sizes: image.naturalWidth + "x" + image.naturalHeight }];
+    }
+    // A timeout is not evidence that a real cover is absent: keep it retryable.
+    if (image) artworkStatus.set(coverId, "synthetic");
+  }
+  return rasterPixelArtwork(seed);
+}
 export function CoverArtwork({
   coverId, seed, size = 160, priority = false, className = "",
 }: {

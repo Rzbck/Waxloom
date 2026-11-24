@@ -14,7 +14,7 @@ import {
 
 import { api } from "./api";
 import { songDisplayTitle, songDisplayArtist, songDisplayAlbum } from "./albumDisplay";
-import { CoverArtwork } from "./CoverArtwork";
+import { CoverArtwork, resolveMediaArtwork } from "./CoverArtwork";
 import { compactPlayedHistory, nextFromQueue, planShuffleUpcoming, radioGenre, selectRadioTracks } from "./smartAutoplay";
 import { authorizeYouTubeImport, downloadPhase, enqueueDiscoveryDownload, enqueueSelectedYouTube, useDownloads } from "./downloadQueue";
 import { useLibraryPresence, verifyLibraryPresence } from "./libraryPresence";
@@ -1048,13 +1048,29 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
     if (!("mediaSession" in navigator) || (!currentSong && !currentPreview)) return;
     const session = navigator.mediaSession;
     if (typeof MediaMetadata === "undefined") return;
-    session.metadata = new MediaMetadata({
+    const metadata = new MediaMetadata({
       title: activeTitle,
       artist: activeArtist,
-      album: currentSong ? (songDisplayAlbum(currentSong) ?? "") : "",
-      artwork: currentSong?.coverArt ? [{ src: api.coverUrl(currentSong.coverArt, 600), sizes: "600x600" }] : [],
+      album: currentSong ? (songDisplayAlbum(currentSong) ?? "") : (currentPreview?.release ?? ""),
+      artwork: [],
     });
-  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.coverArt, currentPreview?.id]);
+    session.metadata = metadata;
+    let cancelled = false;
+    const publish = (artwork: MediaImage[]) => {
+      // Do not let a slow cover from a previous track overwrite the current one.
+      if (cancelled || session.metadata !== metadata || !artwork.length) return;
+      try { metadata.artwork = artwork; } catch { /* Native artwork support varies. */ }
+    };
+    if (currentSong) {
+      void resolveMediaArtwork(currentSong.coverArt || currentSong.albumId, currentSong.albumId || currentSong.id).then(publish).catch(() => undefined);
+    } else if (currentPreview?.thumbnail) {
+      try {
+        const src = new URL(currentPreview.thumbnail, document.baseURI);
+        if (src.protocol === "https:" || src.protocol === "http:") publish([{ src: src.href }]);
+      } catch { /* Invalid preview artwork. */ }
+    }
+    return () => { cancelled = true; };
+  }, [activeTitle, activeArtist, currentSong?.id, currentSong?.album, currentSong?.albumId, currentSong?.coverArt, currentPreview?.id, currentPreview?.thumbnail, currentPreview?.release]);
 
   // Keep OS action handlers installed; dispatch to the latest actions/live queues.
   const mediaActionsRef = useRef({ next, previous, pausePlayback, startLocalPlayback, startPreviewPlayback, seek });
