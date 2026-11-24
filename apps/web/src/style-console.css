@@ -771,7 +771,6 @@ html,body,#root{background:#050505!important}
   .console-shell.app-shell .discovery-fit-page,
   .console-shell.app-shell .discovery-cover-shelf,
   .console-shell.app-shell .waxloom-preserved-view:not([hidden]) { overflow: visible !important; }
-  .waxloom-mobile-player .waxloom-mobile-player-transport .waxloom-transport-play { width: 54px !important; }
 }
 
 
@@ -884,7 +883,7 @@ html,body,#root{background:#050505!important}
     .console-player-rail:not(.is-expanded) .waxloom-mobile-mini > button:not(.waxloom-mobile-mini-info) { display: none; }
     .console-player-rail:not(.is-expanded) .player-center { display: grid; gap: 6px; min-width: 0; flex: none; }
     .console-player-rail:not(.is-expanded) .player-buttons { display: flex; justify-content: space-between; gap: 2px; }
-    .console-player-rail:not(.is-expanded) .player-buttons button { flex: 1 1 0; min-width: 0; height: 44px; padding: 0; }
+    .console-player-rail:not(.is-expanded) .player-buttons button { flex: 0 0 44px; width: 44px; min-width: 44px; height: 44px; padding: 0; border-radius: 50%; }
     .console-player-rail:not(.is-expanded) .player-progress { display: grid; grid-template-columns: 30px minmax(0,1fr) 30px; gap: 3px; font-size: 10px; }
     .console-player-rail:not(.is-expanded) .player-progress input { min-width: 0; }
     .console-player-rail:not(.is-expanded) .player-tools { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 3px; min-width: 0; flex: none; }
@@ -908,4 +907,86 @@ html,body,#root{background:#050505!important}
 @media (orientation: landscape) and (max-height: 540px) and (max-width: 980px) and (pointer: coarse) {
   .console-shell.app-shell > .sidebar { inset: auto !important; }
   .console-player-rail:not(.is-expanded) > .player-dock { left: auto !important; right: max(6px,env(safe-area-inset-right)) !important; bottom: calc(6px + env(safe-area-inset-bottom)) !important; width: var(--console-phone-rail) !important; overflow-y: auto !important; }
+}
+
+
+/* Now Playing: mobile grid has exactly one scroll owner, the queue preview.
+   The portal is outside the app shell and never inherits a moving containing block. */
+@layer waxloom-priority {
+  .waxloom-mobile-player.console-single-player .waxloom-mobile-player-transport .waxloom-transport-play {
+    box-sizing: border-box; aspect-ratio: 1; border-radius: 50%; padding: 0;
+    flex: none; justify-self: center; align-self: center;
+  }
+  .console-single-player .console-next-open {
+    min-height: 44px; padding: 0 6px; border: 0; color: #bbb; font-size: 11px; border-radius: 4px;
+  }
+  .console-single-player .console-next-list { display: grid; gap: 5px; min-height: 0; align-content: start; }
+  .player-dock .waxloom-mobile-mini .waxloom-mobile-mini-play { width: 46px; height: 46px; min-width: 46px; flex: 0 0 46px; aspect-ratio: 1; border-radius: 50%; padding: 0; }
+  .console-player-rail:not(.is-expanded) .player-buttons .play-button { aspect-ratio: 1; border-radius: 50%; }
+  @media ((max-width: 820px) or ((max-width: 980px) and (max-height: 540px) and (orientation: landscape) and (pointer: coarse))) {
+    .waxloom-mobile-player.console-single-player {
+      position: fixed; inset: 0; width: 100%; height: 100dvh; max-height: 100dvh;
+      min-height: 0; box-sizing: border-box; display: grid; align-content: stretch;
+      grid-template-columns: minmax(0,1fr);
+      grid-template-areas: "head" "art" "metadata" "progress" "transport" "actions" "download" "notice" "next";
+      grid-template-rows: 44px minmax(0,1fr) auto auto 54px 48px 44px auto minmax(44px,0.65fr);
+      gap: 4px; padding: max(6px,env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left));
+      overflow: hidden; overscroll-behavior: none; overflow-anchor: none; transition: none; animation: none;
+    }
+    .console-single-player .waxloom-mobile-player-head { grid-area: head; position: static; margin: 0; min-height: 44px; gap: 5px; grid-template-columns: 44px minmax(0,1fr) 44px; }
+    .console-single-player .waxloom-mobile-player-head-title { display: grid; grid-template-columns: minmax(0,1fr); gap: 2px; }
+    .console-single-player .waxloom-mobile-player-close { width: 44px; height: 44px; }
+    .console-single-player .waxloom-mobile-player-art-wrap { grid-area: art; position: static; min-height: 0; height: 100%; align-self: stretch; display: grid; place-items: center; container-type: size; }
+    .console-single-player .waxloom-mobile-player-art { width: min(64vw,30dvh,300px); width: min(100cqw,100cqh,300px); height: auto; aspect-ratio: 1; max-width: 100%; max-height: 100%; }
+    .console-single-player .waxloom-mobile-player-metadata { grid-area: metadata; gap: 2px; min-width: 0; }
+    .console-single-player .waxloom-mobile-metadata-kind { display: none; }
+    .console-single-player .waxloom-mobile-song-title { font-size: clamp(17px,4.5vw,23px); line-height: 1.2; }
+    .console-single-player .waxloom-mobile-song-artist { font-size: 13px; line-height: 1.2; }
+    .console-single-player .waxloom-mobile-player-progress { grid-area: progress; gap: 0; }
+    .console-single-player .waxloom-mobile-player-progress input { height: 44px; margin: 0; }
+    .console-single-player .waxloom-mobile-player-timing { font-size: 11px; line-height: 13px; }
+    .console-single-player .waxloom-mobile-player-transport { grid-area: transport; min-height: 0; height: 54px; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 0; }
+    .console-single-player .waxloom-mobile-player-transport button { width: 44px; height: 44px; padding: 0; }
+    .waxloom-mobile-player.console-single-player .waxloom-mobile-player-transport .waxloom-transport-play { width: 54px; height: 54px; }
+    .console-single-player .waxloom-mobile-player-actions { grid-area: actions; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 3px; }
+    .console-single-player .waxloom-mobile-player-actions button { min-height: 44px; height: 48px; padding: 2px; gap: 2px; }
+    .console-single-player .waxloom-mobile-player-actions button svg { width: 20px; height: 20px; flex: none; }
+    .console-single-player .waxloom-mobile-player-actions button span { font-size: 9px; }
+    .console-single-player .waxloom-mobile-preview-download { grid-area: download; min-height: 44px; padding: 3px 6px; font-size: 12px; }
+    .console-single-player .waxloom-mobile-player-notice { grid-area: notice; padding: 3px 6px; max-height: 32px; overflow: auto; font-size: 11px; line-height: 13px; }
+    .console-single-player .waxloom-mobile-player-next { grid-area: next; display: grid; grid-template-rows: 44px minmax(0,1fr); gap: 2px; min-height: 0; padding: 0; overflow: hidden; }
+    .console-single-player .waxloom-mobile-player-next-heading { align-items: center; min-width: 0; }
+    .console-single-player .console-next-list { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+    .console-single-player .waxloom-next-item { min-height: 44px; padding: 4px 6px; gap: 5px; }
+    .console-single-player .waxloom-mobile-player-head, .console-single-player .waxloom-mobile-player-art-wrap { transition: none; }
+  }
+  @media (max-width: 820px) and (orientation: portrait) and (max-height: 680px) {
+    .waxloom-mobile-player.console-single-player { grid-template-rows: 44px minmax(0,1fr) auto auto 54px 48px 44px auto 44px; }
+    .console-single-player .console-next-list { display: none; }
+  }
+  @media (orientation: landscape) and (max-height: 540px) and (max-width: 980px) and (pointer: coarse) {
+    .waxloom-mobile-player.console-single-player {
+      grid-template-columns: minmax(0,.85fr) minmax(0,1.15fr);
+      grid-template-areas: "head head" "art metadata" "art progress" "art transport" "next actions" "next download" "next notice";
+      grid-template-rows: 44px auto 57px 54px 48px 44px minmax(0,1fr);
+      gap: 4px 10px;
+    }
+    .console-single-player .waxloom-mobile-player-head-title { grid-template-columns: auto minmax(0,1fr); text-align: left; align-items: center; gap: 8px; }
+    .console-single-player .waxloom-mobile-player-art { width: min(27vw,45dvh,240px); width: min(100cqw,100cqh,240px); }
+    .console-single-player .waxloom-mobile-player-metadata { text-align: left; }
+    .console-single-player .waxloom-mobile-song-title { font-size: 19px; }
+    .console-single-player .waxloom-mobile-player-next { align-self: stretch; }
+    .console-single-player .waxloom-mobile-player-notice { max-height: 100%; padding: 0 4px; }
+    .waxloom-mobile-navigation { padding: max(6px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(6px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left)); gap: 8px; }
+    .waxloom-mobile-navigation nav { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
+    .waxloom-mobile-navigation nav button { min-height: 44px; padding: 8px 10px; }
+  }
+  @media (orientation: landscape) and (max-height: 350px) and (max-width: 980px) and (pointer: coarse) {
+    .waxloom-mobile-player.console-single-player { grid-template-rows: 44px auto 44px 48px 44px 44px minmax(0,1fr); gap: 3px 8px; }
+    .console-single-player .waxloom-mobile-player-progress { grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 5px; }
+    .console-single-player .waxloom-mobile-player-timing { gap: 4px; }
+    .console-single-player .waxloom-mobile-player-transport { height: 48px; }
+    .waxloom-mobile-player.console-single-player .waxloom-mobile-player-transport .waxloom-transport-play { width: 48px; height: 48px; }
+    .console-single-player .waxloom-mobile-player-actions button { height: 44px; }
+  }
 }

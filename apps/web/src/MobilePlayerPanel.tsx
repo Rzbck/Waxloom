@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { CoverArtwork } from "./CoverArtwork";
 
 type PlayerIconName =
@@ -144,7 +145,7 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
     const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    closeRef.current?.focus();
+    closeRef.current?.focus({ preventScroll: true });
     const onKeyDown = (event: KeyboardEvent) => {
       if (suspendedRef.current) return;
       if (event.key === "Escape") {
@@ -173,13 +174,29 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
     };
   }, [open, onClose]);
 
+  // The panel never scrolls globally on phones. Clear any stale offsets on rotation.
+  useEffect(() => {
+    if (!open) return;
+    let frame = 0;
+    const reset = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (panelRef.current) { panelRef.current.scrollTop = 0; panelRef.current.scrollLeft = 0; }
+      });
+    };
+    const orientation = window.matchMedia("(orientation: landscape)");
+    orientation.addEventListener("change", reset);
+    reset();
+    return () => { orientation.removeEventListener("change", reset); cancelAnimationFrame(frame); };
+  }, [open]);
+
   if (!open) return null;
 
   const safeDuration = Math.max(0, duration);
   const nextTracks = queue.slice(index + 1, index + 5);
 
-  return (
-    <section ref={panelRef} className="waxloom-mobile-player" role="dialog" aria-modal="true"
+  return createPortal(
+    <section ref={panelRef} className="waxloom-mobile-player console-single-player" role="dialog" aria-modal="true"
       aria-label="Now playing" tabIndex={-1}>
       <header className="waxloom-mobile-player-head">
         <button ref={closeRef} className="waxloom-mobile-player-close" type="button"
@@ -281,8 +298,9 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
       {nextTracks.length > 0 && (
         <section className="waxloom-mobile-player-next" aria-label="Up next">
           <div className="waxloom-mobile-player-next-heading">
-            <strong>Up next</strong><span>{queue.length - index - 1} remaining</span>
+            <strong>Up next</strong><button type="button" className="console-next-open" onClick={onQueue} aria-label="Open full queue">{queue.length - index - 1} remaining <span aria-hidden="true">›</span></button>
           </div>
+          <div className="console-next-list">
           {nextTracks.map((song, offset) => (
             <button type="button" className="waxloom-next-item" key={song.id + "-" + offset}
               onClick={() => onQueueItem(index + 1 + offset)}>
@@ -294,8 +312,9 @@ export function MobilePlayerPanel(props: MobilePlayerPanelProps) {
               <PlayerIcon name="play" size={18} />
             </button>
           ))}
+          </div>
         </section>
       )}
-    </section>
+    </section>, document.body
   );
 }

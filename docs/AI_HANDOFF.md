@@ -1,3 +1,7 @@
+## 2026-11-24 - Stable Now Playing single screen
+
+- Round transport, body portal, viewport-bound mobile player, locally scrolling queue and compact landscape menu. Nine viewport checks including safe areas and repeated rotation pass. Physical Safari retest pending. See docs/CONSOLE_CONSOLIDATION_20261124.md.
+
 ## 2026-11-24 - Phone first-screen ergonomics
 
 - Owner supplied physical iPhone landscape screenshots. Compact top navigation and right player rail, compressed section toolbars, mobile Discovery list with vinyl toggle, compact favorites, shorter portrait dock. See docs/CONSOLE_CONSOLIDATION_20261124.md for exact safe-area QA. Physical retest pending.
