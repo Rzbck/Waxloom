@@ -379,8 +379,10 @@ export function DiscoveryView({ onImportCandidate, active = true }: { onImportCa
     void readFeed();
     // Background preview preparation continues even when the page is closed.
     // Periodic inexpensive reads keep the visible reserve freshly populated.
-    const timer = window.setInterval(() => { void readFeed(); }, refreshing || hydrationPending ? 5_000 : 12_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    const visibleRefresh = () => { if (!document.hidden) void readFeed(); };
+    const timer = window.setInterval(visibleRefresh, refreshing || hydrationPending ? 5_000 : 12_000);
+    document.addEventListener("visibilitychange", visibleRefresh);
+    return () => { cancelled = true; window.clearInterval(timer); document.removeEventListener("visibilitychange", visibleRefresh); };
   }, [Boolean(bundle), refreshing, hydrationPending, active]);
 
   useEffect(() => subscribeTaste(() => setTaste(readTaste())), []);

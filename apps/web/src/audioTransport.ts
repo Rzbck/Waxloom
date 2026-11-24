@@ -22,6 +22,8 @@ export class AudioTransport {
   private foregroundRetry = false;
   private lastProgressAt = 0;
   private lastPosition = 0;
+  private lastDataAt = 0;
+  private bufferedEnd = 0;
   private requestPending = false;
   private pendingSeek: number | null = null;
   private lastClockTrace = 0;
@@ -65,11 +67,15 @@ export class AudioTransport {
     this.foregroundRetry = false;
     this.lastTrace.clear();
     this.lastClockTrace = this.now();
-    this.pendingSeek = initialPosition ?? null;
+    // New resources already start at zero. Setting currentTime=0 again at
+    // HAVE_METADATA causes unnecessary Range/seek activity in WebKit.
+    this.pendingSeek = initialPosition && initialPosition > 0 ? initialPosition : null;
     this.seekInProgress = false;
     this.confirmed = false;
     this.lastPosition = changed ? 0 : audio.currentTime;
     this.lastProgressAt = this.now();
+    this.lastDataAt = this.lastProgressAt;
+    this.bufferedEnd = 0;
     this.requestPending = false;
     this.change("loading");
     this.options.configure();
@@ -80,10 +86,11 @@ export class AudioTransport {
       if (!this.options.ios()) audio.load();
     } else if (audio.error) {
       // Explicit retry of a failed resource needs a fresh resource selection.
-      this.pendingSeek = changed ? (initialPosition ?? 0) : audio.currentTime;
+      const position = changed ? (initialPosition ?? 0) : audio.currentTime;
+      this.pendingSeek = position > 0 ? position : null;
       audio.load();
     } else if (changed || initialPosition !== undefined) {
-      try { audio.currentTime = initialPosition ?? 0; this.pendingSeek = null; } catch { /* metadata will restore the target position */ }
+      try { const position = initialPosition ?? 0; if (Math.abs(audio.currentTime - position) > .05) audio.currentTime = position; this.pendingSeek = null; } catch { /* metadata will restore the target position */ }
     }
     this.request(audio);
     this.trace(reason, audio, true);
@@ -142,10 +149,17 @@ export class AudioTransport {
   }
   observe(audio: HTMLAudioElement, event: string) {
     if (!this.currentResource(audio)) return;
+    if (event === "loadedmetadata" || event === "canplay") this.lastDataAt = this.now();
+    if (event === "progress") {
+      let end = 0;
+      for (let i = 0; i < (audio.buffered?.length ?? 0); i++) end = Math.max(end, audio.buffered.end(i));
+      if (end > this.bufferedEnd + .05) { this.bufferedEnd = end; this.lastDataAt = this.now(); }
+      return;
+    }
     if (event === "loadedmetadata" && this.pendingSeek !== null) {
       const seek = this.pendingSeek; this.pendingSeek = null;
       if (this.intent && Number.isFinite(seek)) {
-        try { audio.currentTime = Math.max(0, Math.min(seek, Number.isFinite(audio.duration) ? audio.duration : seek)); } catch { /* non-seekable media */ }
+        try { const position = Math.max(0, Math.min(seek, Number.isFinite(audio.duration) ? audio.duration : seek)); if (Math.abs(audio.currentTime - position) > .05) audio.currentTime = position; } catch { /* non-seekable media */ }
       }
     }
     if (event === "playing") { this.confirm(audio); return; }
@@ -191,6 +205,7 @@ export class AudioTransport {
     }
     if (event === "session-interrupted") this.change("interrupted");
     if (event === "error") { this.generation++; this.requestPending = false; this.change("blocked"); }
+    if (event === "canplay" && this.attempts > 0 && !this.requestPending && !this.confirmed) this.recover(audio, false, true);
   }
   recover(audio: HTMLAudioElement, foreground = false, eventDriven = false) {
     if ((!foreground && !this.options.hidden()) || !this.options.ios() || !this.intent || !this.matches(audio) || audio.ended || audio.seeking || this.options.interrupted()) return;
@@ -199,29 +214,38 @@ export class AudioTransport {
     if (this.confirmed && this.phase === "playing" && this.currentResource(audio) && !audio.paused && !audio.error && audio.readyState >= 2 && Math.abs(audio.currentTime - this.lastPosition) >= .05) {
       this.confirm(audio); return;
     }
-    const elapsed = this.now() - this.lastProgressAt;
-    const stalled = elapsed >= (eventDriven && !this.confirmed && audio.readyState < 2 ? 3000 : 8000) && (this.requestPending || audio.paused || audio.readyState < 3 || this.phase === "waiting" || this.phase === "playing");
+    const now = this.now();
+    const elapsed = now - this.lastProgressAt;
+    const noData = now - this.lastDataAt;
+    const stalled = elapsed >= (eventDriven && !this.confirmed && audio.readyState < 2 ? 3000 : 8000)
+      && (this.requestPending || audio.paused || audio.readyState < 3 || this.phase === "waiting" || this.phase === "playing");
     const eligible = foreground ? (audio.paused || this.phase === "blocked" || stalled || (!this.confirmed && elapsed >= 3000)) : stalled || this.phase === "blocked";
     if (!eligible) return;
-    // At most one background attempt and one foreground attempt per explicit
-    // start/source. No loops, auto-skip, silence tracks or background polling
-    // that pretends to override a suspended operating system.
-    if (foreground ? this.foregroundRetry : this.attempts >= 1) {
-      if (stalled && this.phase !== "blocked") { this.change("blocked"); this.trace("recovery-exhausted", audio); }
-      return;
+    // A first stall is not a failed download: the previous immediate reload
+    // cancelled an in-flight HTTP request. First retry play without touching src.
+    // A second attempt is destructive only after sustained lack of buffer growth.
+    const hard = Boolean(audio.error) || (!this.confirmed && audio.readyState < 2 && noData >= 12000 && elapsed >= 12000);
+    if (foreground) {
+      if (this.foregroundRetry) return;
+      this.foregroundRetry = true;
+    } else {
+      if (this.attempts >= 2) {
+        if (elapsed >= 8000 && noData >= 8000 && this.phase !== "blocked") { this.change("blocked"); this.trace("recovery-exhausted", audio); }
+        return;
+      }
+      if (this.attempts === 1 && !hard) return;
+      this.attempts++;
     }
-    if (foreground) this.foregroundRetry = true; else this.attempts++;
-    this.trace(foreground ? "recover-fg" : eventDriven ? "recover-event" : "recover-stall", audio, true);
+    const reload = hard && (foreground || this.attempts === 2 || Boolean(audio.error));
+    this.trace(reload ? "recover-reload" : foreground ? "recover-fg" : "recover-soft", audio, true);
     this.options.configure();
-    // Preserve position and source. Re-request playback without replacing src.
-    // Do not pause a healthy advancing stream.
-    if ((foreground && audio.error) || (!this.confirmed && audio.readyState < 2 && stalled)) {
-      // WebKit can stay at HAVE_METADATA after ended. One same-source reload
-      // is allowed on concrete stall evidence, without relying on JS timers.
-      this.pendingSeek = audio.currentTime;
+    if (reload) {
+      this.pendingSeek = audio.currentTime > .05 ? audio.currentTime : null;
       this.generation++;
+      this.bufferedEnd = 0;
+      this.lastDataAt = now;
       audio.load();
-    } else if (!audio.paused && stalled && this.confirmed) audio.pause();
+    }
     this.request(audio);
   }
 }

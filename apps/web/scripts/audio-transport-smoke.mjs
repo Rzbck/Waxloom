@@ -9,11 +9,13 @@ function fixture({ios=true,hidden=true}={}){
   const audio={
     _src:"", currentSrc:"", ownerDocument:{baseURI:"https://example.invalid/"},
     paused:true, ended:false, seeking:false, readyState:0, networkState:0,
-    currentTime:0, duration:180,error:null, loads:0, pauses:0, plays:0,
+    _time:0, seeks:0, duration:180,error:null, loads:0, pauses:0, plays:0, bufferEnd:0,
+    get currentTime(){return this._time},set currentTime(value){this.seeks++;this._time=value},
+    get buffered(){return {length:this.bufferEnd>0?1:0,end:()=>this.bufferEnd}},
     getAttribute(name){return name==="src"?this._src:null},
-    set src(v){this._src=v;this.currentSrc=new URL(v,this.ownerDocument.baseURI).href;this.currentTime=0;this.paused=true;this.ended=false;this.readyState=0;this.error=null},
+    set src(v){this._src=v;this.currentSrc=new URL(v,this.ownerDocument.baseURI).href;this._time=0;this.paused=true;this.ended=false;this.readyState=0;this.error=null},
     get src(){return this._src},
-    load(){this.loads++;this.readyState=0;this.paused=true;this.error=null;this.currentTime=0},
+    load(){this.loads++;this.readyState=0;this.paused=true;this.error=null;this._time=0},
     pause(){this.pauses++;this.paused=true},
     play(){this.plays++;return new Promise((resolve,reject)=>pending.push({resolve,reject}))}
   };
@@ -46,8 +48,9 @@ function fixture({ios=true,hidden=true}={}){
   const f=fixture();f.start();await f.ok();f.audio.currentTime=35;f.advance(35000);
   f.t.recover(f.audio);eq(f.audio.plays,1,"native clock advanced while JS suspended");eq(f.audio.pauses,0);
   f.audio.readyState=4;f.t.observe(f.audio,"stalled");eq(f.t.phase,"playing","network stall with buffered data isn't silence");
-  f.audio.readyState=1;f.t.observe(f.audio,"waiting");eq(f.t.phase,"waiting");f.advance(7999);f.t.recover(f.audio);eq(f.audio.plays,1);f.advance(1);f.t.recover(f.audio);eq(f.audio.plays,2);eq(f.audio.loads,1,"stalled resource reselected once");f.audio.readyState=1;f.t.observe(f.audio,"loadedmetadata");eq(f.audio.currentTime,35,"recovery restores position after metadata");
-  f.advance(9000);f.t.recover(f.audio);eq(f.t.phase,"blocked");eq(f.audio.plays,2);
+  f.audio.readyState=1;f.t.observe(f.audio,"waiting");eq(f.t.phase,"waiting");f.advance(7999);f.t.recover(f.audio);eq(f.audio.plays,1);f.advance(1);f.t.recover(f.audio);eq(f.audio.plays,2);eq(f.audio.loads,0,"first retry leaves download intact");eq(f.audio.currentTime,35,"soft retry preserves position");
+  f.advance(12000);f.t.recover(f.audio);eq(f.audio.loads,1,"second retry reloads only after sustained stall");eq(f.audio.plays,3);f.audio.readyState=1;f.t.observe(f.audio,"loadedmetadata");eq(f.audio.currentTime,35,"reload restores position");
+  f.advance(9000);f.t.recover(f.audio);eq(f.t.phase,"blocked");eq(f.audio.plays,3);
 }
 {
   const f=fixture();f.start();await f.ok();f.audio.paused=true;f.t.observe(f.audio,"pause");eq(f.t.intent,false,"ambiguous native pause conservatively treated as user pause");f.advance(20000);f.t.recover(f.audio);eq(f.audio.plays,1);
@@ -73,16 +76,30 @@ function fixture({ios=true,hidden=true}={}){
   const f=fixture();f.start("next-track");f.audio.readyState=1;f.audio.paused=false;
   f.t.observe(f.audio,"loadedmetadata");f.advance(3200);f.t.observe(f.audio,"stalled");
   eq(f.audio.plays,2,"event alone triggers recovery even with suspended timers");
-  eq(f.audio.loads,1,"one same-source reload");eq(f.t.key,"next-track");
+  eq(f.audio.loads,0,"early retry does not cancel in-flight network transfer");eq(f.t.key,"next-track");
   f.audio.readyState=1;f.t.observe(f.audio,"loadedmetadata");
   f.audio.currentTime=258;f.audio.seeking=true;f.t.observe(f.audio,"seeking");f.t.observe(f.audio,"timeupdate");
   f.audio.seeking=false;f.audio.readyState=4;f.t.observe(f.audio,"seeked");f.audio.paused=false;f.t.observe(f.audio,"timeupdate");
   eq(f.t.phase,"loading","large seek must not falsely confirm audio");
-  f.advance(9000);f.t.recover(f.audio);eq(f.audio.plays,2,"background budget respected");
+  f.advance(9000);f.t.recover(f.audio);eq(f.audio.plays,2,"no destructive reload after data becomes ready");
   f.setHidden(false);f.t.recover(f.audio,true);eq(f.audio.plays,3,"foreground retry after seek without confirmation");
   await f.ok();eq(f.t.phase,"playing");
 }
 {
   const f=fixture();f.start();f.t.stop(f.audio);f.advance(3500);f.audio.readyState=1;f.t.observe(f.audio,"stalled");eq(f.audio.plays,1,"event retry cannot undo pause");
+}
+{
+  const f=fixture();f.start("zero","next",0);f.audio.readyState=1;f.t.observe(f.audio,"loadedmetadata");
+  eq(f.audio.seeks,0,"new resource at zero must not create a redundant seek");
+  f.advance(3200);f.t.observe(f.audio,"stalled");eq(f.audio.plays,2);eq(f.audio.loads,0);
+  f.advance(11000);f.audio.bufferEnd=4;f.t.observe(f.audio,"progress");f.advance(2000);f.t.recover(f.audio);
+  eq(f.audio.loads,0,"do not reload while data is arriving");
+  f.advance(12000);f.t.recover(f.audio);eq(f.audio.loads,1,"one reload only after sustained lack of data");eq(f.audio.plays,3);
+  f.audio.readyState=1;f.t.observe(f.audio,"loadedmetadata");eq(f.audio.seeks,0,"reload at zero does not seek");
+  f.advance(13000);f.t.recover(f.audio);eq(f.audio.plays,3,"recovery budget bounded");
+}
+{
+  const f=fixture();f.start("resume","resume",59);f.audio.readyState=1;f.t.observe(f.audio,"loadedmetadata");eq(f.audio.currentTime,59,"nonzero restored position retained");
+  f.t.stop(f.audio);f.advance(30000);f.t.recover(f.audio);eq(f.audio.plays,1);
 }
 console.log("PASS: audio transport ("+checks+" assertions)");

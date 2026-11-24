@@ -31,7 +31,7 @@ function reloadCurrent() {
 }
 
 async function checkForUpdates(force = false) {
-  if (!currentAsset || (!force && Date.now() - lastCheck < 60000)) return;
+  if (document.hidden || !currentAsset || (!force && Date.now() - lastCheck < 60000)) return;
   lastCheck = Date.now();
   try {
     const response = await fetch("/index.html?version_check=" + Date.now(), {

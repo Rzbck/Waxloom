@@ -1150,7 +1150,7 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
       </PlayerProgressContext.Provider>
       <audio
         ref={audioRef}
-        preload={mode === "preview" ? "auto" : "none"}
+        preload={mode === "preview" || isIOSAudio() ? "auto" : "none"}
         loop={repeat === "one"}
         onLoadedMetadata={(event) => {
           const audio = event.currentTarget;
@@ -1169,6 +1169,10 @@ export function PlayerProvider({ children }: { children: ReactNode }) {
         onSuspend={(event) => transport.observe(event.currentTarget, "suspend")}
         onCanPlay={(event) => transport.observe(event.currentTarget, "canplay")}
         onLoadStart={(event) => transport.observe(event.currentTarget, "loadstart")}
+        onProgress={event => transport.observe(event.currentTarget, "progress")}
+        onEmptied={event => transport.trace("emptied", event.currentTarget)}
+        onAbort={event => transport.trace("abort", event.currentTarget)}
+        onVolumeChange={event => transport.trace(event.currentTarget.muted ? "muted" : "volume-" + Math.round(event.currentTarget.volume * 100), event.currentTarget)}
         onPlaying={(event) => {
           if (!transport.currentResource(event.currentTarget) || !transport.intent) return;
           transport.observe(event.currentTarget, "playing");
